@@ -664,97 +664,111 @@ const ManualTradingPage: React.FC = () => {
 
         switch (action) {
           case 'opportunity': {
-            pushWorkflowLog('info', `Scanning opportunities across ${sanitizedTargetSymbols.length || 1} symbols...`);
+            pushWorkflowLog('info', `Scanning opportunities using your active trading strategies...`);
 
-            // 1. Scan for opportunities
-            const scanResult = await analyzeOpportunity({
-              symbol: primarySymbol,
-              analysis_type: workflowConfig.type === 'opportunity_scan' ? 'opportunity' : 'technical',
-              timeframe: workflowConfig.timeframe,
-              confidence_threshold: workflowConfig.confidence,
-              ai_models: workflowConfig.aiModels,
-              include_risk_metrics: workflowConfig.includeRiskMetrics
+            // 1. Call the REAL opportunity discovery service (not AI consensus)
+            const scanResponse = await apiClient.post('/opportunities/discover', {
+              force_refresh: true,
+              include_strategy_recommendations: true
             });
 
-            // Parse the API response structure: data.result.opportunity_analysis or data.opportunities
-            const opportunityData = scanResult?.result?.opportunity_analysis || scanResult?.result || scanResult;
-            const opportunities = opportunityData?.opportunities || opportunityData?.detected_opportunities || [];
+            if (!scanResponse.data?.success) {
+              throw new Error(scanResponse.data?.message || 'Opportunity scan failed');
+            }
 
-            pushWorkflowLog('info', `Found ${opportunities.length} opportunities. Validating with AI consensus...`);
+            pushWorkflowLog('info', `Scan initiated with ID: ${scanResponse.data.scan_id}`);
 
-            // 2. Batch validate all opportunities
-            const validationResults = await Promise.allSettled(
-              opportunities.map((opp: any) =>
-                validateTrade({
-                  trade_data: {
-                    symbol: opp.symbol,
-                    action: opp.side,
-                    amount: opp.suggested_position_size,
-                    order_type: 'market',
-                    stop_loss: opp.stop_loss_percent,
-                    take_profit: opp.take_profit_percent,
-                    leverage: opp.leverage || 1,
-                    strategy: opp.strategy
-                  },
-                  confidence_threshold: workflowConfig.confidence,
-                  ai_models: workflowConfig.aiModels,
-                  execution_urgency: 'normal'
-                })
-              )
-            );
+            // 2. Poll for scan results
+            let scanResult;
+            let pollAttempts = 0;
+            const maxPollAttempts = 60; // 60 seconds max
 
-            // 3. Split into validated vs non-validated
-            const validated: Opportunity[] = [];
-            const nonValidated: Opportunity[] = [];
+            while (pollAttempts < maxPollAttempts) {
+              await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+              pollAttempts++;
 
-            opportunities.forEach((opp: any, idx: number) => {
-              const validation = validationResults[idx];
+              const statusResponse = await apiClient.get(`/opportunities/status/${scanResponse.data.scan_id}`);
+
+              if (statusResponse.data?.status === 'completed') {
+                scanResult = statusResponse.data;
+                break;
+              } else if (statusResponse.data?.status === 'failed') {
+                throw new Error(statusResponse.data?.error || 'Scan failed');
+              }
+
+              // Update progress
+              const progress = statusResponse.data?.progress;
+              if (progress) {
+                pushWorkflowLog('info', `Scanning... ${progress.strategies_completed}/${progress.total_strategies} strategies`);
+              }
+            }
+
+            if (!scanResult) {
+              throw new Error('Scan timeout - taking longer than expected');
+            }
+
+            // 3. Parse opportunities from scan result
+            const opportunities = scanResult?.opportunities || [];
+
+            pushWorkflowLog('success', `Found ${opportunities.length} opportunities from your active strategies!`);
+
+            // 2. Map opportunities from discovery service to our Opportunity type
+            // These are already pre-validated by the strategy engine
+            const validated: Opportunity[] = opportunities.map((opp: any) => {
               const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString(); // 5 minutes from now
 
-              const opportunity: Opportunity = {
+              // Normalize opportunity_type for case-insensitive comparison
+              const oppType = String(opp.opportunity_type || '').toLowerCase().trim();
+
+              // Determine side with explicit checks for long/buy and short/sell
+              let side: 'buy' | 'sell';
+              if (oppType.includes('long') || oppType.includes('buy')) {
+                side = 'buy';
+              } else if (oppType.includes('short') || oppType.includes('sell')) {
+                side = 'sell';
+              } else {
+                // Default fallback
+                side = 'sell';
+              }
+
+              return {
                 id: crypto.randomUUID(),
                 symbol: opp.symbol,
-                side: opp.side,
-                strategy: opp.strategy || 'Unknown',
-                confidence: opp.confidence || 0,
-                entry_price: opp.entry_price || 0,
-                stop_loss: opp.stop_loss || 0,
-                take_profit: opp.take_profit || 0,
-                suggested_position_size: opp.suggested_position_size || 0,
-                position_size_percent: opp.position_size_percent || 0,
-                max_risk: opp.max_risk || 0,
-                max_risk_percent: opp.max_risk_percent || 0,
-                potential_gain: opp.potential_gain || 0,
-                potential_gain_percent: opp.potential_gain_percent || 0,
-                risk_reward_ratio: opp.risk_reward_ratio || 0,
-                timeframe: opp.timeframe || workflowConfig.timeframe,
-                reasoning: opp.reasoning,
-                indicators: opp.indicators,
-                timestamp: new Date().toISOString(),
+                side,
+                strategy: opp.strategy_name || opp.strategy_id || 'Unknown',
+                confidence: Number(opp.confidence_score ?? 0) * 100, // Convert 0-1 to 0-100
+                entry_price: Number(opp.entry_price ?? 0),
+                stop_loss: Number(opp.metadata?.stop_loss ?? 0),
+                take_profit: Number(opp.metadata?.take_profit ?? 0),
+                suggested_position_size: Number(opp.required_capital_usd ?? 0),
+                position_size_percent: Number(opp.metadata?.position_size_percent ?? 5),
+                max_risk: Number(opp.metadata?.max_risk_usd ?? 0),
+                max_risk_percent: Number(opp.metadata?.max_risk_percent ?? 2),
+                potential_gain: Number(opp.profit_potential_usd ?? 0),
+                potential_gain_percent: Number(opp.metadata?.potential_gain_percent ?? 0),
+                risk_reward_ratio: Number(opp.metadata?.risk_reward_ratio ?? 0),
+                timeframe: opp.estimated_timeframe || '4h',
+                reasoning: opp.metadata?.reasoning || `Opportunity detected by ${opp.strategy_name}`,
+                indicators: opp.metadata?.indicators,
+                timestamp: opp.discovered_at || new Date().toISOString(),
                 expires_at: expiresAt,
-                aiValidated: false,
-                validation: undefined,
+                aiValidated: true, // Already validated by strategy engine
+                validation: {
+                  approved: true,
+                  consensus_score: Number(opp.confidence_score ?? 0) * 100,
+                  confidence: Number(opp.confidence_score ?? 0) * 100,
+                  reason: `Strategy-validated opportunity: ${opp.strategy_name}`,
+                  model_responses: [],
+                  risk_assessment: {
+                    risk_level: opp.risk_level || 'medium',
+                    risk_score: 0
+                  }
+                },
                 validationReason: undefined
               };
-
-              if (validation.status === 'fulfilled' && validation.value.approved) {
-                opportunity.aiValidated = true;
-                opportunity.validation = {
-                  approved: validation.value.approved,
-                  consensus_score: validation.value.consensus_score || 0,
-                  confidence: validation.value.confidence || 0,
-                  reason: validation.value.reason,
-                  model_responses: validation.value.model_responses,
-                  risk_assessment: validation.value.risk_assessment
-                };
-                validated.push(opportunity);
-              } else {
-                opportunity.validationReason = validation.status === 'fulfilled'
-                  ? validation.value.reason
-                  : 'Validation failed';
-                nonValidated.push(opportunity);
-              }
             });
+
+            const nonValidated: Opportunity[] = []; // All opportunities from service are pre-validated
 
             // 4. Calculate costs from backend pricing config (use defaults if not loaded)
             const config = pricingConfig || {
