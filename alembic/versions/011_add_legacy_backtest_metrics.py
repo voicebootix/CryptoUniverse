@@ -32,15 +32,24 @@ def upgrade() -> None:
     inspector = sa.inspect(bind)
     existing_columns = {col["name"] for col in inspector.get_columns(BACKTEST_TABLE)}
 
-    # Add each column if it doesn't exist
-    for column_name, column_type in COLUMNS:
-        if column_name not in existing_columns:
-            with op.batch_alter_table(BACKTEST_TABLE) as batch_op:
+    # Collect missing columns
+    columns_to_add = [
+        (name, col_type) for name, col_type in COLUMNS
+        if name not in existing_columns
+    ]
+
+    # Add all missing columns in a single batch operation
+    if columns_to_add:
+        with op.batch_alter_table(BACKTEST_TABLE) as batch_op:
+            for column_name, column_type in columns_to_add:
                 batch_op.add_column(
                     sa.Column(column_name, column_type, nullable=True)
                 )
-            print(f"✅ Added column: {column_name}")
-        else:
+                print(f"✅ Added column: {column_name}")
+
+    # Report columns that already exist
+    for column_name, _ in COLUMNS:
+        if column_name in existing_columns:
             print(f"⏭️  Column already exists: {column_name}")
 
 
@@ -50,11 +59,20 @@ def downgrade() -> None:
     inspector = sa.inspect(bind)
     existing_columns = {col["name"] for col in inspector.get_columns(BACKTEST_TABLE)}
 
-    # Drop each column if it exists
-    for column_name, _ in COLUMNS:
-        if column_name in existing_columns:
-            with op.batch_alter_table(BACKTEST_TABLE) as batch_op:
+    # Collect existing columns to drop
+    columns_to_drop = [
+        name for name, _ in COLUMNS
+        if name in existing_columns
+    ]
+
+    # Drop all existing columns in a single batch operation
+    if columns_to_drop:
+        with op.batch_alter_table(BACKTEST_TABLE) as batch_op:
+            for column_name in columns_to_drop:
                 batch_op.drop_column(column_name)
-            print(f"✅ Dropped column: {column_name}")
-        else:
+                print(f"✅ Dropped column: {column_name}")
+
+    # Report columns that don't exist
+    for column_name, _ in COLUMNS:
+        if column_name not in existing_columns:
             print(f"⏭️  Column doesn't exist: {column_name}")
