@@ -1,0 +1,51 @@
+        # Start background scan (don't await!)
+        async def run_discovery_background():
+            """
+            Background wrapper with defensive lifecycle tracking.
+            Captures failures at the EARLIEST possible point.
+            """
+            import time
+
+            # Track that background task started
+            try:
+                await user_opportunity_discovery._track_scan_lifecycle(
+                    str(current_user.id),
+                    scan_id,
+                    "background_task_started",
+                    "in_progress",
+                    wrapper="endpoint_background"
+                )
+            except Exception as track_error:
+                logger.debug("Failed to track background start", error=str(track_error))
+
+            try:
+                await user_opportunity_discovery.discover_opportunities_for_user(
+                    user_id=str(current_user.id),
+                    force_refresh=request.force_refresh,
+                    include_strategy_recommendations=request.include_strategy_recommendations
+                )
+            except Exception as e:
+                # Track background task failure
+                error_type = type(e).__name__
+                is_timeout = "Timeout" in error_type or "timeout" in str(e).lower()
+
+                try:
+                    await user_opportunity_discovery._track_scan_lifecycle(
+                        str(current_user.id),
+                        scan_id,
+                        "background_task_failed",
+                        "error" if not is_timeout else "timeout",
+                        error=str(e),
+                        error_type=error_type,
+                        is_timeout=is_timeout,
+                        wrapper="endpoint_background"
+                    )
+                except Exception as track_error:
+                    logger.debug("Failed to track background failure", error=str(track_error))
+
+                logger.error("Background opportunity discovery failed",
+                           user_id=str(current_user.id),
+                           scan_id=scan_id,
+                           error=str(e),
+                           error_type=error_type,
+                           exc_info=True)

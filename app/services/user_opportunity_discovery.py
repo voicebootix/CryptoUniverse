@@ -973,49 +973,40 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
             # STEP 6: Rank and filter opportunities
             try:
-                self.logger.info("🔄 STEP 6: Starting rank and filter",
-                               scan_id=scan_id,
-                               opportunities_count=len(all_opportunities))
+                await self._track_debug_step(user_id, scan_id, 6, "Rank and filter opportunities",
+                                            "starting", opportunities_count=len(all_opportunities))
 
                 ranked_opportunities = await self._rank_and_filter_opportunities(
                     all_opportunities, user_profile, scan_id
                 )
 
-                self.logger.info("✅ STEP 6: Rank and filter completed",
-                               scan_id=scan_id,
-                               ranked_count=len(ranked_opportunities))
+                await self._track_debug_step(user_id, scan_id, 6, "Rank and filter opportunities",
+                                            "completed", ranked_count=len(ranked_opportunities))
             except Exception as rank_error:
-                self.logger.error("❌ STEP 6: Rank and filter FAILED",
-                                scan_id=scan_id,
-                                error=str(rank_error),
-                                exc_info=True)
+                await self._track_debug_step(user_id, scan_id, 6, "Rank and filter opportunities",
+                                            "failed", error=str(rank_error))
                 raise
 
             # STEP 7: Add strategy recommendations if requested
             strategy_recommendations = []
             if include_strategy_recommendations:
                 try:
-                    self.logger.info("🔄 STEP 7: Starting strategy recommendations",
-                                   scan_id=scan_id)
+                    await self._track_debug_step(user_id, scan_id, 7, "Generate strategy recommendations", "starting")
 
                     strategy_recommendations = await self._generate_strategy_recommendations(
                         user_id, user_profile, len(ranked_opportunities), portfolio_result
                     )
 
-                    self.logger.info("✅ STEP 7: Strategy recommendations completed",
-                                   scan_id=scan_id,
-                                   recommendations_count=len(strategy_recommendations))
+                    await self._track_debug_step(user_id, scan_id, 7, "Generate strategy recommendations",
+                                                "completed", recommendations_count=len(strategy_recommendations))
                 except Exception as rec_error:
-                    self.logger.error("❌ STEP 7: Strategy recommendations FAILED",
-                                    scan_id=scan_id,
-                                    error=str(rec_error),
-                                    exc_info=True)
+                    await self._track_debug_step(user_id, scan_id, 7, "Generate strategy recommendations",
+                                                "failed", error=str(rec_error))
                     raise
 
             # STEP 8: Build comprehensive response with metrics
             try:
-                self.logger.info("🔄 STEP 8: Starting response assembly",
-                               scan_id=scan_id)
+                await self._track_debug_step(user_id, scan_id, 8, "Assemble response", "starting")
 
                 execution_time = (time.time() - discovery_start_time) * 1000
                 metrics['total_time'] = execution_time
@@ -1036,30 +1027,22 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     total_strategies=total_strategies,
                 )
 
-                self.logger.info("✅ STEP 8: Response assembly completed",
-                               scan_id=scan_id,
-                               response_keys=list(final_response.keys()) if isinstance(final_response, dict) else "N/A")
+                await self._track_debug_step(user_id, scan_id, 8, "Assemble response", "completed")
             except Exception as assembly_error:
-                self.logger.error("❌ STEP 8: Response assembly FAILED",
-                                scan_id=scan_id,
-                                error=str(assembly_error),
-                                exc_info=True)
+                await self._track_debug_step(user_id, scan_id, 8, "Assemble response",
+                                            "failed", error=str(assembly_error))
                 raise
 
             # STEP 9: Update cached scan result
             try:
-                self.logger.info("🔄 STEP 9: Updating cached scan result",
-                               scan_id=scan_id)
+                await self._track_debug_step(user_id, scan_id, 9, "Update cached scan result", "starting")
 
                 await self._update_cached_scan_result(user_id, final_response, partial=False)
 
-                self.logger.info("✅ STEP 9: Cached scan result updated",
-                               scan_id=scan_id)
+                await self._track_debug_step(user_id, scan_id, 9, "Update cached scan result", "completed")
             except Exception as cache_error:
-                self.logger.error("❌ STEP 9: Cache update FAILED",
-                                scan_id=scan_id,
-                                error=str(cache_error),
-                                exc_info=True)
+                await self._track_debug_step(user_id, scan_id, 9, "Update cached scan result",
+                                            "failed", error=str(cache_error))
                 raise
 
             # ENTERPRISE MONITORING: Log comprehensive metrics
@@ -1084,44 +1067,35 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
             # STEP 10: Cache results
             try:
-                self.logger.info("🔄 STEP 10: Caching opportunities",
-                               scan_id=scan_id)
+                await self._track_debug_step(user_id, scan_id, 10, "Cache opportunities", "starting")
 
                 await self._cache_opportunities(user_id, final_response, user_profile)
 
-                self.logger.info("✅ STEP 10: Opportunities cached",
-                               scan_id=scan_id)
+                await self._track_debug_step(user_id, scan_id, 10, "Cache opportunities", "completed")
             except Exception as cache_opp_error:
-                self.logger.error("❌ STEP 10: Caching opportunities FAILED",
-                                scan_id=scan_id,
-                                error=str(cache_opp_error),
-                                exc_info=True)
+                await self._track_debug_step(user_id, scan_id, 10, "Cache opportunities",
+                                            "failed", error=str(cache_opp_error))
                 raise
 
             # STEP 11: Track strategies completion
             try:
-                self.logger.info("🔄 STEP 11: Tracking strategies completion lifecycle",
-                               scan_id=scan_id)
+                await self._track_debug_step(user_id, scan_id, 11, "Track strategies completion lifecycle", "starting")
 
                 await self._track_scan_lifecycle(user_id, scan_id, "strategies_scan", "completed",
                                                strategies_completed=total_strategies,
                                                opportunities_found=len(ranked_opportunities))
 
-                self.logger.info("✅ STEP 11: Strategies completion tracked",
-                               scan_id=scan_id)
+                await self._track_debug_step(user_id, scan_id, 11, "Track strategies completion lifecycle", "completed")
             except Exception as lifecycle_error:
-                self.logger.error("❌ STEP 11: Lifecycle tracking FAILED",
-                                scan_id=scan_id,
-                                error=str(lifecycle_error),
-                                exc_info=True)
+                await self._track_debug_step(user_id, scan_id, 11, "Track strategies completion lifecycle",
+                                            "failed", error=str(lifecycle_error))
                 raise
 
             # STEP 12: Track metrics for diagnostic monitoring
             try:
-                self.logger.info("🔄 STEP 12: Tracking scan metrics for diagnostics",
-                               scan_id=scan_id,
-                               opportunities=len(ranked_opportunities),
-                               strategies=user_profile.active_strategy_count)
+                await self._track_debug_step(user_id, scan_id, 12, "Track scan metrics for diagnostics",
+                                            "starting", opportunities=len(ranked_opportunities),
+                                            strategies=user_profile.active_strategy_count)
 
                 await self._track_scan_metrics(
                     user_id=user_id,
@@ -1132,31 +1106,24 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     success=True
                 )
 
-                self.logger.info("✅ STEP 12: Scan metrics tracked successfully",
-                               scan_id=scan_id)
+                await self._track_debug_step(user_id, scan_id, 12, "Track scan metrics for diagnostics", "completed")
             except Exception as metrics_error:
-                self.logger.error("❌ STEP 12: Scan metrics tracking FAILED",
-                                scan_id=scan_id,
-                                error=str(metrics_error),
-                                exc_info=True)
+                await self._track_debug_step(user_id, scan_id, 12, "Track scan metrics for diagnostics",
+                                            "failed", error=str(metrics_error))
                 raise
 
             # STEP 13: Track final completion
             try:
-                self.logger.info("🔄 STEP 13: Tracking final completion lifecycle",
-                               scan_id=scan_id)
+                await self._track_debug_step(user_id, scan_id, 13, "Track final completion lifecycle", "starting")
 
                 await self._track_scan_lifecycle(user_id, scan_id, "completed", "completed",
                                                total_opportunities=len(ranked_opportunities),
                                                execution_time_ms=execution_time)
 
-                self.logger.info("✅ STEP 13: Final completion tracked",
-                               scan_id=scan_id)
+                await self._track_debug_step(user_id, scan_id, 13, "Track final completion lifecycle", "completed")
             except Exception as final_lifecycle_error:
-                self.logger.error("❌ STEP 13: Final lifecycle tracking FAILED",
-                                scan_id=scan_id,
-                                error=str(final_lifecycle_error),
-                                exc_info=True)
+                await self._track_debug_step(user_id, scan_id, 13, "Track final completion lifecycle",
+                                            "failed", error=str(final_lifecycle_error))
                 raise
 
             self.logger.info("✅ ENTERPRISE User Opportunity Discovery Completed",
@@ -4585,6 +4552,50 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
         except Exception as track_error:
             self.logger.debug("Lifecycle tracking failed", error=str(track_error))
+
+    async def _track_debug_step(self, user_id: str, scan_id: str, step_number: int, step_name: str, status: str = "in_progress", error: str = None, **extra_data):
+        """Track detailed step-by-step progress for diagnostic visibility.
+
+        This writes to Redis so debug info is visible through the diagnostic endpoint
+        instead of requiring log parsing.
+
+        Status: starting, completed, failed
+        """
+        try:
+            if not self.redis:
+                return
+
+            debug_key = f"scan_debug:{scan_id}"
+            timestamp = self._current_timestamp().isoformat()
+
+            step_data = {
+                "step": step_number,
+                "name": step_name,
+                "status": status,
+                "timestamp": timestamp,
+                **extra_data
+            }
+
+            if error:
+                step_data["error"] = str(error)
+                step_data["error_type"] = type(error).__name__ if isinstance(error, Exception) else "Unknown"
+
+            # Store in Redis hash with step number as key
+            step_key = f"step_{step_number}"
+            await self.redis.hset(debug_key, step_key, json.dumps(step_data))
+            await self.redis.hset(debug_key, "current_step", str(step_number))
+            await self.redis.hset(debug_key, "last_updated", timestamp)
+            await self.redis.expire(debug_key, 3600)  # 1 hour TTL
+
+            # Log to application logs as well
+            emoji = "🔄" if status == "starting" else "✅" if status == "completed" else "❌"
+            self.logger.info(f"{emoji} STEP {step_number}: {step_name}",
+                           scan_id=scan_id,
+                           status=status,
+                           **extra_data)
+
+        except Exception as track_error:
+            self.logger.debug("Debug step tracking failed", error=str(track_error))
 
     async def _track_scan_metrics(self, user_id: str, scan_id: str, opportunities_count: int, strategies_count: int, execution_time_ms: float, success: bool = True):
         """Track user-initiated opportunity scan metrics for diagnostic monitoring.
