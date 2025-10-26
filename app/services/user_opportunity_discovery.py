@@ -861,24 +861,73 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             # Create semaphore for bounded concurrency - Optimized for performance
             strategy_semaphore = asyncio.Semaphore(15)  # Run max 15 strategies concurrently (increased from 3)
 
-            async def scan_strategy_with_semaphore(strategy_info):
+            async def scan_strategy_with_semaphore(strategy_info, strategy_index):
                 strategy_identifier = strategy_info.get("strategy_id", "Unknown")
+                strategy_name = strategy_info.get("name", "Unknown")
                 start_time = time.time()
+
+                # Track strategy start in Redis (use 100+ for strategy steps to avoid collision with aggregation steps 6-13)
+                step_number = 100 + strategy_index
+                await self._track_debug_step(
+                    user_id, scan_id, step_number,
+                    f"Strategy: {strategy_name}",
+                    "starting",
+                    strategy_id=strategy_identifier,
+                    strategy_index=strategy_index
+                )
+
                 async with strategy_semaphore:
                     try:
-                        return await self._scan_strategy_opportunities(
+                        result = await self._scan_strategy_opportunities(
                             strategy_info, discovered_assets, user_profile, scan_id, portfolio_result
                         )
+
+                        # Track strategy completion
+                        execution_time = (time.time() - start_time) * 1000
+                        await self._track_debug_step(
+                            user_id, scan_id, step_number,
+                            f"Strategy: {strategy_name}",
+                            "completed",
+                            strategy_id=strategy_identifier,
+                            strategy_index=strategy_index,
+                            execution_time_ms=execution_time,
+                            opportunities_found=len(result.get("opportunities", [])) if isinstance(result, dict) else 0
+                        )
+
+                        return result
+                    except Exception as e:
+                        # Track strategy failure
+                        execution_time = (time.time() - start_time) * 1000
+                        await self._track_debug_step(
+                            user_id, scan_id, step_number,
+                            f"Strategy: {strategy_name}",
+                            "failed",
+                            strategy_id=strategy_identifier,
+                            strategy_index=strategy_index,
+                            execution_time_ms=execution_time,
+                            error=str(e)
+                        )
+                        raise
                     finally:
                         strategy_timings[strategy_identifier] = time.time() - start_time
 
             # Run all strategy scans concurrently
+            self.logger.info("🚀 STARTING CONCURRENT STRATEGY SCANS",
+                           scan_id=scan_id,
+                           total_strategies=total_strategies,
+                           concurrency_limit=15)
+
             strategy_tasks = [
-                scan_strategy_with_semaphore(strategy)
-                for strategy in active_strategies
+                scan_strategy_with_semaphore(strategy, idx)
+                for idx, strategy in enumerate(active_strategies)
             ]
-            
+
             strategy_scan_results = await asyncio.gather(*strategy_tasks, return_exceptions=True)
+
+            self.logger.info("✅ ALL STRATEGY SCANS COMPLETED",
+                           scan_id=scan_id,
+                           total_strategies=total_strategies,
+                           total_time_s=sum(strategy_timings.values()))
             
             # Process results
             for i, result in enumerate(strategy_scan_results):
