@@ -859,27 +859,32 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             await self._update_cached_scan_result(user_id, initial_snapshot, partial=True)
 
             # Create semaphore for bounded concurrency - Optimized for performance
-            strategy_semaphore = asyncio.Semaphore(15)  # Run max 15 strategies concurrently (increased from 3)
+            concurrency_limit = 15  # Run max 15 strategies concurrently (increased from 3)
+            strategy_semaphore = asyncio.Semaphore(concurrency_limit)
 
-            # Calculate per-strategy timeout from total scan budget
-            per_strategy_timeout_s = max(10.0, min(60.0, self._scan_response_budget / max(total_strategies, 1)))
+            # Calculate per-strategy timeout from total scan budget, accounting for concurrency
+            # With 15 concurrent strategies, we process in batches, so timeout should reflect batch time
+            batches = max(1, math.ceil(total_strategies / concurrency_limit))
+            # Allocate budget per batch; allow longer-running strategies to finish (upper bound 180s for heavy scanners)
+            per_strategy_timeout_s = max(10.0, min(180.0, self._scan_response_budget / batches))
 
             async def scan_strategy_with_semaphore(strategy_info, strategy_index):
                 strategy_identifier = strategy_info.get("strategy_id", "Unknown")
                 strategy_name = strategy_info.get("name", "Unknown")
-                start_time = time.time()
-
-                # Track strategy start in Redis (use 100+ for strategy steps to avoid collision with aggregation steps 6-13)
-                step_number = 100 + strategy_index
-                await self._track_debug_step(
-                    user_id, scan_id, step_number,
-                    f"Strategy: {strategy_name}",
-                    "starting",
-                    strategy_id=strategy_identifier,
-                    strategy_index=strategy_index
-                )
 
                 async with strategy_semaphore:
+                    # Start time and debug tracking inside semaphore to measure pure execution time (not queue wait)
+                    start_time = time.time()
+                    step_number = 100 + strategy_index  # 100-series reserved for per-strategy steps
+                    await self._track_debug_step(
+                        user_id, scan_id, step_number,
+                        f"Strategy: {strategy_name}",
+                        "starting",
+                        strategy_id=strategy_identifier,
+                        strategy_index=strategy_index,
+                        started_at=datetime.fromtimestamp(start_time, tz=timezone.utc).isoformat()
+                    )
+
                     try:
                         # Bound per-strategy runtime to avoid indefinite hangs
                         result = await asyncio.wait_for(
@@ -916,8 +921,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                             strategy_id=strategy_identifier,
                             strategy_index=strategy_index,
                             execution_time_ms=execution_time,
-                            opportunities_found=len(result.get("opportunities", [])) if isinstance(result, dict) else 0,
-                            started_at=datetime.fromtimestamp(start_time, tz=timezone.utc).isoformat()
+                            opportunities_found=len(result.get("opportunities", [])) if isinstance(result, dict) else 0
                         )
                         return result
                     finally:
