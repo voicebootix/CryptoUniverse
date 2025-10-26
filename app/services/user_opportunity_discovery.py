@@ -861,6 +861,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             # Create semaphore for bounded concurrency - Optimized for performance
             strategy_semaphore = asyncio.Semaphore(15)  # Run max 15 strategies concurrently (increased from 3)
 
+            # Calculate per-strategy timeout from total scan budget
+            per_strategy_timeout_s = max(10.0, min(60.0, self._scan_response_budget / max(total_strategies, 1)))
+
             async def scan_strategy_with_semaphore(strategy_info, strategy_index):
                 strategy_identifier = strategy_info.get("strategy_id", "Unknown")
                 strategy_name = strategy_info.get("name", "Unknown")
@@ -878,11 +881,33 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
                 async with strategy_semaphore:
                     try:
-                        result = await self._scan_strategy_opportunities(
-                            strategy_info, discovered_assets, user_profile, scan_id, portfolio_result
+                        # Bound per-strategy runtime to avoid indefinite hangs
+                        result = await asyncio.wait_for(
+                            self._scan_strategy_opportunities(
+                                strategy_info, discovered_assets, user_profile, scan_id, portfolio_result
+                            ),
+                            timeout=per_strategy_timeout_s
                         )
+                    except Exception as e:
+                        # Track strategy failure (timeout or other)
+                        execution_time = (time.time() - start_time) * 1000
+                        error_type = type(e).__name__
+                        is_timeout = isinstance(e, asyncio.TimeoutError)
 
-                        # Track strategy completion
+                        await self._track_debug_step(
+                            user_id, scan_id, step_number,
+                            f"Strategy: {strategy_name}",
+                            "failed",
+                            strategy_id=strategy_identifier,
+                            strategy_index=strategy_index,
+                            execution_time_ms=execution_time,
+                            error=e,
+                            error_type=error_type,
+                            is_timeout=is_timeout
+                        )
+                        raise
+                    else:
+                        # Track strategy completion (only if no exception)
                         execution_time = (time.time() - start_time) * 1000
                         await self._track_debug_step(
                             user_id, scan_id, step_number,
@@ -891,23 +916,10 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                             strategy_id=strategy_identifier,
                             strategy_index=strategy_index,
                             execution_time_ms=execution_time,
-                            opportunities_found=len(result.get("opportunities", [])) if isinstance(result, dict) else 0
+                            opportunities_found=len(result.get("opportunities", [])) if isinstance(result, dict) else 0,
+                            started_at=datetime.fromtimestamp(start_time, tz=timezone.utc).isoformat()
                         )
-
                         return result
-                    except Exception as e:
-                        # Track strategy failure
-                        execution_time = (time.time() - start_time) * 1000
-                        await self._track_debug_step(
-                            user_id, scan_id, step_number,
-                            f"Strategy: {strategy_name}",
-                            "failed",
-                            strategy_id=strategy_identifier,
-                            strategy_index=strategy_index,
-                            execution_time_ms=execution_time,
-                            error=str(e)
-                        )
-                        raise
                     finally:
                         strategy_timings[strategy_identifier] = time.time() - start_time
 
@@ -4609,7 +4621,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         step_number: int,
         step_name: str,
         status: str = "in_progress",
-        error: str | None = None,
+        error: Exception | str | None = None,
         **extra_data,
     ):
         """Track detailed step-by-step progress for diagnostic visibility.
