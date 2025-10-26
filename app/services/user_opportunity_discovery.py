@@ -859,26 +859,106 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             await self._update_cached_scan_result(user_id, initial_snapshot, partial=True)
 
             # Create semaphore for bounded concurrency - Optimized for performance
-            strategy_semaphore = asyncio.Semaphore(15)  # Run max 15 strategies concurrently (increased from 3)
+            concurrency_limit = 15  # Run max 15 strategies concurrently (increased from 3)
+            strategy_semaphore = asyncio.Semaphore(concurrency_limit)
 
-            async def scan_strategy_with_semaphore(strategy_info):
+            # Calculate per-strategy timeout from total scan budget, accounting for concurrency
+            # With 15 concurrent strategies, we process in batches, so timeout should reflect batch time
+            batches = max(1, math.ceil(total_strategies / concurrency_limit))
+            # Allocate budget per batch; allow longer-running strategies to finish (upper bound 180s for heavy scanners)
+            per_strategy_timeout_s = max(10.0, min(180.0, self._scan_response_budget / batches))
+
+            async def scan_strategy_with_semaphore(strategy_info, strategy_index):
                 strategy_identifier = strategy_info.get("strategy_id", "Unknown")
-                start_time = time.time()
+                strategy_name = strategy_info.get("name", "Unknown")
+
                 async with strategy_semaphore:
+                    # Start time and debug tracking inside semaphore to measure pure execution time (not queue wait)
+                    start_time = time.time()
+                    step_number = 100 + strategy_index  # 100-series reserved for per-strategy steps
+                    await self._track_debug_step(
+                        user_id, scan_id, step_number,
+                        f"Strategy: {strategy_name}",
+                        "starting",
+                        strategy_id=strategy_identifier,
+                        strategy_index=strategy_index,
+                        started_at=datetime.fromtimestamp(start_time, tz=timezone.utc).isoformat()
+                    )
+
                     try:
-                        return await self._scan_strategy_opportunities(
-                            strategy_info, discovered_assets, user_profile, scan_id, portfolio_result
+                        # Bound per-strategy runtime to avoid indefinite hangs
+                        result = await asyncio.wait_for(
+                            self._scan_strategy_opportunities(
+                                strategy_info, discovered_assets, user_profile, scan_id, portfolio_result
+                            ),
+                            timeout=per_strategy_timeout_s
                         )
+                    except asyncio.CancelledError as e:
+                        # Track strategy cancellation (parent task cancelled)
+                        execution_time = (time.time() - start_time) * 1000
+                        await self._track_debug_step(
+                            user_id, scan_id, step_number,
+                            f"Strategy: {strategy_name}",
+                            "cancelled",
+                            strategy_id=strategy_identifier,
+                            strategy_index=strategy_index,
+                            execution_time_ms=execution_time,
+                            error=e,
+                            error_type="CancelledError",
+                            is_cancelled=True
+                        )
+                        raise
+                    except Exception as e:
+                        # Track strategy failure (timeout or other)
+                        execution_time = (time.time() - start_time) * 1000
+                        error_type = type(e).__name__
+                        is_timeout = isinstance(e, asyncio.TimeoutError)
+
+                        await self._track_debug_step(
+                            user_id, scan_id, step_number,
+                            f"Strategy: {strategy_name}",
+                            "failed",
+                            strategy_id=strategy_identifier,
+                            strategy_index=strategy_index,
+                            execution_time_ms=execution_time,
+                            error=e,
+                            error_type=error_type,
+                            is_timeout=is_timeout
+                        )
+                        raise
+                    else:
+                        # Track strategy completion (only if no exception)
+                        execution_time = (time.time() - start_time) * 1000
+                        await self._track_debug_step(
+                            user_id, scan_id, step_number,
+                            f"Strategy: {strategy_name}",
+                            "completed",
+                            strategy_id=strategy_identifier,
+                            strategy_index=strategy_index,
+                            execution_time_ms=execution_time,
+                            opportunities_found=len(result.get("opportunities", [])) if isinstance(result, dict) else 0
+                        )
+                        return result
                     finally:
                         strategy_timings[strategy_identifier] = time.time() - start_time
 
             # Run all strategy scans concurrently
+            self.logger.info("🚀 STARTING CONCURRENT STRATEGY SCANS",
+                           scan_id=scan_id,
+                           total_strategies=total_strategies,
+                           concurrency_limit=15)
+
             strategy_tasks = [
-                scan_strategy_with_semaphore(strategy)
-                for strategy in active_strategies
+                scan_strategy_with_semaphore(strategy, idx)
+                for idx, strategy in enumerate(active_strategies)
             ]
-            
+
             strategy_scan_results = await asyncio.gather(*strategy_tasks, return_exceptions=True)
+
+            self.logger.info("✅ ALL STRATEGY SCANS COMPLETED",
+                           scan_id=scan_id,
+                           total_strategies=total_strategies,
+                           total_time_s=sum(strategy_timings.values()))
             
             # Process results
             for i, result in enumerate(strategy_scan_results):
@@ -4567,7 +4647,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         step_number: int,
         step_name: str,
         status: str = "in_progress",
-        error: str | None = None,
+        error: Exception | str | None = None,
         **extra_data,
     ):
         """Track detailed step-by-step progress for diagnostic visibility.
