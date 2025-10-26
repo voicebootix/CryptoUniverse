@@ -740,7 +740,9 @@ const ManualTradingPage: React.FC = () => {
                 // If we have 3+ consecutive errors, fail fast
                 if (consecutiveErrors >= 3) {
                   pushWorkflowLog('error', `Aborting scan after ${consecutiveErrors} consecutive errors`);
-                  throw new Error(`Backend service unavailable - ${consecutiveErrors} consecutive ${statusCode || 'network'} errors`);
+                  const error = new Error(`Backend service unavailable - ${consecutiveErrors} consecutive ${statusCode || 'network'} errors`);
+                  error.cause = pollError;
+                  throw error;
                 }
 
                 // For non-critical errors, continue polling
@@ -749,7 +751,9 @@ const ManualTradingPage: React.FC = () => {
                   continue;
                 } else {
                   // Critical auth/not-found errors should fail immediately
-                  throw pollError;
+                  const error = new Error(`Critical error (${statusCode}): ${errorDetail || errorMsg}`);
+                  error.cause = pollError;
+                  throw error;
                 }
               }
             }
