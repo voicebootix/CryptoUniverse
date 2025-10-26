@@ -725,9 +725,9 @@ const ManualTradingPage: React.FC = () => {
                 // Log detailed error to execution log
                 if (statusCode === 500) {
                   pushWorkflowLog('error', `Backend service error (500): ${errorDetail || errorMsg}`);
-                  pushWorkflowLog('error', 'This indicates an authentication, database, or service configuration issue on the backend.');
+                  pushWorkflowLog('error', 'Internal server error occurred. Check backend logs for details.');
                 } else if (statusCode === 404) {
-                  pushWorkflowLog('error', `Scan not found (404) - scan_id may have expired`);
+                  pushWorkflowLog('error', `Scan not found (404) - scan_id may be invalid or scan was not created`);
                 } else if (statusCode === 401 || statusCode === 403) {
                   pushWorkflowLog('error', `Authentication error (${statusCode}): ${errorDetail || errorMsg}`);
                 } else if (pollError?.code === 'ECONNABORTED' || pollError?.code === 'ETIMEDOUT') {
