@@ -893,6 +893,21 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                             ),
                             timeout=per_strategy_timeout_s
                         )
+                    except asyncio.CancelledError as e:
+                        # Track strategy cancellation (parent task cancelled)
+                        execution_time = (time.time() - start_time) * 1000
+                        await self._track_debug_step(
+                            user_id, scan_id, step_number,
+                            f"Strategy: {strategy_name}",
+                            "cancelled",
+                            strategy_id=strategy_identifier,
+                            strategy_index=strategy_index,
+                            execution_time_ms=execution_time,
+                            error=e,
+                            error_type="CancelledError",
+                            is_cancelled=True
+                        )
+                        raise
                     except Exception as e:
                         # Track strategy failure (timeout or other)
                         execution_time = (time.time() - start_time) * 1000
