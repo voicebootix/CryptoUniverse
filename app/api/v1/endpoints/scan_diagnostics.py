@@ -507,3 +507,119 @@ async def get_scan_lifecycle(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to retrieve scan lifecycle: {str(e)}"
         )
+
+
+@router.get("/scan-debug/{scan_id}")
+async def get_scan_debug_steps(
+    scan_id: str,
+    current_user: User = Depends(require_role(UserRole.ADMIN))
+):
+    """
+    Get detailed step-by-step debug information for a specific scan.
+
+    **Admin Only**
+
+    Shows exactly which aggregation steps completed, are in progress, or failed.
+    This provides diagnostic visibility without requiring log parsing.
+
+    Returns:
+    - All steps executed during the scan
+    - Current step being processed
+    - Success/failure status for each step
+    - Error details if any step failed
+    - Timestamps for each step
+    """
+
+    try:
+        redis = await get_redis_client()
+
+        if not redis:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Redis not available"
+            )
+
+        debug_key = f"scan_debug:{scan_id}"
+
+        # Get all debug data
+        debug_data = await redis.hgetall(debug_key)
+
+        if not debug_data:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No debug data found for scan {scan_id}"
+            )
+
+        # Decode Redis hash
+        decoded_data = {}
+        for key, value in debug_data.items():
+            k = key.decode() if isinstance(key, bytes) else key
+            v = value.decode() if isinstance(value, bytes) else value
+            decoded_data[k] = v
+
+        # Extract metadata
+        current_step = decoded_data.get("current_step")
+        last_updated = decoded_data.get("last_updated")
+
+        # Parse all step data
+        steps = {}
+        for key, value in decoded_data.items():
+            if key.startswith("step_"):
+                try:
+                    step_info = json.loads(value)
+                    step_number = int(key.replace("step_", ""))
+                    steps[step_number] = step_info
+                except (json.JSONDecodeError, ValueError) as parse_error:
+                    logger.debug("Failed to parse step", key=key, error=str(parse_error))
+
+        # Sort steps by step number
+        sorted_steps = dict(sorted(steps.items()))
+
+        # Determine overall scan status
+        failed_steps = [s for s in sorted_steps.values() if s.get("status") == "failed"]
+        in_progress_steps = [s for s in sorted_steps.values() if s.get("status") == "starting"]
+
+        if failed_steps:
+            overall_status = "failed"
+            failure_info = failed_steps[0]  # First failure
+        elif in_progress_steps:
+            overall_status = "in_progress"
+            failure_info = None
+        elif len(sorted_steps) >= 13 and all(s.get("status") == "completed" for s in sorted_steps.values()):
+            overall_status = "completed"
+            failure_info = None
+        else:
+            overall_status = "incomplete"
+            failure_info = None
+
+        response = {
+            "success": True,
+            "scan_id": scan_id,
+            "overall_status": overall_status,
+            "current_step": int(current_step) if current_step else None,
+            "last_updated": last_updated,
+            "total_steps": len(sorted_steps),
+            "steps": sorted_steps,
+            "failure_info": failure_info,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+        logger.info("📊 Retrieved scan debug steps",
+                   scan_id=scan_id,
+                   total_steps=len(sorted_steps),
+                   overall_status=overall_status)
+
+        return response
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to retrieve scan debug steps",
+                    scan_id=scan_id,
+                    error=str(e),
+                    exc_info=True)
+
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve scan debug steps: {str(e)}"
+        )
