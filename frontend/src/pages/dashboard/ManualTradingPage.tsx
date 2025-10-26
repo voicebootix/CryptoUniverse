@@ -681,30 +681,86 @@ const ManualTradingPage: React.FC = () => {
             // 2. Poll for scan results
             let scanResult;
             let pollAttempts = 0;
-            const maxPollAttempts = 60; // 60 seconds max
+            const maxPollAttempts = 40; // 40 attempts × 3 seconds = 120 seconds max
+            const pollIntervalMs = 3000; // 3 second intervals (matches backend recommendation)
+            let consecutiveErrors = 0;
 
             while (pollAttempts < maxPollAttempts) {
-              await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+              await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
               pollAttempts++;
 
-              const statusResponse = await apiClient.get(`/opportunities/status/${scanResponse.data.scan_id}`);
+              try {
+                const statusResponse = await apiClient.get(`/opportunities/status/${scanResponse.data.scan_id}`);
 
-              if (statusResponse.data?.status === 'completed') {
-                scanResult = statusResponse.data;
-                break;
-              } else if (statusResponse.data?.status === 'failed') {
-                throw new Error(statusResponse.data?.error || 'Scan failed');
-              }
+                // Reset error counter on successful response
+                consecutiveErrors = 0;
 
-              // Update progress
-              const progress = statusResponse.data?.progress;
-              if (progress) {
-                pushWorkflowLog('info', `Scanning... ${progress.strategies_completed}/${progress.total_strategies} strategies`);
+                if (statusResponse.data?.status === 'completed') {
+                  scanResult = statusResponse.data;
+                  pushWorkflowLog('success', 'Scan completed successfully!');
+                  break;
+                } else if (statusResponse.data?.status === 'failed') {
+                  const failureReason = statusResponse.data?.error || 'Scan failed';
+                  pushWorkflowLog('error', `Scan failed: ${failureReason}`);
+                  throw new Error(failureReason);
+                } else if (statusResponse.data?.status === 'running') {
+                  // Update progress
+                  const progress = statusResponse.data?.progress;
+                  if (progress) {
+                    pushWorkflowLog('info', `Scanning... ${progress.strategies_completed}/${progress.total_strategies} strategies`);
+                  } else {
+                    pushWorkflowLog('info', `Scan in progress (attempt ${pollAttempts}/${maxPollAttempts})...`);
+                  }
+                } else {
+                  // Unknown status
+                  pushWorkflowLog('warning', `Unknown scan status: ${statusResponse.data?.status}`);
+                }
+              } catch (pollError: any) {
+                consecutiveErrors++;
+
+                // Extract detailed error information
+                const statusCode = pollError?.response?.status;
+                const errorDetail = pollError?.response?.data?.detail || pollError?.response?.data?.message;
+                const errorMsg = pollError?.message || 'Unknown error';
+
+                // Log detailed error to execution log
+                if (statusCode === 500) {
+                  pushWorkflowLog('error', `Backend service error (500): ${errorDetail || errorMsg}`);
+                  pushWorkflowLog('error', 'Internal server error occurred. Check backend logs for details.');
+                } else if (statusCode === 404) {
+                  pushWorkflowLog('error', `Scan not found (404) - scan_id may be invalid or scan was not created`);
+                } else if (statusCode === 401 || statusCode === 403) {
+                  pushWorkflowLog('error', `Authentication error (${statusCode}): ${errorDetail || errorMsg}`);
+                } else if (pollError?.code === 'ECONNABORTED' || pollError?.code === 'ETIMEDOUT') {
+                  pushWorkflowLog('warning', `Request timeout (attempt ${pollAttempts}/${maxPollAttempts})`);
+                } else {
+                  pushWorkflowLog('error', `Polling error (${statusCode || 'network'}): ${errorDetail || errorMsg}`);
+                }
+
+                // If we have 3+ consecutive errors, fail fast
+                if (consecutiveErrors >= 3) {
+                  pushWorkflowLog('error', `Aborting scan after ${consecutiveErrors} consecutive errors`);
+                  const error = new Error(`Backend service unavailable - ${consecutiveErrors} consecutive ${statusCode || 'network'} errors`);
+                  error.cause = pollError;
+                  throw error;
+                }
+
+                // For non-critical errors, continue polling
+                if (statusCode !== 404 && statusCode !== 401 && statusCode !== 403) {
+                  pushWorkflowLog('info', `Retrying... (${consecutiveErrors} consecutive errors)`);
+                  continue;
+                } else {
+                  // Critical auth/not-found errors should fail immediately
+                  const error = new Error(`Critical error (${statusCode}): ${errorDetail || errorMsg}`);
+                  error.cause = pollError;
+                  throw error;
+                }
               }
             }
 
             if (!scanResult) {
-              throw new Error('Scan timeout - taking longer than expected');
+              pushWorkflowLog('error', 'Scan timeout - taking longer than 120 seconds');
+              throw new Error('Scan timeout - taking longer than expected. The scan may still be running in the background.');
             }
 
             // 3. Parse opportunities from scan result
