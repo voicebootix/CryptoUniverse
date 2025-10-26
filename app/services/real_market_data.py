@@ -59,17 +59,24 @@ class RealMarketDataService(LoggerMixin):
             self.exchanges['kucoin'] = ccxt.kucoin({
                 'enableRateLimit': True,
                 'options': {
-                    'defaultType': 'spot'
+                    'defaultType': 'spot',
+                    'adjustForTimeDifference': True
                 }
             })
 
             self.exchanges['kraken'] = ccxt.kraken({
-                'enableRateLimit': True
+                'enableRateLimit': True,
+                'options': {
+                    'adjustForTimeDifference': True  # Fix nonce errors from time sync issues
+                }
             })
 
             # Coinbase for US market
             self.exchanges['coinbase'] = ccxt.coinbase({
-                'enableRateLimit': True
+                'enableRateLimit': True,
+                'options': {
+                    'adjustForTimeDifference': True
+                }
             })
 
             self.logger.info("✅ Initialized real market data connections",
