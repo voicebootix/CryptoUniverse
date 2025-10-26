@@ -681,11 +681,12 @@ const ManualTradingPage: React.FC = () => {
             // 2. Poll for scan results
             let scanResult;
             let pollAttempts = 0;
-            const maxPollAttempts = 60; // 60 seconds max
+            const maxPollAttempts = 40; // 40 attempts × 3 seconds = 120 seconds max
+            const pollIntervalMs = 3000; // 3 second intervals (matches backend recommendation)
             let consecutiveErrors = 0;
 
             while (pollAttempts < maxPollAttempts) {
-              await new Promise(resolve => setTimeout(resolve, 1000)); // Wait 1 second
+              await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
               pollAttempts++;
 
               try {
@@ -754,8 +755,8 @@ const ManualTradingPage: React.FC = () => {
             }
 
             if (!scanResult) {
-              pushWorkflowLog('error', 'Scan timeout - taking longer than 60 seconds');
-              throw new Error('Scan timeout - taking longer than expected');
+              pushWorkflowLog('error', 'Scan timeout - taking longer than 120 seconds');
+              throw new Error('Scan timeout - taking longer than expected. The scan may still be running in the background.');
             }
 
             // 3. Parse opportunities from scan result
