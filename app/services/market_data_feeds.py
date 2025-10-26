@@ -8,6 +8,7 @@ and other free sources for the AI money manager platform.
 import asyncio
 import ast
 import json
+import random
 import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
@@ -341,13 +342,28 @@ class MarketDataFeeds:
     def _get_api_params(self, api_name: str, base_params: Dict = None) -> Dict[str, Any]:
         """Get API parameters including API key if required."""
         params = base_params or {}
-        
+
         api_config = self.apis.get(api_name, {})
         if api_config.get("requires_key") and self.api_keys.get(api_name):
             key_param = api_config.get("api_key_param", "apikey")
             params[key_param] = self.api_keys[api_name]
-        
+
         return params
+
+    async def _load_cached_price_entry(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """Load a cached price payload for graceful degradation."""
+        if not self.redis:
+            return None
+
+        try:
+            cached = await self.redis.get(f"price:{symbol}")
+        except Exception:
+            return None
+
+        if not cached:
+            return None
+
+        return self._deserialize_price_cache(cached)
     
     async def get_real_time_price(self, symbol: str) -> Dict[str, Any]:
         """Get real-time price data for a symbol."""
@@ -1107,32 +1123,100 @@ class MarketDataFeeds:
         try:
             if symbol not in self.symbol_mappings["coincap"]:
                 return {"success": False, "error": f"Symbol {symbol} not supported"}
-            
+
             asset_id = self.symbol_mappings["coincap"][symbol]
             url = f"{self.apis['coincap']['base_url']}/assets/{asset_id}"
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url) as response:
-                    if response.status == 200:
-                        response_data = await response.json()
-                        data = response_data.get("data", {})
-                        
-                        if data:
-                            return {
+
+            if self.circuit_breakers_enabled and not await self._check_circuit_breaker("coincap"):
+                cached = await self._load_cached_price_entry(symbol)
+                if cached:
+                    return {
+                        "success": True,
+                        "data": cached,
+                        "metadata": {
+                            "source": "cache",
+                            "circuit_open": True,
+                        },
+                    }
+                return {"success": False, "error": "CoinCap temporarily unavailable"}
+
+            timeout = aiohttp.ClientTimeout(total=10)
+            max_retries = 3
+            base_delay = 0.5
+            last_error: Optional[Exception] = None
+
+            for attempt in range(max_retries):
+                try:
+                    async with aiohttp.ClientSession(timeout=timeout) as session:
+                        async with session.get(url) as response:
+                            if response.status == 429:
+                                retry_after = int(response.headers.get("Retry-After", "1"))
+                                raise MarketDataRateLimitError(
+                                    message="CoinCap rate limit hit", retry_after=retry_after
+                                )
+                            if response.status >= 500:
+                                raise MarketDataError(
+                                    f"CoinCap server error: {response.status}"
+                                )
+                            if response.status != 200:
+                                raise MarketDataError(
+                                    f"CoinCap request failed: {response.status}"
+                                )
+
+                            response_data = await response.json()
+                            data = response_data.get("data", {})
+                            if not data:
+                                raise MarketDataError("CoinCap returned empty payload")
+
+                            result = {
                                 "success": True,
                                 "data": {
                                     "symbol": symbol,
-                                    "price": float(data.get("priceUsd", 0)),
-                                    "change_24h": float(data.get("changePercent24Hr", 0)),
-                                    "volume_24h": float(data.get("volumeUsd24Hr", 0)),
-                                    "market_cap": float(data.get("marketCapUsd", 0)),
+                                    "price": float(data.get("priceUsd", 0) or 0),
+                                    "change_24h": float(data.get("changePercent24Hr", 0) or 0),
+                                    "volume_24h": float(data.get("volumeUsd24Hr", 0) or 0),
+                                    "market_cap": float(data.get("marketCapUsd", 0) or 0),
                                     "timestamp": datetime.utcnow().isoformat(),
-                                    "source": "coincap"
-                                }
+                                    "source": "coincap",
+                                },
                             }
-                    
-                    return {"success": False, "error": f"API error: {response.status}"}
-                    
+
+                            await self._handle_api_success("coincap")
+                            return result
+
+                except MarketDataRateLimitError as rate_error:
+                    last_error = rate_error
+                    await self._handle_api_failure("coincap", str(rate_error))
+                    delay = rate_error.retry_after or base_delay * (2 ** attempt)
+                except (aiohttp.ClientError, asyncio.TimeoutError) as net_error:
+                    last_error = net_error
+                    await self._handle_api_failure("coincap", str(net_error))
+                    delay = base_delay * (2 ** attempt)
+                except MarketDataError as api_error:
+                    last_error = api_error
+                    await self._handle_api_failure("coincap", str(api_error))
+                    delay = base_delay * (2 ** attempt)
+                except Exception as unexpected_error:
+                    last_error = unexpected_error
+                    await self._handle_api_failure("coincap", str(unexpected_error))
+                    delay = base_delay * (2 ** attempt)
+
+                await asyncio.sleep(delay + random.uniform(0, 0.3))
+
+            cached_fallback = await self._load_cached_price_entry(symbol)
+            if cached_fallback:
+                return {
+                    "success": True,
+                    "data": cached_fallback,
+                    "metadata": {
+                        "source": "cache",
+                        "error": str(last_error) if last_error else None,
+                    },
+                }
+
+            error_message = str(last_error) if last_error else "CoinCap request failed"
+            return {"success": False, "error": error_message}
+
         except Exception as e:
             return {"success": False, "error": str(e)}
     
@@ -1141,7 +1225,7 @@ class MarketDataFeeds:
         try:
             if symbol not in self.symbol_mappings["coingecko"]:
                 return {"success": False, "error": f"Symbol {symbol} not supported"}
-            
+
             coin_id = self.symbol_mappings["coingecko"][symbol]
             url = f"{self.apis['coingecko']['base_url']}/coins/{coin_id}"
             params = {
@@ -1149,78 +1233,117 @@ class MarketDataFeeds:
                 "tickers": "false",
                 "market_data": "true",
                 "community_data": "false",
-                "developer_data": "false"
+                "developer_data": "false",
             }
-            
-            # Enterprise-grade retry logic with exponential backoff
+
             max_retries = 3
             base_delay = 1.0
-            
+
+            if self.circuit_breakers_enabled and not await self._check_circuit_breaker("coingecko"):
+                if self.redis:
+                    try:
+                        cached_raw = await self.redis.get(f"detailed:{symbol}")
+                        if cached_raw:
+                            return json.loads(cached_raw)
+                    except Exception:
+                        pass
+                return {"success": False, "error": "CoinGecko temporarily unavailable"}
+
+            timeout = aiohttp.ClientTimeout(total=30)
+            last_error: Optional[Exception] = None
+
             for attempt in range(max_retries):
                 try:
-                    async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=30)) as session:
+                    async with aiohttp.ClientSession(timeout=timeout) as session:
                         async with session.get(url, params=params) as response:
-                            if response.status == 200:
-                                data = await response.json()
-                                market_data = data.get("market_data", {})
-                                
-                                return {
-                                    "success": True,
-                                    "data": {
-                                        "symbol": symbol,
-                                        "name": data.get("name", ""),
-                                        "price": market_data.get("current_price", {}).get("usd", 0),
-                                        "market_cap": market_data.get("market_cap", {}).get("usd", 0),
-                                        "volume_24h": market_data.get("total_volume", {}).get("usd", 0),
-                                        "change_24h": market_data.get("price_change_percentage_24h", 0),
-                                        "change_7d": market_data.get("price_change_percentage_7d", 0),
-                                        "change_30d": market_data.get("price_change_percentage_30d", 0),
-                                        "high_24h": market_data.get("high_24h", {}).get("usd", 0),
-                                        "low_24h": market_data.get("low_24h", {}).get("usd", 0),
-                                        "ath": market_data.get("ath", {}).get("usd", 0),
-                                        "atl": market_data.get("atl", {}).get("usd", 0),
-                                        "circulating_supply": market_data.get("circulating_supply", 0),
-                                        "total_supply": market_data.get("total_supply", 0),
-                                        "max_supply": market_data.get("max_supply", 0),
-                                        "timestamp": datetime.utcnow().isoformat(),
-                                        "source": "coingecko"
-                                    }
-                                }
-                            elif response.status == 429:
-                                # Rate limit exceeded - implement exponential backoff
-                                if attempt < max_retries - 1:
-                                    delay = base_delay * (2 ** attempt) + (time.time() % 1)  # Add jitter
-                                    logger.warning(f"CoinGecko rate limit hit for {symbol}, retrying in {delay:.2f}s (attempt {attempt + 1}/{max_retries})")
-                                    await asyncio.sleep(delay)
-                                    continue
-                                else:
-                                    logger.error(f"CoinGecko rate limit exceeded for {symbol} after {max_retries} attempts")
-                                    return {"success": False, "error": "Rate limit exceeded", "status_code": 429}
-                            else:
-                                return {"success": False, "error": f"API error: {response.status}", "status_code": response.status}
-                                
-                except asyncio.TimeoutError:
-                    if attempt < max_retries - 1:
-                        delay = base_delay * (2 ** attempt)
-                        logger.warning(f"CoinGecko timeout for {symbol}, retrying in {delay:.2f}s (attempt {attempt + 1}/{max_retries})")
-                        await asyncio.sleep(delay)
-                        continue
-                    else:
-                        return {"success": False, "error": "Request timeout"}
-                        
-                except Exception as e:
-                    if attempt < max_retries - 1:
-                        delay = base_delay * (2 ** attempt)
-                        logger.warning(f"CoinGecko request failed for {symbol}: {e}, retrying in {delay:.2f}s")
-                        await asyncio.sleep(delay)
-                        continue
-                    else:
-                        # On final attempt, return error instead of raising
-                        logger.error(f"CoinGecko request failed for {symbol} after {max_retries} attempts: {e}")
-                        return {"success": False, "error": str(e), "final_attempt": True}
-            
-            return {"success": False, "error": "Max retries exceeded"}
-                    
+                            if response.status == 429:
+                                retry_after = int(response.headers.get("Retry-After", "1"))
+                                raise MarketDataRateLimitError(
+                                    message="CoinGecko rate limited",
+                                    retry_after=retry_after,
+                                )
+                            if response.status >= 500:
+                                raise MarketDataError(
+                                    f"CoinGecko server error: {response.status}"
+                                )
+                            if response.status != 200:
+                                raise MarketDataError(
+                                    f"CoinGecko request failed: {response.status}"
+                                )
+
+                            data = await response.json()
+                            market_data = data.get("market_data", {})
+
+                            detailed_payload = {
+                                "success": True,
+                                "data": {
+                                    "symbol": symbol,
+                                    "name": data.get("name", ""),
+                                    "price": market_data.get("current_price", {}).get("usd", 0),
+                                    "market_cap": market_data.get("market_cap", {}).get("usd", 0),
+                                    "volume_24h": market_data.get("total_volume", {}).get("usd", 0),
+                                    "change_24h": market_data.get("price_change_percentage_24h", 0),
+                                    "change_7d": market_data.get("price_change_percentage_7d", 0),
+                                    "change_30d": market_data.get("price_change_percentage_30d", 0),
+                                    "high_24h": market_data.get("high_24h", {}).get("usd", 0),
+                                    "low_24h": market_data.get("low_24h", {}).get("usd", 0),
+                                    "ath": market_data.get("ath", {}).get("usd", 0),
+                                    "atl": market_data.get("atl", {}).get("usd", 0),
+                                    "circulating_supply": market_data.get("circulating_supply", 0),
+                                    "total_supply": market_data.get("total_supply", 0),
+                                    "max_supply": market_data.get("max_supply", 0),
+                                    "timestamp": datetime.utcnow().isoformat(),
+                                    "source": "coingecko",
+                                },
+                            }
+
+                            await self._handle_api_success("coingecko")
+                            return detailed_payload
+
+                except MarketDataRateLimitError as rate_error:
+                    last_error = rate_error
+                    await self._handle_api_failure("coingecko", str(rate_error))
+                    delay = rate_error.retry_after or base_delay * (2 ** attempt)
+                except (aiohttp.ClientError, asyncio.TimeoutError) as net_error:
+                    last_error = net_error
+                    await self._handle_api_failure("coingecko", str(net_error))
+                    delay = base_delay * (2 ** attempt)
+                except MarketDataError as api_error:
+                    last_error = api_error
+                    await self._handle_api_failure("coingecko", str(api_error))
+                    delay = base_delay * (2 ** attempt)
+                except Exception as unexpected_error:
+                    last_error = unexpected_error
+                    await self._handle_api_failure("coingecko", str(unexpected_error))
+                    delay = base_delay * (2 ** attempt)
+
+                await asyncio.sleep(delay + random.uniform(0, 0.5))
+
+            cached_fallback = None
+            if self.redis:
+                try:
+                    cached_raw = await self.redis.get(f"detailed:{symbol}")
+                    if cached_raw:
+                        cached_fallback = json.loads(cached_raw)
+                except Exception:
+                    cached_fallback = None
+
+            if cached_fallback:
+                metadata = cached_fallback.get("metadata", {})
+                metadata.update(
+                    {
+                        "source": "cache",
+                        "error": str(last_error) if last_error else None,
+                    }
+                )
+                cached_fallback["metadata"] = metadata
+                return cached_fallback
+
+            error_message = (
+                str(last_error) if last_error else "CoinGecko detailed request failed"
+            )
+            return {"success": False, "error": error_message}
+
         except Exception as e:
             return {"success": False, "error": str(e)}
     

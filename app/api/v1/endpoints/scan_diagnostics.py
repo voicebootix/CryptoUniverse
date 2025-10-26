@@ -10,11 +10,11 @@ Date: 2025-10-22
 
 import json
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Mapping
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.core.redis import get_redis_client
 from app.api.v1.endpoints.auth import get_current_user, require_role
@@ -50,12 +50,15 @@ class ScanLifecycleResponse(BaseModel):
     """Response model for scan lifecycle tracking."""
     success: bool
     scan_id: str
+    resolved_scan_id: Optional[str] = None
     current_phase: Optional[str] = None
     current_status: Optional[str] = None
     last_updated: Optional[str] = None
-    phases: Dict[str, Any] = {}
+    phases: Dict[str, Any] = Field(default_factory=dict)
     is_stuck: bool = False
     stuck_duration_seconds: Optional[float] = None
+    redis_key: Optional[str] = None
+    recovered_from_index: bool = False
     timestamp: str
 
 
@@ -392,22 +395,48 @@ async def get_scan_lifecycle(
             )
 
         lifecycle_key = f"scan_lifecycle:{scan_id}"
+        resolved_key = lifecycle_key
+        recovered_from_index = False
+        resolved_scan_id: Optional[str] = None
 
         # Get all lifecycle data
-        lifecycle_data = await redis.hgetall(lifecycle_key)
+        def _decode_hash(hash_data: Mapping[Any, Any]) -> Dict[str, Any]:
+            if not hash_data:
+                return {}
 
-        if not lifecycle_data:
+            decoded: Dict[str, Any] = {}
+            for key, value in hash_data.items():
+                k = key.decode() if isinstance(key, bytes) else key
+                v = value.decode() if isinstance(value, bytes) else value
+                decoded[k] = v
+            return decoded
+
+        lifecycle_data = await redis.hgetall(lifecycle_key)
+        decoded_data = _decode_hash(lifecycle_data)
+
+        if not decoded_data:
+            # Attempt to recover from index of known lifecycle keys
+            index_key = "scan_lifecycle:index"
+            try:
+                # Fall back to most recent entry from index if available
+                recent_keys = await redis.zrevrange(index_key, 0, 0)
+                recent_keys = [
+                    key.decode() if isinstance(key, bytes) else key
+                    for key in recent_keys
+                ]
+                if recent_keys:
+                    resolved_key = recent_keys[0]
+                    decoded_data = _decode_hash(await redis.hgetall(resolved_key))
+                    if decoded_data and resolved_key != lifecycle_key:
+                        recovered_from_index = True
+            except Exception as scan_error:
+                logger.debug("Lifecycle index lookup failed", error=str(scan_error))
+
+        if not decoded_data:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"No lifecycle data found for scan {scan_id}"
             )
-
-        # Decode Redis hash
-        decoded_data = {}
-        for key, value in lifecycle_data.items():
-            k = key.decode() if isinstance(key, bytes) else key
-            v = value.decode() if isinstance(value, bytes) else value
-            decoded_data[k] = v
 
         # Extract current state
         current_phase = decoded_data.get("current_phase")
@@ -441,15 +470,21 @@ async def get_scan_lifecycle(
             except Exception as time_parse_error:
                 logger.debug("Failed to parse time", error=str(time_parse_error))
 
+        if recovered_from_index:
+            resolved_scan_id = resolved_key.split("scan_lifecycle:", 1)[-1]
+
         response = {
             "success": True,
             "scan_id": scan_id,
+            "resolved_scan_id": resolved_scan_id,
             "current_phase": current_phase,
             "current_status": current_status,
             "last_updated": last_updated,
             "phases": phases,
             "is_stuck": is_stuck,
             "stuck_duration_seconds": stuck_duration_seconds,
+            "redis_key": resolved_key,
+            "recovered_from_index": recovered_from_index,
             "timestamp": datetime.utcnow().isoformat()
         }
 

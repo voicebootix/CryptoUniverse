@@ -11,6 +11,9 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass
 from collections import deque
+import math
+import statistics
+
 import structlog
 
 logger = structlog.get_logger(__name__)
@@ -68,15 +71,46 @@ class MetricsCollector:
             return {"error": f"No recent data for {name}"}
         
         values = [point.value for point in recent_points]
+        sorted_values = sorted(values)
+        first_value = values[0]
+        last_value = values[-1]
+        avg_value = sum(values) / len(values)
+        p95_index = max(0, math.ceil(0.95 * len(sorted_values)) - 1)
+        p95_value = sorted_values[p95_index]
+        median_value = statistics.median(sorted_values)
+
+        delta = last_value - first_value
+        eps = 1e-9
+        change_pct: Optional[float]
+        if abs(first_value) > eps:
+            change_pct = (delta / first_value) * 100
+        else:
+            change_pct = None
+
+        trend = "stable"
+        if change_pct is not None:
+            if change_pct > 10:
+                trend = "increasing"
+            elif change_pct < -10:
+                trend = "decreasing"
+        else:
+            if delta > 0:
+                trend = "increasing"
+            elif delta < 0:
+                trend = "decreasing"
+
         return {
             "metric": name,
             "duration_minutes": duration_minutes,
             "points_count": len(values),
-            "current": values[-1] if values else 0,
-            "average": sum(values) / len(values),
-            "min": min(values),
-            "max": max(values),
-            "trend": "increasing" if len(values) >= 2 and values[-1] > values[0] else "stable"
+            "current": last_value,
+            "average": avg_value,
+            "median": median_value,
+            "p95": p95_value,
+            "min": min(sorted_values),
+            "max": max(sorted_values),
+            "trend": trend,
+            "change_pct": change_pct,
         }
     
     def get_all_metrics_summary(self, duration_minutes: int = 15) -> Dict[str, Any]:
@@ -133,7 +167,7 @@ class SystemMonitoringService:
             except asyncio.CancelledError:
                 pass
         logger.info("System monitoring stopped")
-    
+
     async def _monitoring_loop(self, interval_seconds: int):
         """Main monitoring loop."""
         while self.monitoring_active:
@@ -146,6 +180,24 @@ class SystemMonitoringService:
             except Exception as e:
                 logger.error("Monitoring loop error", error=str(e))
                 await asyncio.sleep(interval_seconds)
+
+    def get_performance_trends(self) -> Dict[str, Any]:
+        """Expose smoothed performance metrics for dashboards and alerts."""
+        metric_windows = {
+            "http_request_duration_ms": 15,
+            "database_response_time_ms": 15,
+            "redis_response_time_ms": 15,
+            # Retain legacy key for backward compatibility with older metric emitters
+            "db_query_duration_ms": 15,
+            "db_slow_query_count": 60,
+        }
+
+        trends: Dict[str, Any] = {}
+        for metric, window in metric_windows.items():
+            summary = self.metrics_collector.get_metric_summary(metric, window)
+            if "error" not in summary:
+                trends[metric] = summary
+        return trends
     
     async def _collect_system_metrics(self):
         """Collect comprehensive system metrics."""

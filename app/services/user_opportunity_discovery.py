@@ -4606,6 +4606,13 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             await self.redis.hset(lifecycle_key, "current_status", status)
             await self.redis.hset(lifecycle_key, "last_updated", timestamp)
 
+            # Maintain lightweight index of active lifecycle keys for diagnostics recovery
+            index_key = "scan_lifecycle:index"
+            current_time = int(time.time())
+            await self.redis.zadd(index_key, {lifecycle_key: current_time})
+            await self.redis.zremrangebyscore(index_key, 0, current_time - 3600)
+            await self.redis.expire(index_key, 3600)
+
             self.logger.info(f"📍 Scan lifecycle: {phase}",
                            scan_id=scan_id,
                            status=status,
