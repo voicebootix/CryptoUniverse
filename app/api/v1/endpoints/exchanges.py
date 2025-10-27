@@ -86,6 +86,7 @@ class KrakenNonceManager:
         self._node_id = None
         self._lock = None  # Will be initialized as asyncio.Lock in async context
         self._nonce_key = "kraken:global_nonce"
+        self._force_resync = False  # Flag to force immediate time resync on nonce errors
         self._health_metrics = {
             "total_nonces_generated": 0,
             "redis_failures": 0,
@@ -183,8 +184,10 @@ class KrakenNonceManager:
                 self._health_metrics["last_health_check"] = time.time()
                 
                 # Ensure server time is synchronized
-                if time.time() - self._last_time_sync > 300:  # 5 minutes
+                # Force resync if flag is set (after nonce error) OR if stale (>5 minutes)
+                if self._force_resync or (time.time() - self._last_time_sync > 300):
                     await self._sync_server_time()
+                    self._force_resync = False  # Clear the flag after successful sync
                 
                 # Primary: Redis-based distributed nonce coordination with atomic operation
                 if self._redis:
@@ -1553,12 +1556,10 @@ async def retry_with_backoff(func, max_retries: int = 3, base_delay: float = 1.0
 
             # Force time resync on Kraken nonce errors
             error_str = str(e).lower()
-            if "invalid nonce" in error_str or "eapi:invalid nonce" in error_str:
-                logger.info(f"Nonce error detected on attempt {attempt + 1}, forcing time resync")
-                try:
-                    await kraken_nonce_manager._sync_server_time()
-                except Exception as sync_error:
-                    logger.warning(f"Time resync failed: {str(sync_error)}")
+            if "invalid nonce" in error_str:
+                logger.info(f"Nonce error detected on attempt {attempt + 1}, setting force_resync flag")
+                # Set flag to force resync on next get_nonce() call
+                kraken_nonce_manager._force_resync = True
 
             delay = base_delay * (2 ** attempt)
             logger.warning(f"Attempt {attempt + 1} failed, retrying in {delay}s: {str(e)}")
