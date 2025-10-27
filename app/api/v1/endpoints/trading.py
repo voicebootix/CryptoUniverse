@@ -126,6 +126,19 @@ class PortfolioResponse(BaseModel):
     active_orders: int
 
 
+class PortfolioSummaryResponse(BaseModel):
+    success: bool
+    total_value: Decimal
+    available_balance: Decimal
+    cash_balance: Decimal
+    positions_count: int
+    daily_pnl: Decimal
+    daily_pnl_pct: float
+    total_pnl: Decimal
+    total_pnl_pct: float
+    last_updated: datetime
+
+
 class SystemStatusResponse(BaseModel):
     autonomous_mode: bool
     simulation_mode: bool
@@ -487,107 +500,176 @@ async def toggle_simulation_mode(
         )
 
 
+async def _build_portfolio_response(
+    current_user: User,
+    db: AsyncSession,
+    *,
+    enforce_rate_limit: bool = True,
+) -> PortfolioResponse:
+    """Load portfolio data with graceful fallbacks when upstream services fail."""
+
+    if enforce_rate_limit:
+        await rate_limiter.check_rate_limit(
+            key="portfolio:read",
+            limit=100,
+            window=60,
+            user_id=str(current_user.id)
+        )
+
+    portfolio_data: Dict[str, Any] = {}
+    portfolio_fetch_error: Optional[str] = None
+
+    try:
+        from app.api.v1.endpoints.exchanges import get_user_portfolio_from_exchanges
+        exchange_result = await asyncio.wait_for(
+            get_user_portfolio_from_exchanges(str(current_user.id), db),
+            timeout=10.0  # Increased timeout for production
+        )
+
+        if exchange_result.get("success"):
+            portfolio_data = exchange_result
+        else:
+            portfolio_fetch_error = exchange_result.get("error") or "Portfolio aggregation returned unsuccessful response"
+    except asyncio.TimeoutError:
+        portfolio_fetch_error = "Portfolio service timeout - using cached analytics fallback"
+    except HTTPException as http_exc:
+        if http_exc.status_code in {status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN}:
+            raise
+        portfolio_fetch_error = http_exc.detail or f"HTTP {http_exc.status_code} during portfolio aggregation"
+    except Exception as exc:  # pragma: no cover - defensive logging
+        portfolio_fetch_error = f"Portfolio data service error: {str(exc)}"
+
+    if portfolio_fetch_error:
+        logger.warning(
+            "Portfolio aggregation unavailable, using fallback data",
+            user_id=str(current_user.id),
+            error=portfolio_fetch_error,
+        )
+
+    risk_data: Dict[str, Any] = {}
+    try:
+        risk_metrics = await risk_service.get_portfolio_status(str(current_user.id))
+        if risk_metrics.get("success"):
+            risk_data = risk_metrics.get("portfolio", {}) or {}
+    except Exception as risk_error:  # pragma: no cover - defensive logging
+        logger.warning(
+            "Risk service unavailable while building portfolio response",
+            user_id=str(current_user.id),
+            error=str(risk_error),
+        )
+
+    positions: List[Dict[str, Any]] = portfolio_data.get("positions", []) or risk_data.get("positions", []) or []
+    total_value_usd = (
+        portfolio_data.get("total_value")
+        or portfolio_data.get("total_value_usd")
+        or risk_data.get("total_value")
+        or risk_data.get("portfolio_value")
+        or 0.0
+    )
+
+    # If positions aren't directly available, transform from balances (real data format)
+    if not positions and portfolio_data.get("balances"):
+        for balance in portfolio_data.get("balances", []):
+            if balance.get("total", 0) > 0:
+                positions.append({
+                    "symbol": balance.get("asset", "UNKNOWN"),
+                    "name": balance.get("asset", "UNKNOWN"),
+                    "amount": balance.get("total", 0.0),
+                    "value_usd": balance.get("value_usd", 0.0),
+                    "entry_price": (balance.get("value_usd", 0.0) / balance.get("total", 1)) if balance.get("total") else 0.0,
+                    "current_price": (balance.get("value_usd", 0.0) / balance.get("total", 1)) if balance.get("total") else 0.0,
+                    "change_24h_pct": balance.get("change_24h_pct", 0.0),
+                    "unrealized_pnl": balance.get("unrealized_pnl", 0.0),
+                    "side": balance.get("side", "long"),
+                    "exchange": balance.get("exchange", "unknown"),
+                })
+
+    available_balance = (
+        portfolio_data.get("available_balance")
+        or risk_data.get("available_balance")
+        or risk_data.get("cash_available")
+        or 0.0
+    )
+    if not available_balance and portfolio_data.get("balances"):
+        stablecoins = {"USDT", "USDC", "BUSD", "DAI", "FDUSD"}
+        available_balance = sum(
+            balance.get("value_usd", 0.0)
+            for balance in portfolio_data.get("balances", [])
+            if balance.get("asset") in stablecoins
+        )
+
+    daily_pnl = portfolio_data.get("daily_pnl")
+    if daily_pnl is None:
+        daily_pnl = risk_data.get("daily_pnl", 0.0)
+
+    total_pnl = portfolio_data.get("total_pnl")
+    if total_pnl is None:
+        total_pnl = risk_data.get("total_pnl", 0.0)
+
+    margin_used = portfolio_data.get("margin_used")
+    if margin_used is None:
+        margin_used = risk_data.get("margin_used", 0.0)
+
+    margin_available = portfolio_data.get("margin_available")
+    if margin_available is None:
+        margin_available = risk_data.get("margin_available", 0.0)
+
+    risk_score = portfolio_data.get("risk_score", risk_data.get("risk_score", 5.0))
+    active_orders = portfolio_data.get("active_orders", risk_data.get("active_orders", 0))
+
+    return PortfolioResponse(
+        total_value=Decimal(str(total_value_usd)),
+        available_balance=Decimal(str(available_balance)),
+        positions=positions,
+        daily_pnl=Decimal(str(daily_pnl or 0)),
+        daily_pnl_pct=float(portfolio_data.get("daily_pnl_pct", risk_data.get("daily_pnl_pct", 0.0)) or 0.0),
+        total_pnl=Decimal(str(total_pnl or 0)),
+        total_pnl_pct=float(portfolio_data.get("total_pnl_pct", risk_data.get("total_pnl_pct", 0.0)) or 0.0),
+        margin_used=Decimal(str(margin_used or 0)),
+        margin_available=Decimal(str(margin_available or 0)),
+        risk_score=float(risk_score or 0),
+        active_orders=int(active_orders or 0),
+    )
+
+
 @router.get("/portfolio", response_model=PortfolioResponse)
 async def get_portfolio_status(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_database)
 ):
     """Get current portfolio status and performance."""
-    
+
+    return await _build_portfolio_response(current_user, db, enforce_rate_limit=True)
+
+
+@router.get("/portfolio/summary", response_model=PortfolioSummaryResponse)
+async def get_portfolio_summary(
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_database)
+):
+    """Lightweight portfolio summary for dashboards requiring quick totals."""
+
     await rate_limiter.check_rate_limit(
-        key="portfolio:read",
-        limit=100,
+        key="portfolio:summary",
+        limit=200,
         window=60,
         user_id=str(current_user.id)
     )
-    
-    try:
-        # Get real portfolio data with timeout handling for production
-        try:
-            from app.api.v1.endpoints.exchanges import get_user_portfolio_from_exchanges
-            portfolio_data = await asyncio.wait_for(
-                get_user_portfolio_from_exchanges(str(current_user.id), db),
-                timeout=10.0  # Increased timeout for production
-            )
 
-            if not portfolio_data.get("success"):
-                logger.error(f"Portfolio data failed: {portfolio_data.get('error')}")
-                raise HTTPException(
-                    status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                    detail="Portfolio data temporarily unavailable"
-                )
+    portfolio = await _build_portfolio_response(current_user, db, enforce_rate_limit=False)
 
-        except asyncio.TimeoutError:
-            logger.error("Portfolio data timeout - service overloaded")
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Portfolio service timeout - try again shortly"
-            )
-        except Exception as e:
-            logger.error(f"Portfolio data error: {str(e)}")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Portfolio data service error"
-            )
-        
-        # Get additional portfolio metrics from risk service
-        risk_metrics = await risk_service.get_portfolio_status(str(current_user.id))
-        risk_data = risk_metrics.get("portfolio", {}) if risk_metrics.get("success") else {}
-        
-        # Transform portfolio data into positions (handle both real and mock data)
-        positions = portfolio_data.get("positions", [])
-        total_value_usd = portfolio_data.get("total_value", portfolio_data.get("total_value_usd", 0.0))
-
-        # If positions aren't directly available, transform from balances (real data format)
-        if not positions and portfolio_data.get("balances"):
-            positions = []
-            for balance in portfolio_data.get("balances", []):
-                if balance.get("total", 0) > 0:
-                    positions.append({
-                        "symbol": balance["asset"],
-                        "name": balance["asset"],
-                        "amount": balance["total"],
-                        "value_usd": balance["value_usd"],
-                        "entry_price": (balance["value_usd"] / balance["total"]) if balance.get("total") else 0.0,
-                        "current_price": (balance["value_usd"] / balance["total"]) if balance.get("total") else 0.0,
-                        "change_24h_pct": 0.0,  # Would come from market data service
-                        "unrealized_pnl": 0.0,  # Would be calculated from entry vs current
-                        "side": "long",
-                        "exchange": balance.get("exchange", "unknown")
-                    })
-        
-        # Calculate available balance (handle both real and mock data)
-        available_balance = portfolio_data.get("available_balance", 0.0)
-        if not available_balance and portfolio_data.get("balances"):
-            # Fallback for real data format
-            stablecoins = ["USDT", "USDC", "BUSD", "DAI", "FDUSD"]
-            available_balance = sum(
-                balance["value_usd"] for balance in portfolio_data.get("balances", [])
-                if balance["asset"] in stablecoins
-            )
-
-        return PortfolioResponse(
-            total_value=Decimal(str(total_value_usd)),
-            available_balance=Decimal(str(available_balance)),
-            positions=positions,
-            daily_pnl=Decimal(str(portfolio_data.get("daily_pnl", risk_data.get("daily_pnl", 0)))),
-            daily_pnl_pct=portfolio_data.get("daily_pnl_pct", risk_data.get("daily_pnl_pct", 0.0)),
-            total_pnl=Decimal(str(portfolio_data.get("total_pnl", risk_data.get("total_pnl", 0)))),
-            total_pnl_pct=portfolio_data.get("total_pnl_pct", risk_data.get("total_pnl_pct", 0.0)),
-            margin_used=Decimal(str(portfolio_data.get("margin_used", risk_data.get("margin_used", 0)))),
-            margin_available=Decimal(str(portfolio_data.get("margin_available", risk_data.get("margin_available", 0)))),
-            risk_score=portfolio_data.get("risk_score", risk_data.get("risk_score", 5.0)),
-            active_orders=portfolio_data.get("active_orders", risk_data.get("active_orders", 0))
-        )
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("Portfolio status retrieval failed", error=str(e))
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to get portfolio status: {str(e)}"
-        )
+    return PortfolioSummaryResponse(
+        success=True,
+        total_value=portfolio.total_value,
+        available_balance=portfolio.available_balance,
+        cash_balance=portfolio.available_balance,
+        positions_count=len(portfolio.positions),
+        daily_pnl=portfolio.daily_pnl,
+        daily_pnl_pct=portfolio.daily_pnl_pct,
+        total_pnl=portfolio.total_pnl,
+        total_pnl_pct=portfolio.total_pnl_pct,
+        last_updated=datetime.utcnow(),
+    )
 
 
 @router.get("/status", response_model=SystemStatusResponse)
