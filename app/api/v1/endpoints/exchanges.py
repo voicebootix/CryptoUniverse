@@ -186,8 +186,10 @@ class KrakenNonceManager:
                 # Ensure server time is synchronized
                 # Force resync if flag is set (after nonce error) OR if stale (>5 minutes)
                 if self._force_resync or (time.time() - self._last_time_sync > 300):
-                    await self._sync_server_time()
-                    self._force_resync = False  # Clear the flag after successful sync
+                    success = await self._sync_server_time()
+                    # Only clear flag if sync succeeded, otherwise keep trying on future attempts
+                    if success:
+                        self._force_resync = False
                 
                 # Primary: Redis-based distributed nonce coordination with atomic operation
                 if self._redis:
