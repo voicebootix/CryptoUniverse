@@ -48,6 +48,12 @@ import PhaseProgressVisualizer, { ExecutionPhase } from '@/components/trading/Ph
 import { PHASE_CONFIG } from '@/constants/trading';
 import { formatCurrency, formatPercentage } from '@/lib/utils';
 import { apiClient } from '@/lib/api/client';
+import {
+  opportunityApi,
+  OpportunityDiscoveryResponse,
+  OpportunityApiError,
+  type Opportunity as DiscoveryOpportunity
+} from '@/lib/api/opportunityApi';
 import { AIConsensusCard } from '@/components/trading/AIConsensusCard';
 import { MarketContextCard } from '@/components/trading/MarketContextCard';
 import { AIUsageStats } from '@/components/trading/AIUsageStats';
@@ -664,109 +670,241 @@ const ManualTradingPage: React.FC = () => {
 
         switch (action) {
           case 'opportunity': {
-            pushWorkflowLog('info', `Scanning opportunities using your active trading strategies...`);
+            let lastLoggedMessage: string | null = null;
+            const logMessage = (level: WorkflowLogLevel, message: string) => {
+              if (lastLoggedMessage === message) {
+                return;
+              }
+              lastLoggedMessage = message;
+              pushWorkflowLog(level, message);
+            };
 
-            // 1. Call the REAL opportunity discovery service (not AI consensus)
-            const scanResponse = await apiClient.post('/opportunities/discover', {
+            logMessage('info', `Scanning opportunities using your active trading strategies...`);
+
+            // 1. Initiate the enterprise opportunity discovery scan
+            const scanInitiation = await opportunityApi.discoverOpportunities({
               force_refresh: true,
               include_strategy_recommendations: true
             });
 
-            if (!scanResponse.data?.success) {
-              throw new Error(scanResponse.data?.message || 'Opportunity scan failed');
+            if (!scanInitiation?.success) {
+              throw new Error(scanInitiation?.message || 'Opportunity scan failed');
             }
 
-            pushWorkflowLog('info', `Scan initiated with ID: ${scanResponse.data.scan_id}`);
+            logMessage('info', `Scan initiated with ID: ${scanInitiation.scan_id}`);
 
-            // 2. Poll for scan results
-            let scanResult;
+            // 2. Poll for scan results using the new async pattern
+            let scanResult: OpportunityDiscoveryResponse | null = null;
             let pollAttempts = 0;
-            const maxPollAttempts = 40; // 40 attempts × 3 seconds = 120 seconds max
-            const pollIntervalMs = 3000; // 3 second intervals (matches backend recommendation)
+            const pollIntervalMs = (scanInitiation.polling_interval_seconds ?? 3) * 1000;
+            const estimatedRuntimeMs = (scanInitiation.estimated_completion_seconds ?? 120) * 1000;
+            const maxWaitMs = Math.max(120_000, Math.floor(estimatedRuntimeMs * 1.5));
+            const maxPollAttempts = Math.max(40, Math.ceil(maxWaitMs / Math.max(pollIntervalMs, 1000)));
             let consecutiveErrors = 0;
+            let lastNotFoundLoggedAt = -1;
+            let notFoundStreak = 0;
+            let lastPartialResults: DiscoveryOpportunity[] = [];
+
+            const attemptEarlyResultFetch = async (): Promise<OpportunityDiscoveryResponse | null> => {
+              try {
+                return await opportunityApi.getScanResults(scanInitiation.scan_id);
+              } catch (error) {
+                if (error instanceof OpportunityApiError) {
+                  const pendingCodes = ['SCAN_IN_PROGRESS', '202', '404', 'SCAN_NOT_FOUND'];
+                  if (pendingCodes.includes(error.code ?? '')) {
+                    return null;
+                  }
+                }
+
+                throw error;
+              }
+            };
 
             while (pollAttempts < maxPollAttempts) {
               await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
               pollAttempts++;
 
               try {
-                const statusResponse = await apiClient.get(`/opportunities/status/${scanResponse.data.scan_id}`);
+                const statusResponse = await opportunityApi.getScanStatus(scanInitiation.scan_id);
 
                 // Reset error counter on successful response
                 consecutiveErrors = 0;
 
-                if (statusResponse.data?.status === 'completed') {
-                  scanResult = statusResponse.data;
-                  pushWorkflowLog('success', 'Scan completed successfully!');
-                  break;
-                } else if (statusResponse.data?.status === 'failed') {
-                  const failureReason = statusResponse.data?.error || 'Scan failed';
-                  pushWorkflowLog('error', `Scan failed: ${failureReason}`);
-                  throw new Error(failureReason);
-                } else if (statusResponse.data?.status === 'running') {
-                  // Update progress
-                  const progress = statusResponse.data?.progress;
-                  if (progress) {
-                    pushWorkflowLog('info', `Scanning... ${progress.strategies_completed}/${progress.total_strategies} strategies`);
-                  } else {
-                    pushWorkflowLog('info', `Scan in progress (attempt ${pollAttempts}/${maxPollAttempts})...`);
+                const normalizedStatus = (statusResponse.status || '').toLowerCase();
+
+                switch (normalizedStatus) {
+                  case 'complete': {
+                    logMessage('success', 'Scan completed successfully! Fetching results...');
+
+                    const results = await attemptEarlyResultFetch();
+                    if (results) {
+                      scanResult = results;
+                      logMessage('success', `Retrieved ${results.total_opportunities} opportunities.`);
+                      break;
+                    }
+
+                    logMessage('info', 'Results not ready yet. Waiting for backend to finalize...');
+                    break;
                   }
-                } else {
-                  // Unknown status
-                  pushWorkflowLog('warning', `Unknown scan status: ${statusResponse.data?.status}`);
+                  case 'scanning':
+                  case 'running':
+                  case 'in_progress':
+                  case 'processing':
+                  case 'queued':
+                  case 'pending':
+                  case 'initiated':
+                  case 'initializing': {
+                    notFoundStreak = 0;
+                    const progress = statusResponse.progress;
+                    if (progress) {
+                      logMessage(
+                        'info',
+                        `Scanning... ${progress.strategies_completed}/${progress.total_strategies} strategies (${progress.percentage ?? 0}%)`
+                      );
+                    } else {
+                      logMessage('info', `Scan in progress (attempt ${pollAttempts}/${maxPollAttempts})...`);
+                    }
+
+                    if (Array.isArray(statusResponse.partial_results) && statusResponse.partial_results.length > 0) {
+                      lastPartialResults = statusResponse.partial_results;
+                    }
+
+                    if (pollAttempts >= 3 && pollAttempts % 5 === 0) {
+                      const results = await attemptEarlyResultFetch();
+                      if (results) {
+                        scanResult = results;
+                        logMessage('success', `Retrieved ${results.total_opportunities} opportunities.`);
+                        break;
+                      }
+                    }
+                    break;
+                  }
+                  case 'not_found': {
+                    notFoundStreak++;
+                    // Avoid spamming the log with the same message
+                    if (lastNotFoundLoggedAt !== pollAttempts) {
+                      logMessage('warning', 'Scan not yet registered - waiting for backend to initialise the job...');
+                      lastNotFoundLoggedAt = pollAttempts;
+                    }
+
+                    if (notFoundStreak >= 3) {
+                      const results = await attemptEarlyResultFetch();
+                      if (results) {
+                        scanResult = results;
+                        logMessage('success', `Retrieved ${results.total_opportunities} opportunities.`);
+                        break;
+                      }
+                    }
+                    break;
+                  }
+                  case 'failed': {
+                    const failureReason = statusResponse.message || 'Scan failed';
+                    logMessage('error', `Scan failed: ${failureReason}`);
+                    throw new Error(failureReason);
+                  }
+                  default: {
+                    logMessage('warning', `Unexpected scan status: ${statusResponse.status}`);
+                  }
+                }
+
+                if (scanResult) {
+                  break;
                 }
               } catch (pollError: any) {
                 consecutiveErrors++;
 
-                // Extract detailed error information
-                const statusCode = pollError?.response?.status;
-                const errorDetail = pollError?.response?.data?.detail || pollError?.response?.data?.message;
-                const errorMsg = pollError?.message || 'Unknown error';
+                if (pollError instanceof OpportunityApiError) {
+                  const statusCode = pollError.code;
 
-                // Log detailed error to execution log
-                if (statusCode === 500) {
-                  pushWorkflowLog('error', `Backend service error (500): ${errorDetail || errorMsg}`);
-                  pushWorkflowLog('error', 'Internal server error occurred. Check backend logs for details.');
-                } else if (statusCode === 404) {
-                  pushWorkflowLog('error', `Scan not found (404) - scan_id may be invalid or scan was not created`);
-                } else if (statusCode === 401 || statusCode === 403) {
-                  pushWorkflowLog('error', `Authentication error (${statusCode}): ${errorDetail || errorMsg}`);
-                } else if (pollError?.code === 'ECONNABORTED' || pollError?.code === 'ETIMEDOUT') {
-                  pushWorkflowLog('warning', `Request timeout (attempt ${pollAttempts}/${maxPollAttempts})`);
+                  if (statusCode === '401' || statusCode === '403') {
+                    logMessage('error', `Authentication error (${statusCode}): ${pollError.message}`);
+                  } else if (statusCode === '404' || statusCode === 'SCAN_NOT_FOUND') {
+                    logMessage('error', `Scan not found (${statusCode}) - please initiate a new scan.`);
+                    throw pollError;
+                  } else if (statusCode === '500') {
+                    logMessage('error', `Backend service error (500): ${pollError.message}`);
+                  } else {
+                    logMessage('error', `Polling error (${statusCode || 'unknown'}): ${pollError.message}`);
+                  }
                 } else {
-                  pushWorkflowLog('error', `Polling error (${statusCode || 'network'}): ${errorDetail || errorMsg}`);
+                  // Extract detailed error information if available from Axios
+                  const statusCode = pollError?.response?.status;
+                  const errorDetail = pollError?.response?.data?.detail || pollError?.response?.data?.message;
+                  const errorMsg = pollError?.message || 'Unknown error';
+
+                  if (statusCode === 500) {
+                    logMessage('error', `Backend service error (500): ${errorDetail || errorMsg}`);
+                    logMessage('error', 'Internal server error occurred. Check backend logs for details.');
+                  } else if (statusCode === 404) {
+                    logMessage('error', `Scan not found (404) - scan_id may be invalid or scan was not created`);
+                  } else if (statusCode === 401 || statusCode === 403) {
+                    logMessage('error', `Authentication error (${statusCode}): ${errorDetail || errorMsg}`);
+                  } else if (pollError?.code === 'ECONNABORTED' || pollError?.code === 'ETIMEDOUT') {
+                    logMessage('warning', `Request timeout (attempt ${pollAttempts}/${maxPollAttempts})`);
+                  } else {
+                    logMessage('error', `Polling error (${statusCode || 'network'}): ${errorDetail || errorMsg}`);
+                  }
                 }
 
                 // If we have 3+ consecutive errors, fail fast
                 if (consecutiveErrors >= 3) {
-                  pushWorkflowLog('error', `Aborting scan after ${consecutiveErrors} consecutive errors`);
-                  const error = new Error(`Backend service unavailable - ${consecutiveErrors} consecutive ${statusCode || 'network'} errors`);
+                  logMessage('error', `Aborting scan after ${consecutiveErrors} consecutive errors`);
+                  const error = new Error(`Backend service unavailable - ${consecutiveErrors} consecutive errors`);
                   error.cause = pollError;
                   throw error;
                 }
 
-                // For non-critical errors, continue polling
-                if (statusCode !== 404 && statusCode !== 401 && statusCode !== 403) {
-                  pushWorkflowLog('info', `Retrying... (${consecutiveErrors} consecutive errors)`);
-                  continue;
-                } else {
-                  // Critical auth/not-found errors should fail immediately
-                  const error = new Error(`Critical error (${statusCode}): ${errorDetail || errorMsg}`);
-                  error.cause = pollError;
-                  throw error;
+                logMessage('info', `Retrying... (${consecutiveErrors} consecutive errors)`);
+                continue;
+              }
+            }
+
+            if (!scanResult) {
+              try {
+                const finalResults = await attemptEarlyResultFetch();
+                if (finalResults) {
+                  scanResult = finalResults;
+                  logMessage('success', `Retrieved ${finalResults.total_opportunities} opportunities.`);
+                }
+              } catch (finalError) {
+                if (
+                  !(finalError instanceof OpportunityApiError &&
+                  (finalError.code === 'SCAN_IN_PROGRESS' || finalError.code === 'SCAN_NOT_FOUND'))
+                ) {
+                  throw finalError;
                 }
               }
             }
 
             if (!scanResult) {
-              pushWorkflowLog('error', 'Scan timeout - taking longer than 120 seconds');
-              throw new Error('Scan timeout - taking longer than expected. The scan may still be running in the background.');
+              if (lastPartialResults.length > 0) {
+                logMessage('warning', 'Scan timed out - using latest partial results while backend continues processing.');
+                scanResult = {
+                  success: true,
+                  scan_id: scanInitiation.scan_id,
+                  user_id: user?.id || 'unknown',
+                  opportunities: lastPartialResults,
+                  total_opportunities: lastPartialResults.length,
+                  signal_analysis: null,
+                  threshold_transparency: null,
+                  user_profile: {},
+                  strategy_performance: {},
+                  asset_discovery: {},
+                  strategy_recommendations: [],
+                  execution_time_ms: 0,
+                  last_updated: new Date().toISOString(),
+                  fallback_used: true
+                };
+              } else {
+                logMessage('error', `Scan timeout - taking longer than ${Math.round(maxWaitMs / 1000)} seconds`);
+                throw new Error('Scan timeout - taking longer than expected. The scan may still be running in the background.');
+              }
             }
 
             // 3. Parse opportunities from scan result
-            const opportunities = scanResult?.opportunities || [];
+            const opportunities = scanResult.opportunities || [];
 
-            pushWorkflowLog('success', `Found ${opportunities.length} opportunities from your active strategies!`);
+            logMessage('success', `Found ${opportunities.length} opportunities from your active strategies!`);
 
             // 2. Map opportunities from discovery service to our Opportunity type
             // These are already pre-validated by the strategy engine

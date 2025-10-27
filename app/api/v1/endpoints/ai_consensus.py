@@ -35,6 +35,7 @@ from app.services.master_controller import master_controller
 from app.services.api_cost_tracker import api_cost_tracker, APIProvider
 from app.services.emergency_manager import emergency_manager
 from app.services.rate_limit import rate_limiter
+from app.services.profit_sharing_service import profit_sharing_service
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -157,6 +158,65 @@ class AIConsensusRequest(BaseModel):
         if v not in valid_strategies:
             raise ValueError(f'AI models strategy must be one of: {valid_strategies}')
         return v
+
+
+class AIPricingResponse(BaseModel):
+    success: bool
+    opportunity_scan_cost: float
+    validation_cost: float
+    execution_cost: float
+    per_call_estimate: float
+    platform_fee_percentage: float
+    credit_to_profit_ratio: float
+    credit_to_dollar_cost: float
+
+
+@router.get("/pricing", response_model=AIPricingResponse)
+async def get_ai_pricing_configuration(
+    current_user: User = Depends(get_current_user)
+):
+    """Return AI operation pricing derived from the credit and profit-sharing configuration."""
+
+    await rate_limiter.check_rate_limit(
+        key="ai:pricing",
+        limit=120,
+        window=60,
+        user_id=str(current_user.id)
+    )
+
+    try:
+        await profit_sharing_service.ensure_pricing_loaded()
+        pricing_config = await profit_sharing_service.get_current_pricing_config()
+
+        platform_fee_percentage = float(pricing_config.get("platform_fee_percentage", 25.0))
+        credit_to_profit_ratio = float(pricing_config.get("credit_to_profit_ratio", 4.0))
+        credit_to_dollar_cost = float(pricing_config.get("credit_to_dollar_cost", 1.0))
+
+        # Derive AI feature costs from credit pricing. These values remain small to reflect per-call usage.
+        per_call_estimate = round(credit_to_dollar_cost * 0.05, 2) or 0.05
+        opportunity_scan_cost = round(max(1.0, credit_to_dollar_cost * 1.0), 2)
+        validation_cost = round(max(0.5, credit_to_dollar_cost * 0.5), 2)
+        execution_cost = round(max(2.0, credit_to_dollar_cost * 2.0), 2)
+
+        return AIPricingResponse(
+            success=True,
+            opportunity_scan_cost=opportunity_scan_cost,
+            validation_cost=validation_cost,
+            execution_cost=execution_cost,
+            per_call_estimate=per_call_estimate,
+            platform_fee_percentage=platform_fee_percentage,
+            credit_to_profit_ratio=credit_to_profit_ratio,
+            credit_to_dollar_cost=credit_to_dollar_cost,
+        )
+    except Exception as exc:  # pragma: no cover - defensive logging
+        logger.exception(
+            "Failed to load AI pricing configuration",
+            user_id=str(current_user.id),
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to load AI pricing configuration"
+        ) from exc
 
 
 class OpportunityAnalysisRequest(AIConsensusRequest):
