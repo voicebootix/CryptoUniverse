@@ -954,8 +954,9 @@ const ManualTradingPage: React.FC = () => {
                   reason: `Strategy-validated opportunity: ${opp.strategy_name}`,
                   model_responses: [],
                   risk_assessment: {
-                    risk_level: opp.risk_level || 'medium',
-                    risk_score: 0
+                    level: (opp.risk_level?.toUpperCase() || 'MEDIUM') as 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL',
+                    max_loss: opp.stop_loss ? Math.abs(opp.entry_price - opp.stop_loss) * (opp.suggested_position_size || 0) : 0,
+                    max_loss_percent: opp.stop_loss ? Math.abs((opp.stop_loss - opp.entry_price) / opp.entry_price) * 100 : 0
                   }
                 },
                 validationReason: undefined
