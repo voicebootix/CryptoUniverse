@@ -830,8 +830,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
             await self._preload_price_universe(discovered_assets, user_profile, scan_id)
 
-            # Reset transient caches so per-scan price lookups coalesce cleanly
-            trading_strategies_service.reset_transient_caches()
+            # Cache TTL handles expiration automatically; no need to clear globally
+            # This allows strategies to share cached prices during the scan
 
             # STEP 5: Run opportunity discovery across all user's strategies
             all_opportunities = []
@@ -865,11 +865,15 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             concurrency_limit = 15  # Run max 15 strategies concurrently (increased from 3)
             strategy_semaphore = asyncio.Semaphore(concurrency_limit)
 
-            # Calculate per-strategy timeout from total scan budget, accounting for concurrency
+            # Calculate remaining budget for strategy scans, accounting for time already spent
+            elapsed_since_start = time.time() - discovery_start_time
+            remaining_budget = max(10.0, self._scan_response_budget - elapsed_since_start)
+
+            # Calculate per-strategy timeout from remaining budget, accounting for concurrency
             # With 15 concurrent strategies, we process in batches, so timeout should reflect batch time
             batches = max(1, math.ceil(total_strategies / concurrency_limit))
-            # Allocate budget per batch; allow longer-running strategies to finish (upper bound 240s for heavy scanners)
-            per_strategy_timeout_s = max(10.0, min(240.0, self._scan_response_budget / batches))
+            # Allocate remaining budget per batch; allow longer-running strategies to finish (upper bound 240s for heavy scanners)
+            per_strategy_timeout_s = max(10.0, min(240.0, remaining_budget / batches))
 
             async def scan_strategy_with_semaphore(strategy_info, strategy_index):
                 strategy_identifier = strategy_info.get("strategy_id", "Unknown")

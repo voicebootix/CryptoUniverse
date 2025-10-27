@@ -11,7 +11,7 @@ import copy
 import json
 import random
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Any, Tuple
 
 import aiohttp
@@ -58,6 +58,8 @@ class MarketDataFeeds:
         self.redis = None
         self._local_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
         self._cache_lock = asyncio.Lock()
+        self._local_cache_max = int(getattr(settings, "LOCAL_CACHE_MAX_KEYS", 5000))
+        self._bg_tasks = set()
         
         # Load API keys from environment
         self.api_keys = {
@@ -282,6 +284,10 @@ class MarketDataFeeds:
     async def _cache_local(self, cache_key: str, ttl_seconds: int, payload: Dict[str, Any]) -> None:
         expires_at = self._monotonic() + ttl_seconds
         async with self._cache_lock:
+            # Evict oldest if at capacity
+            if self._local_cache_max and len(self._local_cache) >= self._local_cache_max:
+                oldest_key = min(self._local_cache, key=lambda k: self._local_cache[k][0])
+                self._local_cache.pop(oldest_key, None)
             self._local_cache[cache_key] = (expires_at, copy.deepcopy(payload))
 
     def _parse_cached_at(self, cached_at: Optional[str]) -> Optional[datetime]:
@@ -292,7 +298,8 @@ class MarketDataFeeds:
             value = cached_at
             if isinstance(value, str) and value.endswith("Z"):
                 value = value[:-1] + "+00:00"
-            return datetime.fromisoformat(value)
+            dt = datetime.fromisoformat(value)
+            return dt if getattr(dt, "tzinfo", None) else dt.replace(tzinfo=timezone.utc)
         except Exception:
             return None
 
@@ -304,7 +311,7 @@ class MarketDataFeeds:
             prepared = {"success": True, "data": copy.deepcopy(payload)}
 
         metadata = prepared.setdefault("metadata", {})
-        now_iso = datetime.utcnow().isoformat()
+        now_iso = datetime.now(timezone.utc).isoformat()
         metadata.setdefault("cached_at", now_iso)
         metadata.setdefault("served_from", "live")
         metadata.setdefault("cache_origin", metadata.get("source", "unknown"))
@@ -318,13 +325,16 @@ class MarketDataFeeds:
 
         cached_at = self._parse_cached_at(metadata.get("cached_at"))
         if cached_at is None:
-            cached_at = datetime.utcnow()
+            cached_at = datetime.now(timezone.utc)
             metadata["cached_at"] = cached_at.isoformat()
+        elif getattr(cached_at, "tzinfo", None) is None:
+            cached_at = cached_at.replace(tzinfo=timezone.utc)
 
         freshness_window = self.cache_freshness_seconds.get(ttl_key)
         is_stale = False
         if freshness_window is not None:
-            is_stale = (datetime.utcnow() - cached_at).total_seconds() > freshness_window
+            now_utc = datetime.now(timezone.utc)
+            is_stale = (now_utc - cached_at).total_seconds() > freshness_window
 
         metadata["stale"] = is_stale
         metadata["served_from"] = "cache"
@@ -442,7 +452,9 @@ class MarketDataFeeds:
                     error=str(exc),
                 )
 
-        loop.create_task(_sync())
+        task = loop.create_task(_sync())
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
     
     async def _check_rate_limit(self, api_name: str) -> bool:
         """ENTERPRISE: Check rate limits with circuit breaker protection."""
@@ -509,17 +521,7 @@ class MarketDataFeeds:
             # Record success in circuit breaker
             await circuit_breaker._record_success()
             logger.debug(f"Circuit breaker success recorded for {api_name}")
-    
-    async def _check_circuit_breaker(self, api_name: str) -> bool:
-        """Check if API call should be allowed by circuit breaker."""
-        if not self.circuit_breakers_enabled:
-            return True
-            
-        circuit_breaker = self.circuit_breakers.get(api_name)
-        if circuit_breaker:
-            return await circuit_breaker._should_try()
-        return True
-    
+
     def _get_api_params(self, api_name: str, base_params: Dict = None) -> Dict[str, Any]:
         """Get API parameters including API key if required."""
         params = base_params or {}
@@ -586,7 +588,14 @@ class MarketDataFeeds:
             cache_key = f"price:{symbol}"
             cached_data = await self._get_cached_response(cache_key, "price")
             if cached_data:
-                return cached_data
+                # Check if cached data is stale before returning it
+                metadata = cached_data.get("metadata", {}) if isinstance(cached_data, dict) else {}
+                is_stale = metadata.get("stale", False)
+
+                # Only return cached data if it's fresh
+                if not is_stale:
+                    return cached_data
+                # If stale, fall through to attempt fresh API call
 
             # Try APIs in order of preference with rate limiting
             apis_to_try = [
@@ -1341,19 +1350,6 @@ class MarketDataFeeds:
             asset_id = self.symbol_mappings["coincap"][symbol]
             url = f"{self.apis['coincap']['base_url']}/assets/{asset_id}"
 
-            if self.circuit_breakers_enabled and not await self._check_circuit_breaker("coincap"):
-                cached = await self._load_cached_price_entry(symbol)
-                if cached:
-                    return {
-                        "success": True,
-                        "data": cached,
-                        "metadata": {
-                            "source": "cache",
-                            "circuit_open": True,
-                        },
-                    }
-                return {"success": False, "error": "CoinCap temporarily unavailable"}
-
             timeout = aiohttp.ClientTimeout(total=10)
             max_retries = 3
             base_delay = 0.5
@@ -1452,12 +1448,6 @@ class MarketDataFeeds:
 
             max_retries = 3
             base_delay = 1.0
-
-            if self.circuit_breakers_enabled and not await self._check_circuit_breaker("coingecko"):
-                cached_payload = await self._get_cached_response(f"detailed:{symbol}", "detailed")
-                if cached_payload:
-                    return cached_payload
-                return {"success": False, "error": "CoinGecko temporarily unavailable"}
 
             timeout = aiohttp.ClientTimeout(total=30)
             last_error: Optional[Exception] = None

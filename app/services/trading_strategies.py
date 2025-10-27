@@ -288,17 +288,15 @@ class PriceResolverMixin:
 
     def _ensure_price_cache_containers(self) -> Tuple[
         Dict[Tuple[str, str], Dict[str, Any]],
-        Dict[Tuple[str, str], asyncio.Future],
+        Dict[Tuple[str, str], asyncio.Task],
     ]:
-        cache = getattr(self, "_price_cache", None)
-        if cache is None:
-            cache = {}
-            setattr(self, "_price_cache", cache)
+        if not hasattr(self, "_price_cache"):
+            self._price_cache = {}
+        cache = self._price_cache
 
-        inflight = getattr(self, "_price_cache_inflight", None)
-        if inflight is None:
-            inflight = {}
-            setattr(self, "_price_cache_inflight", inflight)
+        if not hasattr(self, "_price_cache_inflight"):
+            self._price_cache_inflight = {}
+        inflight = self._price_cache_inflight
 
         return cache, inflight
 
