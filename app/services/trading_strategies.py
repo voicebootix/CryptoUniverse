@@ -29,6 +29,8 @@ Integrates with Trade Execution Service for order placement.
 """
 
 import asyncio
+import contextlib
+import copy
 import json
 import time
 from datetime import datetime, timedelta
@@ -281,13 +283,42 @@ class ExchangeConfigurationsFutures:
 class PriceResolverMixin:
     """Shared helper for resolving spot prices across strategy engines."""
 
-    async def _get_symbol_price(self, exchange: str, symbol: str) -> Dict[str, Any]:
-        """Resolve the latest market price for the supplied symbol.
+    _DEFAULT_PRICE_CACHE_TTL = 30.0
+    _DEFAULT_PRICE_CACHE_CAPACITY = 512
 
-        The helper mirrors the implementation that previously lived only on the
-        top-level ``TradingStrategiesService`` so that derivative and spot
-        engines can consistently access live pricing without duplicating logic.
-        """
+    def _ensure_price_cache_containers(self) -> Tuple[
+        Dict[Tuple[str, str], Dict[str, Any]],
+        Dict[Tuple[str, str], asyncio.Future],
+    ]:
+        cache = getattr(self, "_price_cache", None)
+        if cache is None:
+            cache = {}
+            setattr(self, "_price_cache", cache)
+
+        inflight = getattr(self, "_price_cache_inflight", None)
+        if inflight is None:
+            inflight = {}
+            setattr(self, "_price_cache_inflight", inflight)
+
+        return cache, inflight
+
+    def reset_transient_caches(self) -> None:
+        cache = getattr(self, "_price_cache", None)
+        if isinstance(cache, dict):
+            cache.clear()
+
+        inflight = getattr(self, "_price_cache_inflight", None)
+        if isinstance(inflight, dict):
+            inflight.clear()
+
+    def _get_price_cache_ttl(self) -> float:
+        return float(getattr(self, "_price_cache_ttl", self._DEFAULT_PRICE_CACHE_TTL))
+
+    def _get_price_cache_capacity(self) -> int:
+        return int(getattr(self, "_price_cache_capacity", self._DEFAULT_PRICE_CACHE_CAPACITY))
+
+    async def _get_symbol_price(self, exchange: str, symbol: str) -> Dict[str, Any]:
+        """Resolve the latest market price for the supplied symbol with caching and fallbacks."""
 
         target_exchange = (exchange or "").strip().lower() or "binance"
         if target_exchange in {"auto", "spot", "default"}:
@@ -337,60 +368,98 @@ class PriceResolverMixin:
             except (TypeError, ValueError):
                 return default
 
-        try:
-            price_payload = await market_analysis_service.get_exchange_price(
-                target_exchange,
-                normalized_symbol,
-            )
-            if isinstance(price_payload, dict) and price_payload.get("price") is not None:
-                return {
-                    "success": True,
-                    "price": _safe_number(price_payload.get("price"), 0.0),
-                    "symbol": normalized_symbol,
-                    "volume": _safe_number(
-                        price_payload.get("volume") or price_payload.get("volume_24h"),
-                        0.0,
-                    ),
-                    "change_24h": _safe_number(price_payload.get("change_24h"), 0.0),
-                    "timestamp": price_payload.get("timestamp", datetime.utcnow().isoformat()),
-                }
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            if hasattr(self, "logger"):
-                self.logger.warning(
-                    "Primary price fetch failed",
-                    exchange=target_exchange,
-                    symbol=normalized_symbol,
-                    error=str(exc),
-                )
+        cache_key = (target_exchange, normalized_symbol)
+        cache, inflight = self._ensure_price_cache_containers()
+        now = time.monotonic()
+        cache_entry = cache.get(cache_key)
+        if cache_entry and cache_entry["expires_at"] > now:
+            return copy.deepcopy(cache_entry["payload"])
 
-        base_symbol = normalized_symbol.split("/", 1)[0]
-        try:
-            snapshot = await market_data_feeds.get_market_snapshot(base_symbol)
-            if snapshot.get("success"):
-                data = snapshot.get("data", {})
-                price = data.get("price")
-                if price is not None:
+        existing_task = inflight.get(cache_key)
+        if existing_task is not None:
+            try:
+                result = await existing_task
+                return copy.deepcopy(result)
+            except Exception:
+                inflight.pop(cache_key, None)
+
+        async def _resolve_price() -> Dict[str, Any]:
+            try:
+                price_payload = await market_analysis_service.get_exchange_price(
+                    target_exchange,
+                    normalized_symbol,
+                )
+                if isinstance(price_payload, dict) and price_payload.get("price") is not None:
                     return {
                         "success": True,
-                        "price": _safe_number(price, 0.0),
+                        "price": _safe_number(price_payload.get("price"), 0.0),
                         "symbol": normalized_symbol,
-                        "volume": _safe_number(data.get("volume_24h"), 0.0),
-                        "change_24h": _safe_number(data.get("change_24h"), 0.0),
-                        "timestamp": data.get("timestamp", datetime.utcnow().isoformat()),
+                        "volume": _safe_number(
+                            price_payload.get("volume") or price_payload.get("volume_24h"),
+                            0.0,
+                        ),
+                        "change_24h": _safe_number(price_payload.get("change_24h"), 0.0),
+                        "timestamp": price_payload.get("timestamp", datetime.utcnow().isoformat()),
                     }
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            if hasattr(self, "logger"):
-                self.logger.warning(
-                    "Market snapshot fallback failed",
-                    symbol=normalized_symbol,
-                    error=str(exc),
-                )
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                if hasattr(self, "logger"):
+                    self.logger.warning(
+                        "Primary price fetch failed",
+                        exchange=target_exchange,
+                        symbol=normalized_symbol,
+                        error=str(exc),
+                    )
 
-        return {"success": False, "error": f"Price unavailable for {normalized_symbol}"}
+            base_symbol = normalized_symbol.split("/", 1)[0]
+            try:
+                snapshot = await market_data_feeds.get_market_snapshot(base_symbol)
+                if snapshot.get("success"):
+                    data = snapshot.get("data", {})
+                    price = data.get("price")
+                    if price is not None:
+                        return {
+                            "success": True,
+                            "price": _safe_number(price, 0.0),
+                            "symbol": normalized_symbol,
+                            "volume": _safe_number(data.get("volume_24h"), 0.0),
+                            "change_24h": _safe_number(data.get("change_24h"), 0.0),
+                            "timestamp": data.get("timestamp", datetime.utcnow().isoformat()),
+                        }
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                if hasattr(self, "logger"):
+                    self.logger.warning(
+                        "Market snapshot fallback failed",
+                        symbol=normalized_symbol,
+                        error=str(exc),
+                    )
+
+            return {"success": False, "error": f"Price unavailable for {normalized_symbol}"}
+
+        loop = asyncio.get_running_loop()
+        task = loop.create_task(_resolve_price())
+        inflight[cache_key] = task
+        try:
+            payload = await task
+        finally:
+            inflight.pop(cache_key, None)
+
+        if payload.get("success"):
+            ttl_seconds = self._get_price_cache_ttl()
+            cache_capacity = self._get_price_cache_capacity()
+            expires_at = now + max(ttl_seconds, 0.0)
+            if len(cache) >= cache_capacity:
+                oldest_key = min(cache.items(), key=lambda item: item[1]["expires_at"])[0]
+                cache.pop(oldest_key, None)
+            cache[cache_key] = {
+                "expires_at": expires_at,
+                "payload": copy.deepcopy(payload),
+            }
+
+        return copy.deepcopy(payload)
 
 
 class DerivativesEngine(LoggerMixin, PriceResolverMixin):
@@ -1479,6 +1548,12 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
         self._platform_strategy_ids: Dict[str, str] = {}
         self._platform_strategy_lock = asyncio.Lock()
         self._platform_strategy_owner_id: Optional[uuid.UUID] = None
+
+        # Transient price cache tuning for strategy scans
+        self._price_cache: Dict[Tuple[str, str], Dict[str, Any]] = {}
+        self._price_cache_inflight: Dict[Tuple[str, str], asyncio.Future] = {}
+        self._price_cache_ttl = 45.0  # slightly longer than a single scan burst
+        self._price_cache_capacity = 512
 
     async def get_platform_strategy_id(self, function_name: str) -> Optional[str]:
         """Return the UUID for a platform AI strategy function."""
@@ -5534,9 +5609,11 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
                 "risk_assessment": {}
             }
             
-            # Get price data for both symbols
-            price_a_data = await self._get_symbol_price("binance", f"{symbol_a}USDT")
-            price_b_data = await self._get_symbol_price("binance", f"{symbol_b}USDT")
+            # Get price data for both symbols concurrently
+            price_a_data, price_b_data = await asyncio.gather(
+                self._get_symbol_price("binance", f"{symbol_a}USDT"),
+                self._get_symbol_price("binance", f"{symbol_b}USDT"),
+            )
             
             price_a = float(price_a_data.get("price", 0)) if price_a_data else 0
             price_b = float(price_b_data.get("price", 0)) if price_b_data else 0
@@ -5923,7 +6000,7 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
         
         try:
             params = parameters or {}
-            
+
             mm_result = {
                 "symbol": symbol,
                 "strategy_type": strategy_type,
@@ -5933,16 +6010,21 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
                 "profitability_analysis": {},
                 "risk_controls": {}
             }
-            
+
+            volatility_task = asyncio.create_task(self._estimate_daily_volatility(symbol))
+
             # Get current market data
             price_data = await self._get_symbol_price(exchange, symbol)
             current_price = float(price_data.get("price", 0)) if price_data else 0
-            
+
             if current_price <= 0:
+                volatility_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await volatility_task
                 return {
                     "success": False,
                     "error": f"Unable to get real price for {symbol}",
-                    "function": "scalping_strategy"
+                    "function": "market_making"
                 }
             
             # Market microstructure analysis
@@ -5950,13 +6032,15 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
             order_book_depth = params.get("order_book_depth", 1000000)  # $1M depth
             daily_volume = float(price_data.get("volume", 1000000000)) if price_data else 1000000000
             
+            daily_volatility = await volatility_task
+
             mm_result["market_microstructure"] = {
                 "current_price": current_price,
                 "typical_spread_bps": bid_ask_spread_bps,
                 "order_book_depth_usd": order_book_depth,
                 "daily_volume_usd": daily_volume,
                 "market_impact": self._estimate_market_impact(symbol, daily_volume),
-                "volatility": await self._estimate_daily_volatility(symbol),
+                "volatility": daily_volatility,
                 "liquidity_score": min(100, daily_volume / 100000000),  # Volume-based liquidity score
                 "market_making_suitability": daily_volume > 100000000 and bid_ask_spread_bps > 5
             }
@@ -6081,7 +6165,7 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
         
         try:
             params = parameters or {}
-            
+
             scalp_result = {
                 "symbol": symbol,
                 "timeframe": timeframe,
@@ -6091,19 +6175,24 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
                 "profit_targets": {},
                 "risk_controls": {}
             }
-            
+
+            volatility_task = asyncio.create_task(self._estimate_daily_volatility(symbol))
+
             # Get current market conditions
             price_data = await self._get_symbol_price(exchange, symbol)
             if not price_data or not price_data.get("success"):
+                volatility_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await volatility_task
                 return {
                     "success": False,
                     "error": f"Unable to get price for {symbol}",
                     "function": "scalping_strategy"
                 }
             current_price = float(price_data.get("price", 0))
-            
+
             # Market condition analysis for scalping
-            daily_volatility = await self._estimate_daily_volatility(symbol)
+            daily_volatility = await volatility_task
             intraday_volatility = daily_volatility / 4  # Approximate hourly volatility
             tick_size = self._get_tick_size(symbol, exchange)
             

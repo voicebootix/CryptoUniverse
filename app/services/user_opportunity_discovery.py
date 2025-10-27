@@ -830,6 +830,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
             await self._preload_price_universe(discovered_assets, user_profile, scan_id)
 
+            # Reset transient caches so per-scan price lookups coalesce cleanly
+            trading_strategies_service.reset_transient_caches()
+
             # STEP 5: Run opportunity discovery across all user's strategies
             all_opportunities = []
             strategy_results = {}
@@ -865,8 +868,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             # Calculate per-strategy timeout from total scan budget, accounting for concurrency
             # With 15 concurrent strategies, we process in batches, so timeout should reflect batch time
             batches = max(1, math.ceil(total_strategies / concurrency_limit))
-            # Allocate budget per batch; allow longer-running strategies to finish (upper bound 180s for heavy scanners)
-            per_strategy_timeout_s = max(10.0, min(180.0, self._scan_response_budget / batches))
+            # Allocate budget per batch; allow longer-running strategies to finish (upper bound 240s for heavy scanners)
+            per_strategy_timeout_s = max(10.0, min(240.0, self._scan_response_budget / batches))
 
             async def scan_strategy_with_semaphore(strategy_info, strategy_index):
                 strategy_identifier = strategy_info.get("strategy_id", "Unknown")

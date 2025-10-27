@@ -21,8 +21,9 @@ from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
 
 import structlog
-from sqlalchemy import select, and_, desc, func
+from sqlalchemy import select, and_, desc, func, or_
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 
 from app.core.config import get_settings
 from app.core.database import get_database_session
@@ -2277,10 +2278,25 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
         async with get_database_session() as db:
             query = (
                 select(UserStrategyAccess)
+                .options(
+                    load_only(
+                        UserStrategyAccess.strategy_id,
+                        UserStrategyAccess.strategy_type,
+                        UserStrategyAccess.is_active,
+                        UserStrategyAccess.expires_at,
+                        UserStrategyAccess.metadata_json,
+                        UserStrategyAccess.subscription_type,
+                        UserStrategyAccess.credits_paid,
+                    )
+                )
                 .where(
                     and_(
                         UserStrategyAccess.user_id == user_uuid,
                         UserStrategyAccess.is_active.is_(True),
+                        or_(
+                            UserStrategyAccess.expires_at.is_(None),
+                            UserStrategyAccess.expires_at > func.now(),
+                        ),
                     )
                 )
             )
