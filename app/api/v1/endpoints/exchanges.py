@@ -1553,10 +1553,12 @@ async def retry_with_backoff(func, max_retries: int = 3, base_delay: float = 1.0
 
             # Force time resync on Kraken nonce errors
             error_str = str(e).lower()
-            if "invalid nonce" in error_str or "eapi:invalid nonce" in error_str:
-                logger.info(f"Nonce error detected on attempt {attempt + 1}, forcing time resync")
+            logger.debug(f"retry_with_backoff: error_str='{error_str}'")  # Debug logging
+            if "invalid nonce" in error_str:
+                logger.info(f"Nonce error detected on attempt {attempt + 1}, forcing time resync for error: {error_str}")
                 try:
                     await kraken_nonce_manager._sync_server_time()
+                    logger.info("Time resync completed successfully")
                 except Exception as sync_error:
                     logger.warning(f"Time resync failed: {str(sync_error)}")
 
