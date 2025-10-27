@@ -7343,6 +7343,14 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
                 except (TypeError, ValueError):
                     return None
 
+            def _safe_int(value: Any) -> int:
+                try:
+                    if value is None:
+                        return 0
+                    return int(float(value))
+                except (TypeError, ValueError):
+                    return 0
+
             data_quality = strategy_data.get("data_quality", "unknown")
             perf_result["data_quality"] = data_quality
             perf_result["status"] = strategy_data.get("status", data_quality)
@@ -7377,6 +7385,18 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
             largest_win = _safe_float(normalized_data.get("largest_win")) or 0.0
             largest_loss = _safe_float(normalized_data.get("largest_loss")) or 0.0
 
+            total_trades = _safe_int(
+                normalized_data.get("total_trades")
+                if normalized_data.get("total_trades") is not None
+                else strategy_data.get("total_trades")
+            )
+            winning_trades = _safe_int(
+                normalized_data.get("winning_trades")
+                if normalized_data.get("winning_trades") is not None
+                else strategy_data.get("winning_trades")
+            )
+            losing_trades = max(total_trades - winning_trades, 0)
+
             if any(
                 metric is None
                 for metric in [total_return, volatility, max_drawdown, win_rate, average_trade]
@@ -7410,7 +7430,10 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
                 "profit_factor": _safe_float(strategy_data.get("profit_factor")) or 0.0,
                 "average_trade_return": average_trade * 100,
                 "largest_win": largest_win * 100,
-                "largest_loss": largest_loss * 100
+                "largest_loss": largest_loss * 100,
+                "total_trades": total_trades,
+                "winning_trades": winning_trades,
+                "losing_trades": losing_trades,
             }
 
             # Risk-adjusted metrics
@@ -7466,7 +7489,7 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
             optimization_recommendations = []
 
             # Sharpe ratio optimization
-            if strategy_data.get("total_trades", 0) > 0 and sharpe_ratio < 1.0:
+            if total_trades > 0 and sharpe_ratio < 1.0:
                 optimization_recommendations.append({
                     "type": "RISK_EFFICIENCY",
                     "recommendation": "Improve risk-adjusted returns",
@@ -7486,7 +7509,7 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
                 })
             
             # Win rate optimization
-            if strategy_data.get("total_trades", 0) > 0 and perf_result["performance_metrics"]["winning_trades_pct"] < 55:
+            if total_trades > 0 and perf_result["performance_metrics"]["winning_trades_pct"] < 55:
                 optimization_recommendations.append({
                     "type": "WIN_RATE_IMPROVEMENT",
                     "recommendation": "Improve trade selection",
@@ -7525,7 +7548,7 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
                     "expected_improvement": "Target correlation <0.8"
                 })
 
-            if strategy_data.get("data_quality", "no_data") == "no_data" or strategy_data.get("total_trades", 0) == 0:
+            if strategy_data.get("data_quality", "no_data") == "no_data" or total_trades == 0:
                 perf_result["optimization_recommendations"] = []
             else:
                 perf_result["optimization_recommendations"] = optimization_recommendations

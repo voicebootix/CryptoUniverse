@@ -28,6 +28,8 @@ import structlog
 from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.database import AsyncSessionLocal
+
 from app.core.logging import LoggerMixin
 from app.services.portfolio_risk import (
     OptimizationStrategy, TradingMode, RiskFunction,
@@ -2059,7 +2061,6 @@ class PortfolioRiskServiceExtended(PortfolioRiskService):
             self.logger.info(f"Getting portfolio status for user {user_id}")
 
             # Get real exchange balances from database
-            from app.core.database import AsyncSessionLocal
             from app.models.exchange import ExchangeBalance, ExchangeAccount
             from sqlalchemy import select, and_
             from sqlalchemy.orm import selectinload
@@ -2215,7 +2216,6 @@ class PortfolioRiskServiceExtended(PortfolioRiskService):
         """Enterprise portfolio performance analytics used for emergency detection."""
 
         try:
-            from app.core.database import AsyncSessionLocal
             from app.models.trading import Trade, Portfolio, PortfolioSnapshot, TradeStatus
             from sqlalchemy import select, and_
 
@@ -2378,7 +2378,6 @@ class PortfolioRiskServiceExtended(PortfolioRiskService):
         
         try:
             from datetime import timedelta
-            from app.core.database import AsyncSessionLocal
             from app.models.trading import Portfolio
             
             # ENTERPRISE APPROACH: Sophisticated historical analysis with OPTIMIZED queries
@@ -2672,7 +2671,6 @@ class PortfolioRiskServiceExtended(PortfolioRiskService):
         """Calculate total P&L using existing cost basis data (EVIDENCE-BASED FIX)."""
         try:
             # EVIDENCE-BASED: Use existing avg_cost_basis from ExchangeBalance - much faster than historical queries
-            from app.core.database import AsyncSessionLocal
             total_pnl = 0.0
             total_cost_basis = 0.0
             total_current_value = 0.0
