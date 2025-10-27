@@ -705,6 +705,21 @@ const ManualTradingPage: React.FC = () => {
             let notFoundStreak = 0;
             let lastPartialResults: DiscoveryOpportunity[] = [];
 
+            const attemptEarlyResultFetch = async (): Promise<OpportunityDiscoveryResponse | null> => {
+              try {
+                return await opportunityApi.getScanResults(scanInitiation.scan_id);
+              } catch (error) {
+                if (error instanceof OpportunityApiError) {
+                  const pendingCodes = ['SCAN_IN_PROGRESS', '202', '404', 'SCAN_NOT_FOUND'];
+                  if (pendingCodes.includes(error.code ?? '')) {
+                    return null;
+                  }
+                }
+
+                throw error;
+              }
+            };
+
             while (pollAttempts < maxPollAttempts) {
               await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
               pollAttempts++;
@@ -721,19 +736,15 @@ const ManualTradingPage: React.FC = () => {
                   case 'complete': {
                     logMessage('success', 'Scan completed successfully! Fetching results...');
 
-                    try {
-                      const results = await opportunityApi.getScanResults(scanInitiation.scan_id);
+                    const results = await attemptEarlyResultFetch();
+                    if (results) {
                       scanResult = results;
                       logMessage('success', `Retrieved ${results.total_opportunities} opportunities.`);
                       break;
-                    } catch (resultError) {
-                      if (resultError instanceof OpportunityApiError && resultError.code === 'SCAN_IN_PROGRESS') {
-                        logMessage('info', 'Results not ready yet. Waiting for backend to finalize...');
-                        continue;
-                      }
-
-                      throw resultError;
                     }
+
+                    logMessage('info', 'Results not ready yet. Waiting for backend to finalize...');
+                    break;
                   }
                   case 'scanning':
                   case 'running':
@@ -759,25 +770,11 @@ const ManualTradingPage: React.FC = () => {
                     }
 
                     if (pollAttempts >= 3 && pollAttempts % 5 === 0) {
-                      try {
-                        const results = await opportunityApi.getScanResults(scanInitiation.scan_id);
+                      const results = await attemptEarlyResultFetch();
+                      if (results) {
                         scanResult = results;
                         logMessage('success', `Retrieved ${results.total_opportunities} opportunities.`);
                         break;
-                      } catch (resultError) {
-                        if (
-                          resultError instanceof OpportunityApiError &&
-                          (resultError.code === 'SCAN_IN_PROGRESS' || resultError.code === '202')
-                        ) {
-                          // Still processing - continue polling
-                        } else if (
-                          resultError instanceof OpportunityApiError &&
-                          (resultError.code === '404' || resultError.code === 'SCAN_NOT_FOUND')
-                        ) {
-                          // Results endpoint not ready yet - continue polling
-                        } else if (resultError) {
-                          throw resultError;
-                        }
                       }
                     }
                     break;
@@ -791,22 +788,11 @@ const ManualTradingPage: React.FC = () => {
                     }
 
                     if (notFoundStreak >= 3) {
-                      try {
-                        const results = await opportunityApi.getScanResults(scanInitiation.scan_id);
+                      const results = await attemptEarlyResultFetch();
+                      if (results) {
                         scanResult = results;
                         logMessage('success', `Retrieved ${results.total_opportunities} opportunities.`);
                         break;
-                      } catch (resultError) {
-                        if (resultError instanceof OpportunityApiError && resultError.code === 'SCAN_NOT_FOUND') {
-                          // Continue waiting - backend may still be initialising the job
-                        } else if (
-                          resultError instanceof OpportunityApiError &&
-                          (resultError.code === 'SCAN_IN_PROGRESS' || resultError.code === '202')
-                        ) {
-                          // Job is alive but still preparing
-                        } else if (resultError) {
-                          throw resultError;
-                        }
                       }
                     }
                     break;
@@ -875,9 +861,11 @@ const ManualTradingPage: React.FC = () => {
 
             if (!scanResult) {
               try {
-                const finalResults = await opportunityApi.getScanResults(scanInitiation.scan_id);
-                scanResult = finalResults;
-                logMessage('success', `Retrieved ${finalResults.total_opportunities} opportunities.`);
+                const finalResults = await attemptEarlyResultFetch();
+                if (finalResults) {
+                  scanResult = finalResults;
+                  logMessage('success', `Retrieved ${finalResults.total_opportunities} opportunities.`);
+                }
               } catch (finalError) {
                 if (
                   !(finalError instanceof OpportunityApiError &&

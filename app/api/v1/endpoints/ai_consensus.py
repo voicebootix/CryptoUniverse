@@ -209,10 +209,9 @@ async def get_ai_pricing_configuration(
             credit_to_dollar_cost=credit_to_dollar_cost,
         )
     except Exception as exc:  # pragma: no cover - defensive logging
-        logger.error(
+        logger.exception(
             "Failed to load AI pricing configuration",
             user_id=str(current_user.id),
-            error=str(exc),
         )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

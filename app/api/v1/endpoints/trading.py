@@ -516,6 +516,12 @@ async def _build_portfolio_response(
             user_id=str(current_user.id)
         )
 
+    def first_not_none(*values: Any, default: Any = None) -> Any:
+        for value in values:
+            if value is not None:
+                return value
+        return default
+
     portfolio_data: Dict[str, Any] = {}
     portfolio_fetch_error: Optional[str] = None
 
@@ -559,12 +565,12 @@ async def _build_portfolio_response(
         )
 
     positions: List[Dict[str, Any]] = portfolio_data.get("positions", []) or risk_data.get("positions", []) or []
-    total_value_usd = (
-        portfolio_data.get("total_value")
-        or portfolio_data.get("total_value_usd")
-        or risk_data.get("total_value")
-        or risk_data.get("portfolio_value")
-        or 0.0
+    total_value_usd = first_not_none(
+        portfolio_data.get("total_value"),
+        portfolio_data.get("total_value_usd"),
+        risk_data.get("total_value"),
+        risk_data.get("portfolio_value"),
+        default=0.0,
     )
 
     # If positions aren't directly available, transform from balances (real data format)
@@ -584,51 +590,81 @@ async def _build_portfolio_response(
                     "exchange": balance.get("exchange", "unknown"),
                 })
 
-    available_balance = (
-        portfolio_data.get("available_balance")
-        or risk_data.get("available_balance")
-        or risk_data.get("cash_available")
-        or 0.0
+    available_balance = first_not_none(
+        portfolio_data.get("available_balance"),
+        risk_data.get("available_balance"),
+        risk_data.get("cash_available"),
     )
-    if not available_balance and portfolio_data.get("balances"):
+    if available_balance is None and portfolio_data.get("balances"):
         stablecoins = {"USDT", "USDC", "BUSD", "DAI", "FDUSD"}
         available_balance = sum(
             balance.get("value_usd", 0.0)
             for balance in portfolio_data.get("balances", [])
             if balance.get("asset") in stablecoins
         )
+    if available_balance is None:
+        available_balance = 0.0
 
-    daily_pnl = portfolio_data.get("daily_pnl")
-    if daily_pnl is None:
-        daily_pnl = risk_data.get("daily_pnl", 0.0)
+    daily_pnl = first_not_none(
+        portfolio_data.get("daily_pnl"),
+        risk_data.get("daily_pnl"),
+        default=0.0,
+    )
 
-    total_pnl = portfolio_data.get("total_pnl")
-    if total_pnl is None:
-        total_pnl = risk_data.get("total_pnl", 0.0)
+    total_pnl = first_not_none(
+        portfolio_data.get("total_pnl"),
+        risk_data.get("total_pnl"),
+        default=0.0,
+    )
 
-    margin_used = portfolio_data.get("margin_used")
-    if margin_used is None:
-        margin_used = risk_data.get("margin_used", 0.0)
+    margin_used = first_not_none(
+        portfolio_data.get("margin_used"),
+        risk_data.get("margin_used"),
+        default=0.0,
+    )
 
-    margin_available = portfolio_data.get("margin_available")
-    if margin_available is None:
-        margin_available = risk_data.get("margin_available", 0.0)
+    margin_available = first_not_none(
+        portfolio_data.get("margin_available"),
+        risk_data.get("margin_available"),
+        default=0.0,
+    )
 
-    risk_score = portfolio_data.get("risk_score", risk_data.get("risk_score", 5.0))
-    active_orders = portfolio_data.get("active_orders", risk_data.get("active_orders", 0))
+    risk_score = first_not_none(
+        portfolio_data.get("risk_score"),
+        risk_data.get("risk_score"),
+        default=5.0,
+    )
+
+    active_orders = first_not_none(
+        portfolio_data.get("active_orders"),
+        risk_data.get("active_orders"),
+        default=0,
+    )
+
+    daily_pnl_pct = first_not_none(
+        portfolio_data.get("daily_pnl_pct"),
+        risk_data.get("daily_pnl_pct"),
+        default=0.0,
+    )
+
+    total_pnl_pct = first_not_none(
+        portfolio_data.get("total_pnl_pct"),
+        risk_data.get("total_pnl_pct"),
+        default=0.0,
+    )
 
     return PortfolioResponse(
         total_value=Decimal(str(total_value_usd)),
         available_balance=Decimal(str(available_balance)),
         positions=positions,
-        daily_pnl=Decimal(str(daily_pnl or 0)),
-        daily_pnl_pct=float(portfolio_data.get("daily_pnl_pct", risk_data.get("daily_pnl_pct", 0.0)) or 0.0),
-        total_pnl=Decimal(str(total_pnl or 0)),
-        total_pnl_pct=float(portfolio_data.get("total_pnl_pct", risk_data.get("total_pnl_pct", 0.0)) or 0.0),
-        margin_used=Decimal(str(margin_used or 0)),
-        margin_available=Decimal(str(margin_available or 0)),
-        risk_score=float(risk_score or 0),
-        active_orders=int(active_orders or 0),
+        daily_pnl=Decimal(str(daily_pnl)),
+        daily_pnl_pct=float(daily_pnl_pct),
+        total_pnl=Decimal(str(total_pnl)),
+        total_pnl_pct=float(total_pnl_pct),
+        margin_used=Decimal(str(margin_used)),
+        margin_available=Decimal(str(margin_available)),
+        risk_score=float(risk_score),
+        active_orders=int(active_orders),
     )
 
 
