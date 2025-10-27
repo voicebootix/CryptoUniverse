@@ -1558,9 +1558,12 @@ async def retry_with_backoff(func, max_retries: int = 3, base_delay: float = 1.0
 
             # Force time resync on Kraken nonce errors
             error_str = str(e).lower()
+            logger.debug(f"retry_with_backoff: error_str='{error_str}'")  # Debug logging
             if "invalid nonce" in error_str:
                 logger.info(f"Nonce error detected on attempt {attempt + 1}, setting force_resync flag")
                 # Set flag to force resync on next get_nonce() call
+                # This is the CORRECT approach - don't call _sync_server_time() directly
+                # because that updates _last_time_sync, causing get_nonce() to skip resync
                 kraken_nonce_manager._force_resync = True
 
             delay = base_delay * (2 ** attempt)
