@@ -147,24 +147,36 @@ class KrakenNonceManager:
             if force_fresh:
                 logger.info("Fetching FRESH Kraken server time (bypassing cache due to nonce error)")
             import aiohttp
+
+            # Capture time before AND after API call to account for network latency
+            before_call = time.time()
             async with aiohttp.ClientSession() as session:
                 async with session.get("https://api.kraken.com/0/public/Time", timeout=8) as response:
+                    after_call = time.time()
                     if response.status == 200:
                         data = await response.json()
                         if data.get("result") and data["result"].get("unixtime"):
                             server_time = float(data["result"]["unixtime"])
-                            self._server_time_offset = server_time - current_time
-                            self._last_time_sync = current_time
+
+                            # Account for network round-trip time in offset calculation
+                            # The server timestamp was captured at approximately the midpoint of our request
+                            round_trip_time = after_call - before_call
+                            estimated_request_time = before_call + (round_trip_time / 2)
+                            self._server_time_offset = server_time - estimated_request_time
+                            self._last_time_sync = after_call  # Use after_call time, not stale before time
 
                             # Cache for other instances
                             if self._redis:
                                 try:
                                     await self._redis.setex("kraken:server_time_offset", 180, str(self._server_time_offset))
-                                    await self._redis.setex("kraken:last_time_sync", 180, str(current_time))
+                                    await self._redis.setex("kraken:last_time_sync", 180, str(after_call))
                                 except Exception:
                                     pass  # Non-critical
 
-                            logger.info("Kraken server time synced", offset=self._server_time_offset, forced_fresh=force_fresh)
+                            logger.info("Kraken server time synced",
+                                       offset=self._server_time_offset,
+                                       forced_fresh=force_fresh,
+                                       round_trip_ms=int(round_trip_time * 1000))
                             return True
             return False
         except Exception as e:
