@@ -115,18 +115,25 @@ class KrakenNonceManager:
         if self._lock is None:
             self._lock = asyncio.Lock()
     
-    async def _sync_server_time(self) -> bool:
-        """ENTERPRISE: Distributed server time sync with Redis caching."""
+    async def _sync_server_time(self, force_fresh: bool = False) -> bool:
+        """
+        ENTERPRISE: Distributed server time sync with Redis caching.
+
+        Args:
+            force_fresh: If True, bypass cache and fetch fresh time from Kraken API.
+                        Used when nonce errors indicate the cached offset is stale.
+        """
         try:
             current_time = time.time()
             await self._init_redis()
-            
+
             # Try cached server time first (shared across instances)
-            if self._redis:
+            # SKIP cache if force_fresh=True (e.g., after nonce error)
+            if self._redis and not force_fresh:
                 try:
                     cached_offset = await self._redis.get("kraken:server_time_offset")
                     cached_sync_time = await self._redis.get("kraken:last_time_sync")
-                    
+
                     if cached_offset and cached_sync_time:
                         last_sync = float(cached_sync_time)
                         if current_time - last_sync < 120:  # 2 minute cache
@@ -137,6 +144,8 @@ class KrakenNonceManager:
                     pass  # Cache miss, fetch fresh
             
             # Fetch fresh server time
+            if force_fresh:
+                logger.info("Fetching FRESH Kraken server time (bypassing cache due to nonce error)")
             import aiohttp
             async with aiohttp.ClientSession() as session:
                 async with session.get("https://api.kraken.com/0/public/Time", timeout=8) as response:
@@ -146,7 +155,7 @@ class KrakenNonceManager:
                             server_time = float(data["result"]["unixtime"])
                             self._server_time_offset = server_time - current_time
                             self._last_time_sync = current_time
-                            
+
                             # Cache for other instances
                             if self._redis:
                                 try:
@@ -154,8 +163,8 @@ class KrakenNonceManager:
                                     await self._redis.setex("kraken:last_time_sync", 180, str(current_time))
                                 except Exception:
                                     pass  # Non-critical
-                            
-                            logger.info("Kraken server time synced", offset=self._server_time_offset)
+
+                            logger.info("Kraken server time synced", offset=self._server_time_offset, forced_fresh=force_fresh)
                             return True
             return False
         except Exception as e:
@@ -186,7 +195,8 @@ class KrakenNonceManager:
                 # Ensure server time is synchronized
                 # Force resync if flag is set (after nonce error) OR if stale (>5 minutes)
                 if self._force_resync or (time.time() - self._last_time_sync > 300):
-                    success = await self._sync_server_time()
+                    # Pass force_fresh=True when flag is set to bypass Redis cache
+                    success = await self._sync_server_time(force_fresh=self._force_resync)
                     # Only clear flag if sync succeeded, otherwise keep trying on future attempts
                     if success:
                         self._force_resync = False
