@@ -619,11 +619,6 @@ class MarketDataFeeds:
                     break
 
                 try:
-                    # ENTERPRISE: Check circuit breaker before API call
-                    if not await self._check_rate_limit(api_name):
-                        aggregated_errors.append(f"{api_name}: rate limited")
-                        continue
-
                     price_data = await asyncio.wait_for(
                         fetch_method(symbol),
                         timeout=self.api_call_timeout,
@@ -693,16 +688,6 @@ class MarketDataFeeds:
                     break
 
                 try:
-                    # Check rate limits
-                    if not await self._check_rate_limit(api_name):
-                        logger.warning(
-                            "Rate limit exceeded, trying next API",
-                            api=api_name,
-                            symbol=symbol,
-                        )
-                        aggregated_errors.append(f"{api_name}: rate limited")
-                        continue
-
                     # Attempt to fetch data with per-call timeout
                     if api_name == "coingecko":
                         result = await asyncio.wait_for(
