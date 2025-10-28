@@ -6,12 +6,12 @@ and other free sources for the AI money manager platform.
 """
 
 import asyncio
-import ast
+import copy
 import json
 import random
 import time
-from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any
+from datetime import datetime, timedelta, timezone
+from typing import Dict, List, Optional, Any, Tuple
 
 import aiohttp
 import numpy as np
@@ -55,6 +55,10 @@ class MarketDataFeeds:
     
     def __init__(self):
         self.redis = None
+        self._local_cache: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+        self._cache_lock = asyncio.Lock()
+        self._local_cache_max = int(getattr(settings, "LOCAL_CACHE_MAX_KEYS", 5000))
+        self._bg_tasks = set()
         
         # Load API keys from environment
         self.api_keys = {
@@ -145,13 +149,25 @@ class MarketDataFeeds:
             }
         
         # ENTERPRISE CACHING AND FALLBACK CONFIGURATION
+        # Redis retains entries long enough for degraded-mode operation while
+        # the "freshness" window keeps live responses tight for end users.
         self.cache_ttl = {
-            "price": 30,      # 30 seconds for prices
-            "market": 300,    # 5 minutes for market data
-            "trending": 600,  # 10 minutes for trending
-            "global": 900     # 15 minutes for global data
+            "price": 300,       # 5 minutes – allows stale-but-safe fallbacks
+            "detailed": 600,    # 10 minutes for enriched market snapshots
+            "market": 600,      # 10 minutes for market data aggregates
+            "markets": 900,     # 15 minutes for broader market tables
+            "trending": 900,    # 15 minutes for trending data
+            "global": 900,      # 15 minutes for global stats
         }
-        
+        self.cache_freshness_seconds = {
+            "price": 60,        # mark price data as stale after 1 minute
+            "detailed": 300,
+            "market": 300,
+            "markets": 600,
+            "trending": 600,
+            "global": 600,
+        }
+
         # ENTERPRISE API fallback hierarchy with circuit breaker status
         self.api_fallbacks = {
             "price": ["coingecko", "cryptocompare", "coincap", "coinpaprika"],
@@ -246,15 +262,13 @@ class MarketDataFeeds:
             }
         }
         
-        # Cache settings
-        self.cache_ttl = {
-            "price": 30,      # 30 seconds for prices
-            "detailed": 300,  # 5 minutes for detailed data
-            "markets": 600    # 10 minutes for market data
-        }
-
         # Map DeFi governance tokens to protocol level analytics endpoints
         self.defi_protocol_mappings = DEFI_PROTOCOL_MAPPINGS
+
+        # ENTERPRISE TIMEOUT + FALLBACK CONFIGURATION
+        self.api_call_timeout = float(getattr(settings, "MARKET_DATA_API_TIMEOUT", 6.0))
+        self.total_price_timeout = float(getattr(settings, "MARKET_DATA_TOTAL_TIMEOUT", 8.0))
+        self.supabase_sync_timeout = float(getattr(settings, "MARKET_DATA_SUPABASE_TIMEOUT", 1.5))
     
     async def async_init(self):
         try:
@@ -262,6 +276,187 @@ class MarketDataFeeds:
         except Exception as e:
             logger.warning("Redis not available for MarketDataFeeds", error=str(e))
             self.redis = None
+
+    def _monotonic(self) -> float:
+        return time.monotonic()
+
+    async def _cache_local(self, cache_key: str, ttl_seconds: int, payload: Dict[str, Any]) -> None:
+        expires_at = self._monotonic() + ttl_seconds
+        async with self._cache_lock:
+            # Evict oldest if at capacity
+            if self._local_cache_max and len(self._local_cache) >= self._local_cache_max:
+                oldest_key = min(self._local_cache, key=lambda k: self._local_cache[k][0])
+                self._local_cache.pop(oldest_key, None)
+            self._local_cache[cache_key] = (expires_at, copy.deepcopy(payload))
+
+    def _parse_cached_at(self, cached_at: Optional[str]) -> Optional[datetime]:
+        if not cached_at:
+            return None
+
+        try:
+            value = cached_at
+            if isinstance(value, str) and value.endswith("Z"):
+                value = value[:-1] + "+00:00"
+            dt = datetime.fromisoformat(value)
+            return dt if getattr(dt, "tzinfo", None) else dt.replace(tzinfo=timezone.utc)
+        except Exception:
+            return None
+
+    def _prepare_cache_payload(self, payload: Dict[str, Any], ttl_key: str) -> Dict[str, Any]:
+        prepared: Dict[str, Any]
+        if isinstance(payload, dict):
+            prepared = copy.deepcopy(payload)
+        else:
+            prepared = {"success": True, "data": copy.deepcopy(payload)}
+
+        metadata = prepared.setdefault("metadata", {})
+        now_iso = datetime.now(timezone.utc).isoformat()
+        metadata.setdefault("cached_at", now_iso)
+        metadata.setdefault("served_from", "live")
+        metadata.setdefault("cache_origin", metadata.get("source", "unknown"))
+        metadata["cache_ttl"] = self.cache_ttl.get(ttl_key, 30)
+
+        return prepared
+
+    def _apply_cache_metadata(self, payload: Dict[str, Any], ttl_key: str) -> Dict[str, Any]:
+        metadata = payload.setdefault("metadata", {})
+        metadata.setdefault("cache_origin", metadata.get("source", "unknown"))
+
+        cached_at = self._parse_cached_at(metadata.get("cached_at"))
+        if cached_at is None:
+            cached_at = datetime.now(timezone.utc)
+            metadata["cached_at"] = cached_at.isoformat()
+        elif getattr(cached_at, "tzinfo", None) is None:
+            cached_at = cached_at.replace(tzinfo=timezone.utc)
+
+        freshness_window = self.cache_freshness_seconds.get(ttl_key)
+        is_stale = False
+        if freshness_window is not None:
+            now_utc = datetime.now(timezone.utc)
+            is_stale = (now_utc - cached_at).total_seconds() > freshness_window
+
+        metadata["stale"] = is_stale
+        metadata["served_from"] = "cache"
+        metadata["cache_ttl"] = self.cache_ttl.get(ttl_key, 30)
+
+        return payload
+
+    def _decode_cached_payload(self, raw: Any) -> Optional[Dict[str, Any]]:
+        payload: Any = raw
+
+        if isinstance(payload, bytes):
+            try:
+                payload = payload.decode()
+            except Exception:
+                payload = payload.decode(errors="ignore") if hasattr(payload, "decode") else payload
+
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except (json.JSONDecodeError, TypeError):
+                # Cache entries must be valid JSON (written via json.dumps)
+                # This fallback should never execute in normal operation
+                logger.debug(
+                    "Failed to decode cached payload as JSON",
+                    payload_preview=payload[:100] if len(payload) > 100 else payload,
+                )
+                return None
+
+        return payload if isinstance(payload, dict) else None
+
+    async def _get_cached_response(self, cache_key: str, ttl_key: str = "price") -> Optional[Dict[str, Any]]:
+        now = self._monotonic()
+
+        async with self._cache_lock:
+            entry = self._local_cache.get(cache_key)
+            if entry:
+                expires_at, payload = entry
+                if expires_at > now:
+                    payload_copy = copy.deepcopy(payload)
+                    return self._apply_cache_metadata(payload_copy, ttl_key)
+                self._local_cache.pop(cache_key, None)
+
+        if not self.redis:
+            return None
+
+        try:
+            raw = await self.redis.get(cache_key)
+        except Exception as exc:  # pragma: no cover - defensive logging
+            logger.debug(
+                "Redis read failed for market data cache",
+                key=cache_key,
+                error=str(exc),
+            )
+            return None
+
+        if not raw:
+            return None
+
+        decoded = self._decode_cached_payload(raw)
+        if decoded is None:
+            return None
+
+        ttl_seconds = self.cache_ttl.get(ttl_key, 30)
+        await self._cache_local(cache_key, ttl_seconds, decoded)
+        payload_copy = copy.deepcopy(decoded)
+        return self._apply_cache_metadata(payload_copy, ttl_key)
+
+    async def _store_cached_response(
+        self,
+        cache_key: str,
+        ttl_key: str,
+        payload: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        prepared_payload = self._prepare_cache_payload(payload, ttl_key)
+        ttl_seconds = self.cache_ttl.get(ttl_key, 30)
+        await self._cache_local(cache_key, ttl_seconds, prepared_payload)
+
+        if self.redis:
+            try:
+                await self.redis.setex(cache_key, ttl_seconds, json.dumps(prepared_payload))
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.debug(
+                    "Redis write failed for market data cache",
+                    key=cache_key,
+                    error=str(exc),
+                )
+
+        return copy.deepcopy(prepared_payload)
+
+    def _schedule_supabase_sync(self, symbol: str, payload: Dict[str, Any]) -> None:
+        sync_fn = getattr(supabase_client, "sync_market_data", None)
+        if not callable(sync_fn):
+            return
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:  # pragma: no cover - loop not running
+            return
+
+        payload_copy = copy.deepcopy(payload)
+
+        async def _sync() -> None:
+            try:
+                await asyncio.wait_for(
+                    sync_fn(symbol, payload_copy),
+                    timeout=self.supabase_sync_timeout,
+                )
+            except asyncio.TimeoutError:
+                logger.warning(
+                    "Supabase sync timed out",
+                    symbol=symbol,
+                    timeout=self.supabase_sync_timeout,
+                )
+            except Exception as exc:  # pragma: no cover - defensive logging
+                logger.warning(
+                    "Supabase sync failed",
+                    symbol=symbol,
+                    error=str(exc),
+                )
+
+        task = loop.create_task(_sync())
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
     
     async def _check_rate_limit(self, api_name: str) -> bool:
         """ENTERPRISE: Check rate limits with circuit breaker protection."""
@@ -328,17 +523,7 @@ class MarketDataFeeds:
             # Record success in circuit breaker
             await circuit_breaker._record_success()
             logger.debug(f"Circuit breaker success recorded for {api_name}")
-    
-    async def _check_circuit_breaker(self, api_name: str) -> bool:
-        """Check if API call should be allowed by circuit breaker."""
-        if not self.circuit_breakers_enabled:
-            return True
-            
-        circuit_breaker = self.circuit_breakers.get(api_name)
-        if circuit_breaker:
-            return await circuit_breaker._should_try()
-        return True
-    
+
     def _get_api_params(self, api_name: str, base_params: Dict = None) -> Dict[str, Any]:
         """Get API parameters including API key if required."""
         params = base_params or {}
@@ -352,34 +537,68 @@ class MarketDataFeeds:
 
     async def _load_cached_price_entry(self, symbol: str) -> Optional[Dict[str, Any]]:
         """Load a cached price payload for graceful degradation."""
-        if not self.redis:
+        cached_response = await self._get_cached_response(f"price:{symbol}", "price")
+        if not cached_response:
             return None
 
-        try:
-            cached = await self.redis.get(f"price:{symbol}")
-        except Exception:
-            return None
+        if isinstance(cached_response, dict) and "data" in cached_response:
+            data = cached_response.get("data")
+            return data if isinstance(data, dict) else None
 
-        if not cached:
-            return None
+        return cached_response if isinstance(cached_response, dict) else None
 
-        return self._deserialize_price_cache(cached)
+    async def _fallback_price_response(
+        self,
+        symbol: str,
+        errors: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """Return a cached price payload when live calls fail."""
+
+        cache_key = f"price:{symbol}"
+        cached_response = await self._get_cached_response(cache_key, "price")
+        if cached_response:
+            response_payload = copy.deepcopy(cached_response)
+            if not isinstance(response_payload, dict):
+                response_payload = {"success": True, "data": {}}
+
+            if "success" not in response_payload:
+                response_payload = {
+                    "success": True,
+                    "data": response_payload,
+                }
+
+            metadata = response_payload.setdefault("metadata", {})
+            metadata["served_from"] = "cache"
+            metadata["stale"] = metadata.get("stale", True)
+            metadata["cache_degraded"] = True
+
+            if errors:
+                metadata["errors"] = list(errors)
+
+            return response_payload
+
+        error_message = "; ".join(errors or []) if errors else "Live market data unavailable"
+        return {
+            "success": False,
+            "error": error_message or "Live market data unavailable",
+            "data": {},
+        }
     
     async def get_real_time_price(self, symbol: str) -> Dict[str, Any]:
         """Get real-time price data for a symbol."""
         try:
-            # ENTERPRISE REDIS RESILIENCE - Check cache first if Redis is available
             cache_key = f"price:{symbol}"
-            if self.redis:
-                cached_data = await self.redis.get(cache_key)
-                
-                if cached_data:
-                    try:
-                        import json
-                        return json.loads(cached_data)
-                    except:
-                        pass
-            
+            cached_data = await self._get_cached_response(cache_key, "price")
+            if cached_data:
+                # Check if cached data is stale before returning it
+                metadata = cached_data.get("metadata", {}) if isinstance(cached_data, dict) else {}
+                is_stale = metadata.get("stale", False)
+
+                # Only return cached data if it's fresh
+                if not is_stale:
+                    return cached_data
+                # If stale, fall through to attempt fresh API call
+
             # Try APIs in order of preference with rate limiting
             apis_to_try = [
                 ("coingecko", self._fetch_coingecko_price),
@@ -388,143 +607,184 @@ class MarketDataFeeds:
                 ("finnhub", self._fetch_finnhub_price),
                 ("coincap", self._fetch_coincap_price)
             ]
-            
+
             price_data = {"success": False, "error": "No APIs available"}
-            
+            aggregated_errors: List[str] = []
+            start_time = time.monotonic()
+
             for api_name, fetch_method in apis_to_try:
+                # Calculate remaining budget before each call
+                elapsed = time.monotonic() - start_time
+                remaining = max(0.0, self.total_price_timeout - elapsed)
+                if remaining == 0.0:
+                    aggregated_errors.append(f"Global timeout reached after {elapsed:.2f}s")
+                    break
+
                 try:
-                    # ENTERPRISE: Check circuit breaker before API call
-                    if not await self._check_rate_limit(api_name):
-                        continue
-                    
-                    price_data = await fetch_method(symbol)
+                    # Cap per-call timeout to remaining global budget
+                    call_timeout = min(self.api_call_timeout, remaining)
+                    price_data = await asyncio.wait_for(
+                        fetch_method(symbol),
+                        timeout=call_timeout,
+                    )
                     if price_data.get("success"):
                         # ENTERPRISE: Record successful API call
                         await self._handle_api_success(api_name)
                         break
                     else:
                         # ENTERPRISE: Handle API failure
+                        aggregated_errors.append(f"{api_name}: {price_data.get('error', 'unknown error')}")
                         await self._handle_api_failure(api_name, price_data.get("error", "Unknown error"))
+                except asyncio.TimeoutError:
+                    logger.warning("Market data API timed out", api=api_name, symbol=symbol)
+                    await self._handle_api_failure(api_name, "timeout")
+                    aggregated_errors.append(f"{api_name}: timeout")
+                    continue
                 except Exception as e:
                     logger.warning(f"Failed to fetch from {api_name}", error=str(e))
                     # ENTERPRISE: Handle API exception
                     await self._handle_api_failure(api_name, str(e))
+                    aggregated_errors.append(f"{api_name}: {str(e)}")
                     continue
 
             if price_data.get("success"):
-                # ENTERPRISE REDIS RESILIENCE - Cache the result if Redis is available
-                if self.redis:
-                    import json
-                    await self.redis.setex(
-                        cache_key,
-                        self.cache_ttl["price"],
-                        json.dumps(price_data)
-                    )
-                
-                # Sync to Supabase (if available)
-                try:
-                    from app.core.supabase import supabase_client
-                    await supabase_client.sync_market_data(symbol, price_data.get("data", {}))
-                except ImportError:
-                    # Supabase not configured, skip sync
-                    pass
-                except Exception as e:
-                    logger.warning("Supabase sync failed", error=str(e))
-            
+                cached_payload = await self._store_cached_response(cache_key, "price", price_data)
+
+                response_payload = copy.deepcopy(cached_payload)
+
+                self._schedule_supabase_sync(symbol, response_payload.get("data", {}))
+
+                if aggregated_errors:
+                    metadata = response_payload.setdefault("metadata", {})
+                    metadata["warnings"] = list(aggregated_errors)
+                return response_payload
+
+            if aggregated_errors:
+                return await self._fallback_price_response(symbol, aggregated_errors)
             return price_data
-            
+
         except Exception as e:
             logger.error(f"Failed to get price for {symbol}", error=str(e))
-            return {"success": False, "error": str(e)}
+            return await self._fallback_price_response(symbol, [str(e)])
     
     async def get_price_with_enterprise_fallback(self, symbol: str, data_type: str = "price") -> Dict[str, Any]:
         """ENTERPRISE-GRADE price fetching with comprehensive fallback strategies."""
+        ttl_key = data_type if data_type in self.cache_ttl else "price"
         cache_key = f"{data_type}:{symbol}"
-        
+
         try:
-            # Check cache first if Redis is available
-            if self.redis:
-                cached_data = await self.redis.get(cache_key)
-                if cached_data:
-                    import json
-                    return json.loads(cached_data)
-            
+            cached_data = await self._get_cached_response(cache_key, ttl_key)
+            if cached_data:
+                # For non-price data, cache is acceptable as-is.
+                if ttl_key != "price":
+                    return cached_data
+                # For price, only return if still fresh; stale should attempt live fetch.
+                metadata = cached_data.get("metadata", {}) if isinstance(cached_data, dict) else {}
+                if not metadata.get("stale", False):
+                    return cached_data
+                # Stale price: fall through to try live APIs.
+
             # Get fallback hierarchy for this data type
             api_hierarchy = self.api_fallbacks.get(data_type, ["coingecko", "coincap"])
             
-            last_error = None
+            aggregated_errors: List[str] = []
+            start_time = time.monotonic()
+
             for api_name in api_hierarchy:
+                # Calculate remaining budget before each call
+                elapsed = time.monotonic() - start_time
+                remaining = max(0.0, self.total_price_timeout - elapsed)
+                if remaining == 0.0:
+                    aggregated_errors.append(
+                        f"Global timeout reached after {elapsed:.2f}s"
+                    )
+                    break
+
                 try:
-                    # Check rate limits
-                    if not self._check_rate_limit(api_name):
-                        logger.warning(f"Rate limit exceeded for {api_name}, trying next API")
-                        continue
-                    
-                    # Attempt to fetch data
+                    # Cap per-call timeout to remaining global budget
+                    call_timeout = min(self.api_call_timeout, remaining)
+                    # Attempt to fetch data with per-call timeout
                     if api_name == "coingecko":
-                        result = await self._fetch_coingecko_price(symbol)
+                        result = await asyncio.wait_for(
+                            self._fetch_coingecko_price(symbol),
+                            timeout=call_timeout,
+                        )
                     elif api_name == "coincap":
-                        result = await self._fetch_coincap_price(symbol)
+                        result = await asyncio.wait_for(
+                            self._fetch_coincap_price(symbol),
+                            timeout=call_timeout,
+                        )
                     elif api_name == "coinpaprika":
-                        result = await self._fetch_coinpaprika_price(symbol)
+                        result = await asyncio.wait_for(
+                            self._fetch_coinpaprika_price(symbol),
+                            timeout=call_timeout,
+                        )
                     else:
                         continue
-                    
+
                     if result.get("success"):
-                        # Cache successful result if Redis is available
-                        if self.redis:
-                            import json
-                            await self.redis.setex(
-                                cache_key,
-                                self.cache_ttl.get(data_type, 60),
-                                json.dumps(result)
-                            )
-                        return result
-                        
-                except Exception as e:
-                    logger.warning(f"API {api_name} failed for {symbol}: {str(e)}")
-                    last_error = e
+                        await self._handle_api_success(api_name)
+
+                        cached_payload = await self._store_cached_response(cache_key, ttl_key, result)
+
+                        response_payload = copy.deepcopy(cached_payload)
+                        if aggregated_errors:
+                            metadata = response_payload.setdefault("metadata", {})
+                            metadata["warnings"] = list(aggregated_errors)
+                        return response_payload
+
+                    aggregated_errors.append(
+                        f"{api_name}: {result.get('error', 'unknown error')}"
+                    )
+                    await self._handle_api_failure(
+                        api_name, result.get("error", "Unknown error")
+                    )
+
+                except asyncio.TimeoutError:
+                    logger.warning(
+                        "Market data API timed out",
+                        api=api_name,
+                        symbol=symbol,
+                    )
+                    aggregated_errors.append(f"{api_name}: timeout")
+                    await self._handle_api_failure(api_name, "timeout")
                     continue
-            
-            # All APIs failed, return error
-            return {
-                "success": False,
-                "error": f"All APIs failed. Last error: {str(last_error)}",
-                "data": {}
-            }
-            
+                except Exception as e:
+                    logger.warning(
+                        "API call failed",
+                        api=api_name,
+                        symbol=symbol,
+                        error=str(e),
+                    )
+                    aggregated_errors.append(f"{api_name}: {str(e)}")
+                    await self._handle_api_failure(api_name, str(e))
+                    continue
+
+            if aggregated_errors:
+                return await self._fallback_price_response(symbol, aggregated_errors)
+
+            # All APIs failed without specific errors recorded
+            return await self._fallback_price_response(symbol)
+
         except Exception as e:
             logger.error(f"Enterprise fallback failed for {symbol}: {str(e)}")
-            return {"success": False, "error": str(e), "data": {}}
+            return await self._fallback_price_response(symbol, [str(e)])
 
     async def get_detailed_market_data(self, symbol: str) -> Dict[str, Any]:
         """Get detailed market data including volume, market cap, etc."""
         try:
-            # ENTERPRISE REDIS RESILIENCE
             cache_key = f"detailed:{symbol}"
-            if self.redis:
-                cached_data = await self.redis.get(cache_key)
-                
-                if cached_data:
-                    try:
-                        import json
-                        return json.loads(cached_data)
-                    except:
-                        pass
+            cached_data = await self._get_cached_response(cache_key, "detailed")
+            if cached_data:
+                return cached_data
             
             # Get detailed data from CoinGecko
             detailed_data = await self._fetch_coingecko_detailed(symbol)
             
             if detailed_data.get("success"):
-                # ENTERPRISE REDIS RESILIENCE - Cache if Redis is available
-                if self.redis:
-                    import json
-                    await self.redis.setex(
-                        cache_key,
-                        self.cache_ttl["detailed"],
-                        json.dumps(detailed_data)
-                    )
-            
+                cached_payload = await self._store_cached_response(cache_key, "detailed", detailed_data)
+                return cached_payload
+
             return detailed_data
             
         except Exception as e:
@@ -578,16 +838,14 @@ class MarketDataFeeds:
                                     "source": "coingecko"
                                 }
 
-                                # ENTERPRISE REDIS RESILIENCE - Cache individual prices if Redis is available
-                                if self.redis:
-                                    await self.redis.setex(
-                                        f"price:{symbol}",
-                                        self.cache_ttl["price"],
-                                        json.dumps({
-                                            "success": True,
-                                            "data": result["data"][symbol]
-                                        })
-                                    )
+                                await self._store_cached_response(
+                                    f"price:{symbol}",
+                                    "price",
+                                    {
+                                        "success": True,
+                                        "data": result["data"][symbol],
+                                    },
+                                )
 
                             return result
                         return {"success": False, "error": f"API error: {response.status}"}
@@ -606,25 +864,22 @@ class MarketDataFeeds:
     ) -> Dict[str, Any]:
         cached: Dict[str, Any] = {}
 
-        async def load_from_redis(symbol: str) -> Optional[Dict[str, Any]]:
-            if not self.redis:
-                return None
-
-            raw = await self.redis.get(f"price:{symbol}")
-            if not raw:
-                return None
-
-            return self._deserialize_price_cache(raw)
+        async def load_from_cache(symbol: str) -> Optional[Dict[str, Any]]:
+            return await self._load_cached_price_entry(symbol)
 
         for symbol in symbols:
-            cached_data = await load_from_redis(symbol)
+            cached_data = await load_from_cache(symbol)
             if cached_data:
                 cached[symbol] = cached_data
 
         if cached:
-            metadata = {"source": "cache"}
+            metadata = {
+                "served_from": "cache",
+                "cache_degraded": True,
+                "stale": True,
+            }
             if error:
-                metadata["error"] = error
+                metadata["errors"] = [error]
             return {"success": True, "data": cached, "metadata": metadata}
 
         return {
@@ -635,48 +890,17 @@ class MarketDataFeeds:
     def _deserialize_price_cache(self, raw: Any) -> Optional[Dict[str, Any]]:
         """Normalise cached price payloads into dictionaries."""
 
-        payload: Any = raw
-
-        if isinstance(payload, bytes):
-            try:
-                payload = payload.decode()
-            except Exception:  # pragma: no cover - defensive decode
-                payload = payload.decode(errors="ignore") if hasattr(payload, "decode") else payload
-
-        if isinstance(payload, dict):
-            container: Any = payload
-        elif isinstance(payload, str):
-            try:
-                container = json.loads(payload)
-            except (json.JSONDecodeError, TypeError):
-                try:
-                    container = ast.literal_eval(str(payload))
-                except (ValueError, SyntaxError):
-                    return None
-        else:
-            return None
-
+        container = self._decode_cached_payload(raw)
         if not isinstance(container, dict):
             return None
 
         data: Any = container.get("data") if "data" in container else container
 
-        if isinstance(data, bytes):
-            try:
-                data = data.decode()
-            except Exception:  # pragma: no cover - defensive decode
-                data = data.decode(errors="ignore") if hasattr(data, "decode") else data
+        if isinstance(data, dict):
+            return data
 
-        if isinstance(data, str):
-            try:
-                data = json.loads(data)
-            except (json.JSONDecodeError, TypeError):
-                try:
-                    data = ast.literal_eval(str(data))
-                except (ValueError, SyntaxError):
-                    return None
-
-        return data if isinstance(data, dict) else None
+        decoded = self._decode_cached_payload(data)
+        return decoded if isinstance(decoded, dict) else None
 
     async def get_trending_coins(self, limit: int = 10) -> Dict[str, Any]:
         """Get trending coins from CoinGecko."""
@@ -757,18 +981,19 @@ class MarketDataFeeds:
                         error_msg = f"API error: 429 - Rate limited (retry after {retry_after}s)"
                         logger.debug(f"CoinGecko rate limited", symbol=symbol, retry_after=retry_after)
                         
-                        # Try to return cached data if available
-                        if self.redis:
-                            try:
-                                cached_key = f"market_price:{symbol.lower()}"
-                                cached_data = await self.redis.get(cached_key)
-                                if cached_data:
-                                    price_data = json.loads(cached_data)
-                                    price_data["from_cache"] = True
-                                    return {"success": True, "data": price_data}
-                            except Exception:
-                                pass
-                        
+                        cached_price = await self._load_cached_price_entry(symbol)
+                        if cached_price:
+                            cached_payload = copy.deepcopy(cached_price)
+                            cached_payload["from_cache"] = True
+                            return {
+                                "success": True,
+                                "data": cached_payload,
+                                "metadata": {
+                                    "source": "cache",
+                                    "rate_limited": True,
+                                },
+                            }
+
                         return {"success": False, "error": error_msg}
                     
                     return {"success": False, "error": f"API error: {response.status}"}
@@ -1127,19 +1352,6 @@ class MarketDataFeeds:
             asset_id = self.symbol_mappings["coincap"][symbol]
             url = f"{self.apis['coincap']['base_url']}/assets/{asset_id}"
 
-            if self.circuit_breakers_enabled and not await self._check_circuit_breaker("coincap"):
-                cached = await self._load_cached_price_entry(symbol)
-                if cached:
-                    return {
-                        "success": True,
-                        "data": cached,
-                        "metadata": {
-                            "source": "cache",
-                            "circuit_open": True,
-                        },
-                    }
-                return {"success": False, "error": "CoinCap temporarily unavailable"}
-
             timeout = aiohttp.ClientTimeout(total=10)
             max_retries = 3
             base_delay = 0.5
@@ -1239,16 +1451,6 @@ class MarketDataFeeds:
             max_retries = 3
             base_delay = 1.0
 
-            if self.circuit_breakers_enabled and not await self._check_circuit_breaker("coingecko"):
-                if self.redis:
-                    try:
-                        cached_raw = await self.redis.get(f"detailed:{symbol}")
-                        if cached_raw:
-                            return json.loads(cached_raw)
-                    except Exception:
-                        pass
-                return {"success": False, "error": "CoinGecko temporarily unavailable"}
-
             timeout = aiohttp.ClientTimeout(total=30)
             last_error: Optional[Exception] = None
 
@@ -1319,16 +1521,9 @@ class MarketDataFeeds:
 
                 await asyncio.sleep(delay + random.uniform(0, 0.5))
 
-            cached_fallback = None
-            if self.redis:
-                try:
-                    cached_raw = await self.redis.get(f"detailed:{symbol}")
-                    if cached_raw:
-                        cached_fallback = json.loads(cached_raw)
-                except Exception:
-                    cached_fallback = None
+            cached_fallback = await self._get_cached_response(f"detailed:{symbol}", "detailed")
 
-            if cached_fallback:
+            if isinstance(cached_fallback, dict):
                 metadata = cached_fallback.get("metadata", {})
                 metadata.update(
                     {
@@ -1397,23 +1592,23 @@ class MarketDataFeeds:
 
     async def _get_stale_price(self, symbol: str) -> Optional[float]:
         """Get cached/stale price from Redis as fallback."""
-        if not self.redis:
-            return None
-
         try:
-            # Try to get from Redis cache
             cache_key = f"price:{symbol}"
-            cached_data = await self.redis.get(cache_key)
+            cached_response = await self._get_cached_response(cache_key, "price")
 
-            if cached_data:
-                # Use existing deserialize helper
-                price_data = self._deserialize_price_cache(cached_data)
-                if price_data and isinstance(price_data, dict):
-                    # Try to extract price from various possible structures
-                    if "price" in price_data:
-                        return float(price_data["price"])
-                    elif "data" in price_data and isinstance(price_data["data"], dict):
-                        return float(price_data["data"].get("price", 0))
+            if not cached_response:
+                return None
+
+            if isinstance(cached_response, dict):
+                data = cached_response.get("data", cached_response)
+            else:
+                data = cached_response
+
+            if isinstance(data, dict) and "price" in data:
+                return float(data.get("price", 0))
+
+            if isinstance(data, dict) and "data" in data and isinstance(data["data"], dict):
+                return float(data["data"].get("price", 0))
 
             return None
         except Exception as e:

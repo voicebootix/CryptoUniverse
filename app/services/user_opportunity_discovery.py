@@ -830,6 +830,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
             await self._preload_price_universe(discovered_assets, user_profile, scan_id)
 
+            # Cache TTL handles expiration automatically; no need to clear globally
+            # This allows strategies to share cached prices during the scan
+
             # STEP 5: Run opportunity discovery across all user's strategies
             all_opportunities = []
             strategy_results = {}
@@ -862,11 +865,15 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             concurrency_limit = 15  # Run max 15 strategies concurrently (increased from 3)
             strategy_semaphore = asyncio.Semaphore(concurrency_limit)
 
-            # Calculate per-strategy timeout from total scan budget, accounting for concurrency
+            # Calculate remaining budget for strategy scans; do not overshoot SLA
+            elapsed_since_start = time.time() - discovery_start_time
+            remaining_budget = max(0.0, self._scan_response_budget - elapsed_since_start)
+
+            # Calculate per-strategy timeout from remaining budget, accounting for concurrency
             # With 15 concurrent strategies, we process in batches, so timeout should reflect batch time
             batches = max(1, math.ceil(total_strategies / concurrency_limit))
-            # Allocate budget per batch; allow longer-running strategies to finish (upper bound 180s for heavy scanners)
-            per_strategy_timeout_s = max(10.0, min(180.0, self._scan_response_budget / batches))
+            # Allocate remaining budget per batch; allow longer-running strategies to finish (upper bound 240s for heavy scanners)
+            per_strategy_timeout_s = max(10.0, min(240.0, remaining_budget / batches))
 
             async def scan_strategy_with_semaphore(strategy_info, strategy_index):
                 strategy_identifier = strategy_info.get("strategy_id", "Unknown")
@@ -948,12 +955,40 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                            total_strategies=total_strategies,
                            concurrency_limit=15)
 
+            # Enforce overall SLA during the concurrent phase and preserve finished results on timeout
+            # Materialize tasks to retain input order for result-index mapping
             strategy_tasks = [
-                scan_strategy_with_semaphore(strategy, idx)
+                asyncio.create_task(scan_strategy_with_semaphore(strategy, idx))
                 for idx, strategy in enumerate(active_strategies)
             ]
 
-            strategy_scan_results = await asyncio.gather(*strategy_tasks, return_exceptions=True)
+            elapsed_for_budget = time.time() - discovery_start_time
+            overall_remaining_budget = max(0.0, self._scan_response_budget - elapsed_for_budget)
+            try:
+                strategy_scan_results = await asyncio.wait_for(
+                    asyncio.gather(*strategy_tasks, return_exceptions=True),
+                    timeout=max(1.0, overall_remaining_budget),
+                )
+            except asyncio.TimeoutError:
+                self.logger.warning(
+                    "Overall strategy scan timed out; partial results will be returned",
+                    scan_id=scan_id,
+                    budget_s=self._scan_response_budget,
+                )
+                # Collect completed results in input order; mark unfinished as TimeoutError and cancel them
+                strategy_scan_results = []
+                for t in strategy_tasks:
+                    if t.done() and not t.cancelled():
+                        try:
+                            strategy_scan_results.append(t.result())
+                        except Exception as exc:
+                            strategy_scan_results.append(exc)
+                    else:
+                        if not t.done():
+                            t.cancel()
+                        strategy_scan_results.append(asyncio.TimeoutError())
+                # Drain cancellations
+                await asyncio.gather(*strategy_tasks, return_exceptions=True)
 
             self.logger.info("✅ ALL STRATEGY SCANS COMPLETED",
                            scan_id=scan_id,
