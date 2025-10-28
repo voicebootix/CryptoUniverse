@@ -164,11 +164,6 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             "swing_navigator_pro": self._scan_swing_navigator_pro_opportunities,
         }
 
-    @classmethod
-    def _safe_float(cls, value: Any) -> Optional[float]:
-        """Best-effort conversion to float for numeric fields using shared parser."""
-
-        return cls._to_float(value)
 
         # Canonical strategy aliases so display names map to scanners
         self._strategy_aliases = {
@@ -2113,19 +2108,14 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     breakout_detected = bool(breakout_analysis.get("breakout_detected"))
 
                     if action in {"BUY", "SELL"} and breakout_detected:
-                        breakout_raw = signal_block.get("breakout_probability")
-                        breakout_probability = self._safe_float(breakout_raw)
+                        breakout_probability = self._to_fraction(
+                            signal_block.get("breakout_probability")
+                        )
 
-                        if breakout_probability is not None:
-                            if isinstance(breakout_raw, str) and breakout_raw.strip().replace("％", "%").endswith("%"):
-                                breakout_probability /= 100.0
-                        else:
-                            confidence_raw = signal_block.get("confidence")
-                            breakout_probability = self._safe_float(confidence_raw)
-                            if breakout_probability is not None and isinstance(confidence_raw, str):
-                                normalized = confidence_raw.strip().replace("％", "%")
-                                if normalized.endswith("%"):
-                                    breakout_probability /= 100.0
+                        if breakout_probability is None:
+                            breakout_probability = self._to_fraction(
+                                signal_block.get("confidence")
+                            )
 
                         breakout_probability = breakout_probability or 0.0
                         breakout_probability = max(0.0, min(breakout_probability, 1.0))
@@ -4402,6 +4392,13 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 return None
 
         return None
+
+    @classmethod
+    def _safe_float(cls, value: Any) -> Optional[float]:
+        """Best-effort conversion to float using the shared numeric parser."""
+
+        return cls._to_float(value)
+
     def _to_fraction(self, value: Any) -> Optional[float]:
         """Convert values that may represent percentages into fractions."""
 
@@ -4417,7 +4414,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
         # Check for percent markers (including fullwidth percent sign U+FF05)
         if original:
-            normalized = original.strip().replace('％', '%')  # Replace fullwidth percent
+            normalized = original.strip().replace("\uFF05", "%")  # Replace fullwidth percent
             if "%" in normalized:
                 return numeric / 100.0
 
