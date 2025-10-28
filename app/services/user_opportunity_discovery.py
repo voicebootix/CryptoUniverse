@@ -164,16 +164,11 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             "swing_navigator_pro": self._scan_swing_navigator_pro_opportunities,
         }
 
-    @staticmethod
-    def _safe_float(value: Any) -> Optional[float]:
-        """Best-effort conversion to float for numeric fields."""
+    @classmethod
+    def _safe_float(cls, value: Any) -> Optional[float]:
+        """Best-effort conversion to float for numeric fields using shared parser."""
 
-        try:
-            if value is None:
-                return None
-            return float(value)
-        except (TypeError, ValueError):
-            return None
+        return cls._to_float(value)
 
         # Canonical strategy aliases so display names map to scanners
         self._strategy_aliases = {
@@ -1768,8 +1763,20 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                             indicators = execution_data.get("indicators", {}) or momentum_result.get("indicators", {}) or {}
                             risk_mgmt = execution_data.get("risk_management", {}) or momentum_result.get("risk_management", {}) or {}
 
-                            price_snapshot = indicators.get("price") if isinstance(indicators, dict) else {}
-                            entry_price = self._safe_float((price_snapshot or {}).get("current"))
+                            price_scalar: Optional[Any] = None
+                            price_snapshot = {}
+                            if isinstance(indicators, dict):
+                                price_candidate = indicators.get("price_snapshot") or indicators.get("price")
+                                if isinstance(price_candidate, dict):
+                                    price_snapshot = price_candidate
+                                else:
+                                    price_scalar = price_candidate
+
+                            entry_price = None
+                            if isinstance(price_snapshot, dict) and price_snapshot:
+                                entry_price = self._safe_float(price_snapshot.get("current"))
+                            if entry_price is None and price_scalar is not None:
+                                entry_price = self._safe_float(price_scalar)
                             stop_loss_price = self._safe_float(
                                 risk_mgmt.get("stop_loss_price") or risk_mgmt.get("stop_loss")
                             )
@@ -1828,9 +1835,10 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                             profit_potential_value = float(potential_profit) if potential_profit is not None else 0.0
                             required_capital_value = float(position_notional) if position_notional is not None else 0.0
 
+                            price_snapshot_dict = price_snapshot if isinstance(price_snapshot, dict) else {}
                             price_snapshot_clean = {
                                 key: value
-                                for key, value in (price_snapshot or {}).items()
+                                for key, value in price_snapshot_dict.items()
                                 if value is not None
                             }
                             risk_metrics = {
@@ -1923,7 +1931,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
                         # Track ALL signals for transparency
                         self.logger.info(
-                            f"🎯 MEAN REVERSION SIGNAL ANALYSIS",
+                            "🎯 MEAN REVERSION SIGNAL ANALYSIS",
                             scan_id=scan_id,
                             symbol=symbol,
                             deviation_score=deviation_score,
@@ -2105,24 +2113,26 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     breakout_detected = bool(breakout_analysis.get("breakout_detected"))
 
                     if action in {"BUY", "SELL"} and breakout_detected:
-                        breakout_probability = self._safe_float(
-                            signal_block.get("breakout_probability")
-                        )
-                        if breakout_probability is None:
-                            breakout_probability = self._safe_float(
-                                signal_block.get("confidence")
-                            )
-                            breakout_probability = (
-                                (breakout_probability or 0.0) / 100.0
-                                if breakout_probability is not None
-                                else 0.0
-                            )
+                        breakout_raw = signal_block.get("breakout_probability")
+                        breakout_probability = self._safe_float(breakout_raw)
 
-                        breakout_probability = max(0.0, min(breakout_probability or 0.0, 1.0))
+                        if breakout_probability is not None:
+                            if isinstance(breakout_raw, str) and breakout_raw.strip().replace("％", "%").endswith("%"):
+                                breakout_probability /= 100.0
+                        else:
+                            confidence_raw = signal_block.get("confidence")
+                            breakout_probability = self._safe_float(confidence_raw)
+                            if breakout_probability is not None and isinstance(confidence_raw, str):
+                                normalized = confidence_raw.strip().replace("％", "%")
+                                if normalized.endswith("%"):
+                                    breakout_probability /= 100.0
+
+                        breakout_probability = breakout_probability or 0.0
+                        breakout_probability = max(0.0, min(breakout_probability, 1.0))
 
                         # Track ALL signals for transparency
                         self.logger.info(
-                            f"🎯 BREAKOUT SIGNAL ANALYSIS",
+                            "🎯 BREAKOUT SIGNAL ANALYSIS",
                             scan_id=scan_id,
                             symbol=symbol,
                             breakout_probability=breakout_probability,
@@ -4333,7 +4343,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
         return pairs[:max_pairs]
 
-    def _to_float(self, value: Any) -> Optional[float]:
+    @staticmethod
+    def _to_float(value: Any) -> Optional[float]:
         """Convert common numeric string formats to float safely."""
 
         if value is None:

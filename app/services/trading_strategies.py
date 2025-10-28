@@ -1175,6 +1175,15 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
                     strategy_id=strategy_id,
                 )
                 
+                price_payload = price_snapshot if price_snapshot else None
+                indicators_payload = {
+                    "rsi": rsi,
+                    "macd_trend": macd_trend,
+                    "momentum_score": signal_strength,
+                }
+                indicators_payload["price_snapshot"] = price_payload
+                indicators_payload["price"] = price_payload
+
                 return {
                     "success": True,
                     "strategy": "momentum",
@@ -1183,12 +1192,7 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
                         "strength": signal_strength,
                         "confidence": signal_strength * 10
                     },
-                    "indicators": {
-                        "rsi": rsi,
-                        "macd_trend": macd_trend,
-                        "momentum_score": signal_strength,
-                        "price": price_snapshot if price_snapshot else None
-                    },
+                    "indicators": indicators_payload,
                     "execution_result": execution_result,
                     "risk_management": {
                         "stop_loss": parameters.stop_loss,
@@ -1206,6 +1210,14 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
                     "timestamp": datetime.utcnow().isoformat()
                 }
             else:
+                price_payload = price_snapshot if price_snapshot else None
+                indicators_payload = {
+                    "rsi": rsi,
+                    "macd_trend": macd_trend,
+                }
+                indicators_payload["price_snapshot"] = price_payload
+                indicators_payload["price"] = price_payload
+
                 return {
                     "success": True,
                     "strategy": "momentum",
@@ -1215,11 +1227,7 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
                         "confidence": signal_strength * 10,
                         "reason": "Signal strength below threshold"
                     },
-                    "indicators": {
-                        "rsi": rsi,
-                        "macd_trend": macd_trend,
-                        "price": price_snapshot if price_snapshot else None
-                    },
+                    "indicators": indicators_payload,
                     "risk_management": {
                         "stop_loss": parameters.stop_loss,
                         "take_profit": parameters.take_profit,
