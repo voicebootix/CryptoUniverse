@@ -6,7 +6,6 @@ and other free sources for the AI money manager platform.
 """
 
 import asyncio
-import ast
 import copy
 import json
 import random
@@ -355,10 +354,13 @@ class MarketDataFeeds:
             try:
                 payload = json.loads(payload)
             except (json.JSONDecodeError, TypeError):
-                try:
-                    payload = ast.literal_eval(payload)
-                except (ValueError, SyntaxError):
-                    return None
+                # Cache entries must be valid JSON (written via json.dumps)
+                # This fallback should never execute in normal operation
+                logger.debug(
+                    "Failed to decode cached payload as JSON",
+                    payload_preview=payload[:100] if len(payload) > 100 else payload,
+                )
+                return None
 
         return payload if isinstance(payload, dict) else None
 

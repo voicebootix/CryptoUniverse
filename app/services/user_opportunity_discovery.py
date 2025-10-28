@@ -865,9 +865,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             concurrency_limit = 15  # Run max 15 strategies concurrently (increased from 3)
             strategy_semaphore = asyncio.Semaphore(concurrency_limit)
 
-            # Calculate remaining budget for strategy scans, accounting for time already spent
+            # Calculate remaining budget for strategy scans; do not overshoot SLA
             elapsed_since_start = time.time() - discovery_start_time
-            remaining_budget = max(10.0, self._scan_response_budget - elapsed_since_start)
+            remaining_budget = max(0.0, self._scan_response_budget - elapsed_since_start)
 
             # Calculate per-strategy timeout from remaining budget, accounting for concurrency
             # With 15 concurrent strategies, we process in batches, so timeout should reflect batch time
@@ -960,7 +960,22 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 for idx, strategy in enumerate(active_strategies)
             ]
 
-            strategy_scan_results = await asyncio.gather(*strategy_tasks, return_exceptions=True)
+            # Enforce overall SLA during the concurrent phase
+            elapsed_for_budget = time.time() - discovery_start_time
+            overall_remaining_budget = max(0.0, self._scan_response_budget - elapsed_for_budget)
+            try:
+                strategy_scan_results = await asyncio.wait_for(
+                    asyncio.gather(*strategy_tasks, return_exceptions=True),
+                    timeout=max(1.0, overall_remaining_budget),
+                )
+            except asyncio.TimeoutError:
+                self.logger.warning(
+                    "Overall strategy scan timed out; partial results will be returned",
+                    scan_id=scan_id,
+                    budget_s=self._scan_response_budget,
+                )
+                # Proceed with empty results; per-strategy snapshots were already cached incrementally
+                strategy_scan_results = []
 
             self.logger.info("✅ ALL STRATEGY SCANS COMPLETED",
                            scan_id=scan_id,
