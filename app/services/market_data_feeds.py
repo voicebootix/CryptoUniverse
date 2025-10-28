@@ -671,8 +671,15 @@ class MarketDataFeeds:
         try:
             cached_data = await self._get_cached_response(cache_key, ttl_key)
             if cached_data:
-                return cached_data
-            
+                # For non-price data, cache is acceptable as-is.
+                if ttl_key != "price":
+                    return cached_data
+                # For price, only return if still fresh; stale should attempt live fetch.
+                metadata = cached_data.get("metadata", {}) if isinstance(cached_data, dict) else {}
+                if not metadata.get("stale", False):
+                    return cached_data
+                # Stale price: fall through to try live APIs.
+
             # Get fallback hierarchy for this data type
             api_hierarchy = self.api_fallbacks.get(data_type, ["coingecko", "coincap"])
             

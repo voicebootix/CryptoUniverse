@@ -955,12 +955,13 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                            total_strategies=total_strategies,
                            concurrency_limit=15)
 
+            # Enforce overall SLA during the concurrent phase and preserve finished results on timeout
+            # Materialize tasks to retain input order for result-index mapping
             strategy_tasks = [
-                scan_strategy_with_semaphore(strategy, idx)
+                asyncio.create_task(scan_strategy_with_semaphore(strategy, idx))
                 for idx, strategy in enumerate(active_strategies)
             ]
 
-            # Enforce overall SLA during the concurrent phase
             elapsed_for_budget = time.time() - discovery_start_time
             overall_remaining_budget = max(0.0, self._scan_response_budget - elapsed_for_budget)
             try:
@@ -974,8 +975,20 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     scan_id=scan_id,
                     budget_s=self._scan_response_budget,
                 )
-                # Proceed with empty results; per-strategy snapshots were already cached incrementally
+                # Collect completed results in input order; mark unfinished as TimeoutError and cancel them
                 strategy_scan_results = []
+                for t in strategy_tasks:
+                    if t.done() and not t.cancelled():
+                        try:
+                            strategy_scan_results.append(t.result())
+                        except Exception as exc:
+                            strategy_scan_results.append(exc)
+                    else:
+                        if not t.done():
+                            t.cancel()
+                        strategy_scan_results.append(asyncio.TimeoutError())
+                # Drain cancellations
+                await asyncio.gather(*strategy_tasks, return_exceptions=True)
 
             self.logger.info("✅ ALL STRATEGY SCANS COMPLETED",
                            scan_id=scan_id,
