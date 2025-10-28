@@ -613,15 +613,19 @@ class MarketDataFeeds:
             start_time = time.monotonic()
 
             for api_name, fetch_method in apis_to_try:
+                # Calculate remaining budget before each call
                 elapsed = time.monotonic() - start_time
-                if elapsed >= self.total_price_timeout:
+                remaining = max(0.0, self.total_price_timeout - elapsed)
+                if remaining == 0.0:
                     aggregated_errors.append(f"Global timeout reached after {elapsed:.2f}s")
                     break
 
                 try:
+                    # Cap per-call timeout to remaining global budget
+                    call_timeout = min(self.api_call_timeout, remaining)
                     price_data = await asyncio.wait_for(
                         fetch_method(symbol),
-                        timeout=self.api_call_timeout,
+                        timeout=call_timeout,
                     )
                     if price_data.get("success"):
                         # ENTERPRISE: Record successful API call
@@ -687,29 +691,33 @@ class MarketDataFeeds:
             start_time = time.monotonic()
 
             for api_name in api_hierarchy:
+                # Calculate remaining budget before each call
                 elapsed = time.monotonic() - start_time
-                if elapsed >= self.total_price_timeout:
+                remaining = max(0.0, self.total_price_timeout - elapsed)
+                if remaining == 0.0:
                     aggregated_errors.append(
                         f"Global timeout reached after {elapsed:.2f}s"
                     )
                     break
 
                 try:
+                    # Cap per-call timeout to remaining global budget
+                    call_timeout = min(self.api_call_timeout, remaining)
                     # Attempt to fetch data with per-call timeout
                     if api_name == "coingecko":
                         result = await asyncio.wait_for(
                             self._fetch_coingecko_price(symbol),
-                            timeout=self.api_call_timeout,
+                            timeout=call_timeout,
                         )
                     elif api_name == "coincap":
                         result = await asyncio.wait_for(
                             self._fetch_coincap_price(symbol),
-                            timeout=self.api_call_timeout,
+                            timeout=call_timeout,
                         )
                     elif api_name == "coinpaprika":
                         result = await asyncio.wait_for(
                             self._fetch_coinpaprika_price(symbol),
-                            timeout=self.api_call_timeout,
+                            timeout=call_timeout,
                         )
                     else:
                         continue
