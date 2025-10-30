@@ -33,6 +33,7 @@ from app.core.config import get_settings
 from app.core.database import get_database
 from app.core.redis import get_redis_client
 from app.core.logging import LoggerMixin
+from app.constants.opportunity import build_strategy_policy_baseline
 from app.services.strategy_marketplace_service import strategy_marketplace_service
 from app.services.trading_strategies import trading_strategies_service
 from app.services.dynamic_asset_filter import enterprise_asset_filter
@@ -41,6 +42,9 @@ from app.models.credit import CreditAccount, CreditTransaction
 from app.models.user import User
 from app.services.portfolio_risk_core import portfolio_risk_service
 from sqlalchemy import select
+from app.services.strategy_scanning_policy_service import (
+    strategy_scanning_policy_service,
+)
 
 
 # Allow the opportunity discovery service to wait long enough for the
@@ -196,8 +200,13 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             }
         }
 
-        self.strategy_symbol_policies: Dict[str, Dict[str, Optional[int]]] = copy.deepcopy(
-            getattr(settings, "opportunity_strategy_symbol_policies", {}) or {}
+        self._policy_refresh_lock = asyncio.Lock()
+        self._policy_cache_expiry: float = 0.0
+        self._base_strategy_symbol_policies: Dict[str, Dict[str, Any]] = (
+            build_strategy_policy_baseline()
+        )
+        self.strategy_symbol_policies: Dict[str, Dict[str, Any]] = copy.deepcopy(
+            self._base_strategy_symbol_policies
         )
 
     async def _get_cached_scan_entry(self, user_id: str) -> Optional[_CachedOpportunityResult]:
@@ -375,6 +384,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
             # Initialize enterprise asset filter
             await enterprise_asset_filter.async_init()
+
+            await self._refresh_strategy_symbol_policies(force=True)
 
             self.logger.info("🎯 User Opportunity Discovery Service initialized")
 
@@ -769,6 +780,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             # Initialize if needed
             if not self.redis:
                 await self.async_init()
+
+            await self._refresh_strategy_symbol_policies()
 
             # STEP 1: Build user opportunity profile
             user_profile = await self._build_user_opportunity_profile(user_id)
@@ -4447,7 +4460,45 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     # ================================================================================
     # UTILITY METHODS
     # ================================================================================
-    
+
+    async def _refresh_strategy_symbol_policies(self, force: bool = False) -> None:
+        """Reload symbol policy overrides from the database."""
+
+        now = time.monotonic()
+        if not force and now < self._policy_cache_expiry:
+            return
+
+        async with self._policy_refresh_lock:
+            if not force and time.monotonic() < self._policy_cache_expiry:
+                return
+
+            try:
+                overrides = await strategy_scanning_policy_service.get_policy_overrides()
+            except Exception as error:  # pragma: no cover - defensive logging
+                self.logger.warning(
+                    "Failed to refresh strategy scanning policies", error=str(error)
+                )
+                self._policy_cache_expiry = time.monotonic() + 30.0
+                return
+
+            combined = copy.deepcopy(self._base_strategy_symbol_policies)
+            for key, payload in overrides.items():
+                if not isinstance(payload, dict):
+                    continue
+
+                normalized = {
+                    "max_symbols": payload.get("max_symbols"),
+                    "chunk_size": payload.get("chunk_size"),
+                    "enabled": bool(payload.get("enabled", True)),
+                }
+                if payload.get("priority") is not None:
+                    normalized["priority"] = payload.get("priority")
+
+                combined[key] = normalized
+
+            self.strategy_symbol_policies = combined
+            self._policy_cache_expiry = time.monotonic() + 60.0
+
     def _signal_to_risk_level(self, signal_strength: float) -> str:
         """Convert signal strength to risk level for transparency."""
         if signal_strength > 7.0:
@@ -4541,6 +4592,13 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     ) -> List[str]:
         """Select symbols ordered by volume honoring strategy policies."""
 
+        policy = self.strategy_symbol_policies.get(strategy_key)
+        if isinstance(policy, dict) and policy.get("enabled") is False:
+            self.logger.debug(
+                "Strategy scanning disabled via policy", strategy=strategy_key
+            )
+            return []
+
         limit = self._get_strategy_symbol_limit(strategy_key, default_limit)
         return self._get_top_symbols_by_volume(discovered_assets, limit=limit)
 
@@ -4564,6 +4622,11 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         self, discovered_assets: Dict[str, List[Any]], limit: Optional[int] = None
     ) -> List[str]:
         """Get symbols suitable for statistical arbitrage (higher tier preferred)."""
+
+        policy = self.strategy_symbol_policies.get("statistical_arbitrage")
+        if isinstance(policy, dict) and policy.get("enabled") is False:
+            self.logger.debug("Statistical arbitrage policy disabled")
+            return []
 
         # Prefer institutional and enterprise tier assets for stat arb
         preferred_tiers = ["tier_institutional", "tier_enterprise", "tier_professional"]

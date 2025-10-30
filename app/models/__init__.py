@@ -68,6 +68,7 @@ from app.models.signal import (
     SignalEvent,
     SignalDeliveryLog,
 )
+from app.models.opportunity import StrategyScanningPolicy
 
 __all__ = [
     "Base",
@@ -151,4 +152,6 @@ __all__ = [
     "SignalSubscription",
     "SignalEvent",
     "SignalDeliveryLog",
+    # Opportunity models
+    "StrategyScanningPolicy",
 ]
