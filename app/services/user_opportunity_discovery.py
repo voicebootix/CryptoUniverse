@@ -194,6 +194,10 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             }
         }
 
+        self.strategy_symbol_policies: Dict[str, Dict[str, Optional[int]]] = copy.deepcopy(
+            getattr(settings, "opportunity_strategy_symbol_policies", {}) or {}
+        )
+
     async def _get_cached_scan_entry(self, user_id: str) -> Optional[_CachedOpportunityResult]:
         async with self._scan_cache_lock:
             entry = self.opportunity_cache.get(user_id)
@@ -1516,74 +1520,91 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     ) -> List[OpportunityResult]:
         """Scan funding rate arbitrage opportunities using REAL trading strategies service."""
 
-        opportunities = []
+        opportunities: List[OpportunityResult] = []
 
         try:
             # Get top volume symbols from discovered assets for funding arbitrage
-            top_symbols = self._get_top_symbols_by_volume(discovered_assets, limit=20)
-            symbols_str = ",".join(top_symbols)
-            
+            top_symbols = self._select_symbols_by_volume("funding_arbitrage", discovered_assets)
+            if not top_symbols:
+                self.logger.info(
+                    "No symbols available for funding arbitrage scan",
+                    scan_id=scan_id,
+                    user_id=user_profile.user_id,
+                )
+                return opportunities
+
             # Call REAL funding arbitrage strategy using UNIFIED approach (same as rebalancing)
             # Check if user owns this strategy first (using passed portfolio)
             strategy_id = "ai_funding_arbitrage"
             user_portfolio = portfolio_result
             owned_strategy_ids = [s.get("strategy_id") for s in user_portfolio.get("active_strategies", [])]
-            
+
             # FIXED: Log but don't block - dispatcher already handles strategy filtering
             if strategy_id not in owned_strategy_ids:
-                self.logger.warning("Strategy not in portfolio, scanning anyway", 
-                                   user_id=user_profile.user_id, 
-                                   scan_id=scan_id,
-                                   strategy_id=strategy_id,
-                                   portfolio_strategies=len(owned_strategy_ids))
-            
-            # User owns strategy - execute directly without credit consumption
-            arbitrage_result = await trading_strategies_service.execute_strategy(
-                function="funding_arbitrage",
-                parameters={
-                    "symbols": symbols_str,
-                    "exchanges": "all",
-                    "min_funding_rate": 0.005
-                },
-                user_id=user_profile.user_id,
-                simulation_mode=True  # Use simulation mode to avoid credit consumption
-            )
-            
-            if arbitrage_result.get("success"):
-                # Extract opportunities from nested analysis structure
-                analysis_data = arbitrage_result.get("funding_arbitrage_analysis", {})
-                opportunities_data = analysis_data.get("opportunities", [])
-                
-                if opportunities_data:
-                    for opp in opportunities_data:
-                        # Convert to standardized OpportunityResult
-                        opportunity = OpportunityResult(
-                            strategy_id="ai_funding_arbitrage",
-                            strategy_name="AI Funding Arbitrage",
-                            opportunity_type="funding_arbitrage",
-                            symbol=opp.get("symbol", ""),
-                            exchange=opp.get("exchange", ""),
-                            profit_potential_usd=float(opp.get("profit_potential") or 0),
-                            confidence_score=float(opp.get("confidence") or 0.7),
-                            risk_level=opp.get("risk_level", "medium"),
-                            required_capital_usd=float(opp.get("required_capital") or 1000),
-                            estimated_timeframe=opp.get("timeframe", "8h"),
-                            entry_price=opp.get("entry_price"),
-                            exit_price=opp.get("exit_price"),
-                            metadata={
-                                "funding_rate_long": opp.get("funding_rate_long", 0),
-                                "funding_rate_short": opp.get("funding_rate_short", 0),
-                                "spread_percentage": opp.get("spread_percentage", 0),
-                                "exchanges": opp.get("exchanges", [])
-                            },
-                            discovered_at=self._current_timestamp()
+                self.logger.warning(
+                    "Strategy not in portfolio, scanning anyway",
+                    user_id=user_profile.user_id,
+                    scan_id=scan_id,
+                    strategy_id=strategy_id,
+                    portfolio_strategies=len(owned_strategy_ids),
+                )
+
+            async def fetch_for_symbols(symbol_chunk: List[str]) -> List[OpportunityResult]:
+                symbols_str = ",".join(symbol_chunk)
+                arbitrage_result = await trading_strategies_service.execute_strategy(
+                    function="funding_arbitrage",
+                    parameters={
+                        "symbols": symbols_str,
+                        "exchanges": "all",
+                        "min_funding_rate": 0.005,
+                    },
+                    user_id=user_profile.user_id,
+                    simulation_mode=True,  # Use simulation mode to avoid credit consumption
+                )
+
+                chunk_opportunities: List[OpportunityResult] = []
+                if arbitrage_result.get("success"):
+                    analysis_data = arbitrage_result.get("funding_arbitrage_analysis", {})
+                    opportunities_data = analysis_data.get("opportunities", [])
+
+                    for opp in opportunities_data or []:
+                        chunk_opportunities.append(
+                            OpportunityResult(
+                                strategy_id="ai_funding_arbitrage",
+                                strategy_name="AI Funding Arbitrage",
+                                opportunity_type="funding_arbitrage",
+                                symbol=opp.get("symbol", ""),
+                                exchange=opp.get("exchange", ""),
+                                profit_potential_usd=float(opp.get("profit_potential") or 0),
+                                confidence_score=float(opp.get("confidence") or 0.7),
+                                risk_level=opp.get("risk_level", "medium"),
+                                required_capital_usd=float(opp.get("required_capital") or 1000),
+                                estimated_timeframe=opp.get("timeframe", "8h"),
+                                entry_price=opp.get("entry_price"),
+                                exit_price=opp.get("exit_price"),
+                                metadata={
+                                    "funding_rate_long": opp.get("funding_rate_long", 0),
+                                    "funding_rate_short": opp.get("funding_rate_short", 0),
+                                    "spread_percentage": opp.get("spread_percentage", 0),
+                                    "exchanges": opp.get("exchanges", []),
+                                },
+                                discovered_at=self._current_timestamp(),
+                            )
                         )
-                        opportunities.append(opportunity)
-            
+
+                return chunk_opportunities
+
+            opportunities = await self._execute_strategy_across_chunks(
+                "funding_arbitrage", top_symbols, fetch_for_symbols
+            )
+
         except Exception as e:
-            self.logger.error("Funding arbitrage scan failed", 
-                            scan_id=scan_id, error=str(e))
-        
+            self.logger.error(
+                "Funding arbitrage scan failed",
+                scan_id=scan_id,
+                error=str(e),
+            )
+
         return opportunities
     
     async def _scan_statistical_arbitrage_opportunities(
@@ -1600,9 +1621,19 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         try:
             # Get universe of assets for statistical arbitrage
             # Use higher tier assets for stat arb (more institutional approach)
-            universe_symbols = self._get_symbols_for_statistical_arbitrage(discovered_assets, limit=50)
+            stat_arb_limit = self._get_strategy_symbol_limit("statistical_arbitrage")
+            universe_symbols = self._get_symbols_for_statistical_arbitrage(
+                discovered_assets, limit=stat_arb_limit
+            )
+            if not universe_symbols:
+                self.logger.info(
+                    "No symbols available for statistical arbitrage scan",
+                    scan_id=scan_id,
+                    user_id=user_profile.user_id,
+                )
+                return opportunities
             universe_str = ",".join(universe_symbols)
-            
+
             # Call REAL statistical arbitrage strategy using correct method signature
             stat_arb_result = await trading_strategies_service.execute_strategy(
                 function="statistical_arbitrage",
@@ -1747,8 +1778,17 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                    portfolio_strategies=len(owned_strategy_ids))
             
             # Get symbols suitable for momentum trading
-            momentum_symbols = self._get_top_symbols_by_volume(discovered_assets, limit=30)
-            
+            momentum_symbols = self._select_symbols_by_volume(
+                "spot_momentum_strategy", discovered_assets
+            )
+            if not momentum_symbols:
+                self.logger.info(
+                    "No symbols available for momentum scan",
+                    scan_id=scan_id,
+                    user_id=user_profile.user_id,
+                )
+                return opportunities
+
             for symbol in momentum_symbols:
                 try:
                     # User owns strategy - execute using unified approach
@@ -1937,8 +1977,17 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         
         try:
             # Get symbols for mean reversion (prefer higher volume, established coins)
-            reversion_symbols = self._get_top_symbols_by_volume(discovered_assets, limit=25)
-            
+            reversion_symbols = self._select_symbols_by_volume(
+                "spot_mean_reversion", discovered_assets
+            )
+            if not reversion_symbols:
+                self.logger.info(
+                    "No symbols available for mean reversion scan",
+                    scan_id=scan_id,
+                    user_id=user_profile.user_id,
+                )
+                return opportunities
+
             for symbol in reversion_symbols:
                 # Call REAL spot mean reversion strategy using correct method signature
                 reversion_result = await trading_strategies_service.execute_strategy(
@@ -2119,8 +2168,17 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         
         try:
             # Get symbols for breakout trading
-            breakout_symbols = self._get_top_symbols_by_volume(discovered_assets, limit=20)
-            
+            breakout_symbols = self._select_symbols_by_volume(
+                "spot_breakout_strategy", discovered_assets
+            )
+            if not breakout_symbols:
+                self.logger.info(
+                    "No symbols available for breakout scan",
+                    scan_id=scan_id,
+                    user_id=user_profile.user_id,
+                )
+                return opportunities
+
             for symbol in breakout_symbols:
                 # Call REAL spot breakout strategy using correct method signature
                 breakout_result = await trading_strategies_service.execute_strategy(
@@ -2712,8 +2770,15 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                    portfolio_strategies=len(owned_strategy_ids))
             
             # Get highest volume symbols for scalping (need liquidity)
-            symbols = self._get_top_symbols_by_volume(discovered_assets, limit=8)
-            
+            symbols = self._select_symbols_by_volume("scalping_strategy", discovered_assets)
+            if not symbols:
+                self.logger.info(
+                    "No symbols available for scalping scan",
+                    scan_id=scan_id,
+                    user_id=user_profile.user_id,
+                )
+                return opportunities
+
             for symbol in symbols:
                 try:
                     # Call trading strategies service for scalping analysis
@@ -2799,8 +2864,15 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                    portfolio_strategies=len(owned_strategy_ids))
             
             # Get highly liquid symbols for market making
-            symbols = self._get_top_symbols_by_volume(discovered_assets, limit=10)
-            
+            symbols = self._select_symbols_by_volume("market_making", discovered_assets)
+            if not symbols:
+                self.logger.info(
+                    "No symbols available for market making scan",
+                    scan_id=scan_id,
+                    user_id=user_profile.user_id,
+                )
+                return opportunities
+
             for symbol in symbols:
                 try:
                     # Call trading strategies service for market making analysis
@@ -2884,8 +2956,15 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                    portfolio_strategies=len(owned_strategy_ids))
             
             # Get top volume symbols for futures analysis
-            symbols = self._get_top_symbols_by_volume(discovered_assets, limit=20)
-            
+            symbols = self._select_symbols_by_volume("futures_trade", discovered_assets)
+            if not symbols:
+                self.logger.info(
+                    "No symbols available for futures scan",
+                    scan_id=scan_id,
+                    user_id=user_profile.user_id,
+                )
+                return opportunities
+
             # Process symbols in parallel
             tasks = [
                 self._analyze_futures_opportunity(symbol, user_profile.user_id, scan_id)
@@ -2939,10 +3018,17 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 return opportunities
             
             # Get top volume symbols for options analysis
-            symbols = self._get_top_symbols_by_volume(discovered_assets, limit=15)
-            
+            symbols = self._select_symbols_by_volume("options_trade", discovered_assets)
+            if not symbols:
+                self.logger.info(
+                    "No symbols available for options scan",
+                    scan_id=scan_id,
+                    user_id=user_profile.user_id,
+                )
+                return opportunities
+
             # Process in parallel batches for efficiency
-            batch_size = 5
+            batch_size = self._get_strategy_chunk_size("options_trade") or 5
             for i in range(0, len(symbols), batch_size):
                 batch = symbols[i:i+batch_size]
                 
@@ -3130,7 +3216,14 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     portfolio_strategies=len(owned_strategy_ids),
                 )
 
-            symbols = self._get_top_symbols_by_volume(discovered_assets, limit=12)
+            symbols = self._select_symbols_by_volume("volatility_trading", discovered_assets)
+            if not symbols:
+                self.logger.info(
+                    "No symbols available for volatility scan",
+                    scan_id=scan_id,
+                    user_id=user_profile.user_id,
+                )
+                return opportunities
             base_symbols = []
             for symbol in symbols:
                 base = self._extract_base_symbol(symbol)
@@ -3229,7 +3322,14 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     portfolio_strategies=len(owned_strategy_ids),
                 )
 
-            symbols = self._get_top_symbols_by_volume(discovered_assets, limit=12)
+            symbols = self._select_symbols_by_volume("news_sentiment", discovered_assets)
+            if not symbols:
+                self.logger.info(
+                    "No symbols available for news sentiment scan",
+                    scan_id=scan_id,
+                    user_id=user_profile.user_id,
+                )
+                return opportunities
             base_symbols = []
             for symbol in symbols:
                 base = self._extract_base_symbol(symbol)
@@ -3327,7 +3427,16 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             strategy_id = strategy_info.get("strategy_id", "community")
             strategy_name = strategy_info.get("name", "Community Strategy")
 
-            symbols = self._get_top_symbols_by_volume(discovered_assets, limit=8)
+            policy_key = strategy_info.get("strategy_id") or strategy_info.get("name") or "community_strategy"
+            symbols = self._select_symbols_by_volume(str(policy_key), discovered_assets)
+            if not symbols:
+                self.logger.info(
+                    "No symbols available for community strategy scan",
+                    scan_id=scan_id,
+                    user_id=user_profile.user_id,
+                    strategy_id=strategy_id,
+                )
+                return opportunities
             base_symbols = []
             for symbol in symbols:
                 base = self._extract_base_symbol(symbol)
@@ -3956,7 +4065,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 )
 
             if not candidate_positions:
-                fallback_symbols = self._get_top_symbols_by_volume(discovered_assets, limit=5)
+                fallback_symbols = self._select_symbols_by_volume(
+                    "hedge_position", discovered_assets, default_limit=5
+                )
                 for symbol in fallback_symbols:
                     candidate_positions.append(
                         {
@@ -4106,7 +4217,14 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     portfolio_strategies=len(owned_strategy_ids),
                 )
 
-            symbols = self._get_top_symbols_by_volume(discovered_assets, limit=10)
+            symbols = self._select_symbols_by_volume("futures_arbitrage", discovered_assets)
+            if not symbols:
+                self.logger.info(
+                    "No symbols available for futures arbitrage scan",
+                    scan_id=scan_id,
+                    user_id=user_profile.user_id,
+                )
+                return opportunities
             base_symbols = []
             for symbol in symbols:
                 base = self._extract_base_symbol(symbol)
@@ -4215,7 +4333,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         opportunities: List[OpportunityResult] = []
 
         try:
-            candidate_symbols = self._get_top_symbols_by_volume(discovered_assets, limit=10)
+            candidate_symbols = self._select_symbols_by_volume("complex_strategy", discovered_assets)
             if not candidate_symbols:
                 candidate_symbols = ["BTC", "ETH", "SOL"]
 
@@ -4317,54 +4435,145 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         else:
             return "high"
     
-    def _get_top_symbols_by_volume(self, discovered_assets: Dict[str, List[Any]], limit: int = 20) -> List[str]:
+    def _get_strategy_symbol_limit(self, strategy_key: str, default: Optional[int] = None) -> Optional[int]:
+        """Return the configured symbol limit for a strategy or the provided default."""
+
+        policy = self.strategy_symbol_policies.get(strategy_key)
+        if isinstance(policy, dict) and "max_symbols" in policy:
+            value = policy.get("max_symbols")
+            if value is None:
+                return None
+            if isinstance(value, int):
+                return value if value > 0 else None
+            try:
+                int_value = int(value)
+            except (TypeError, ValueError):
+                return default
+            return int_value if int_value > 0 else None
+
+        return default
+
+    def _get_strategy_chunk_size(self, strategy_key: str) -> Optional[int]:
+        """Return the configured chunk size for a strategy, if any."""
+
+        policy = self.strategy_symbol_policies.get(strategy_key)
+        if isinstance(policy, dict) and "chunk_size" in policy:
+            value = policy.get("chunk_size")
+            if value is None:
+                return None
+            if isinstance(value, int):
+                return value if value > 0 else None
+            try:
+                int_value = int(value)
+            except (TypeError, ValueError):
+                return None
+            return int_value if int_value > 0 else None
+
+        return None
+
+    def _chunk_symbols(self, strategy_key: str, symbols: List[str]) -> List[List[str]]:
+        """Split symbols into chunks based on strategy policy."""
+
+        if not symbols:
+            return []
+
+        chunk_size = self._get_strategy_chunk_size(strategy_key)
+        if not chunk_size or chunk_size <= 0 or chunk_size >= len(symbols):
+            return [symbols]
+
+        return [symbols[i : i + chunk_size] for i in range(0, len(symbols), chunk_size)]
+
+    async def _execute_strategy_across_chunks(
+        self,
+        strategy_key: str,
+        symbols: List[str],
+        executor: Any,
+    ) -> List[OpportunityResult]:
+        """Execute strategy fetcher across symbol chunks and aggregate opportunities."""
+
+        if not symbols:
+            return []
+
+        opportunities: List[OpportunityResult] = []
+        for chunk in self._chunk_symbols(strategy_key, symbols):
+            if not chunk:
+                continue
+            chunk_result = await executor(chunk)
+            if chunk_result:
+                opportunities.extend(chunk_result)
+
+        return opportunities
+
+    def _select_symbols_by_volume(
+        self,
+        strategy_key: str,
+        discovered_assets: Dict[str, List[Any]],
+        default_limit: Optional[int] = None,
+    ) -> List[str]:
+        """Select symbols ordered by volume honoring strategy policies."""
+
+        limit = self._get_strategy_symbol_limit(strategy_key, default_limit)
+        return self._get_top_symbols_by_volume(discovered_assets, limit=limit)
+
+    def _get_top_symbols_by_volume(
+        self, discovered_assets: Dict[str, List[Any]], limit: Optional[int] = None
+    ) -> List[str]:
         """Get top symbols by volume across all tiers."""
-        
+
         all_assets = []
         for tier_assets in discovered_assets.values():
             all_assets.extend(tier_assets)
-        
+
         # Sort by volume and get top symbols
         sorted_assets = sorted(all_assets, key=lambda x: x.volume_24h_usd, reverse=True)
+        if limit is None or limit <= 0:
+            return [asset.symbol for asset in sorted_assets]
+
         return [asset.symbol for asset in sorted_assets[:limit]]
-    
-    def _get_symbols_for_statistical_arbitrage(self, discovered_assets: Dict[str, List[Any]], limit: int = 50) -> List[str]:
+
+    def _get_symbols_for_statistical_arbitrage(
+        self, discovered_assets: Dict[str, List[Any]], limit: Optional[int] = None
+    ) -> List[str]:
         """Get symbols suitable for statistical arbitrage (higher tier preferred)."""
-        
+
         # Prefer institutional and enterprise tier assets for stat arb
         preferred_tiers = ["tier_institutional", "tier_enterprise", "tier_professional"]
-        
+
         symbols = []
         for tier in preferred_tiers:
-            if tier in discovered_assets:
-                tier_symbols = [asset.symbol for asset in discovered_assets[tier][:limit//len(preferred_tiers)]]
-                symbols.extend(tier_symbols)
-                
-        # Fill remaining slots with retail tier if needed
-        if len(symbols) < limit and "tier_retail" in discovered_assets:
-            remaining = limit - len(symbols)
-            retail_symbols = [asset.symbol for asset in discovered_assets["tier_retail"][:remaining]]
-            symbols.extend(retail_symbols)
-            
+            tier_assets = discovered_assets.get(tier, [])
+            symbols.extend(asset.symbol for asset in tier_assets)
+
+        if "tier_retail" in discovered_assets:
+            symbols.extend(asset.symbol for asset in discovered_assets["tier_retail"])
+
+        if limit is None or limit <= 0:
+            return symbols
+
         return symbols[:limit]
-    
-    def _get_correlation_pairs(self, discovered_assets: Dict[str, List[Any]], max_pairs: int = 10) -> List[Tuple[str, str]]:
+
+    def _get_correlation_pairs(
+        self, discovered_assets: Dict[str, List[Any]], max_pairs: Optional[int] = 10
+    ) -> List[Tuple[str, str]]:
         """Get symbol pairs likely to be correlated for pairs trading."""
 
         # Get top symbols
-        top_symbols = self._get_top_symbols_by_volume(discovered_assets, limit=20)
-        
+        top_symbols = self._get_top_symbols_by_volume(discovered_assets)
+
         # Create pairs from major cryptocurrencies (these tend to be correlated)
         major_cryptos = [s for s in top_symbols if s in ["BTC", "ETH", "BNB", "ADA", "SOL", "DOT", "AVAX", "MATIC"]]
-        
+
         pairs = []
         for i in range(len(major_cryptos)):
             for j in range(i + 1, len(major_cryptos)):
                 pairs.append((major_cryptos[i], major_cryptos[j]))
-                if len(pairs) >= max_pairs:
+                if max_pairs is not None and len(pairs) >= max_pairs:
                     break
-            if len(pairs) >= max_pairs:
+            if max_pairs is not None and len(pairs) >= max_pairs:
                 break
+
+        if max_pairs is None or max_pairs <= 0:
+            return pairs
 
         return pairs[:max_pairs]
 
