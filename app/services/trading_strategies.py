@@ -1532,6 +1532,12 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
                     )
                     execution_result = None
                 else:
+                    # Sanitize and write back to breakout_signal so payload matches execution
+                    sanitized_stop = round(stop_loss_price, 4)
+                    sanitized_take = round(take_profit_price, 4)
+                    breakout_signal["stop_loss"] = sanitized_stop
+                    breakout_signal["take_profit"] = sanitized_take
+
                     risk_amount_usd = abs(current_price - stop_loss_price) * executed_quantity
                     potential_profit_usd = abs(take_profit_price - current_price) * executed_quantity
                     risk_reward_ratio = (
@@ -1541,10 +1547,10 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
                     risk_management_block.update(
                         {
                             "entry_price": current_price,
-                            "stop_loss_price": round(stop_loss_price, 4),
-                            "take_profit_price": round(take_profit_price, 4),
-                            "stop_loss": round(stop_loss_price, 4),
-                            "take_profit": round(take_profit_price, 4),
+                            "stop_loss_price": sanitized_stop,
+                            "take_profit_price": sanitized_take,
+                            "stop_loss": sanitized_stop,
+                            "take_profit": sanitized_take,
                             "risk_amount_usd": round(risk_amount_usd, 2),
                             "potential_profit_usd": round(potential_profit_usd, 2),
                             "risk_reward_ratio": round(risk_reward_ratio, 2),
@@ -1556,8 +1562,8 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
                         "symbol": symbol,
                         "quantity": executed_quantity,
                         "order_type": "MARKET",
-                        "stop_loss": round(stop_loss_price, 4),
-                        "take_profit": round(take_profit_price, 4),
+                        "stop_loss": sanitized_stop,
+                        "take_profit": sanitized_take,
                     }
 
                     execution_result = await self.trade_executor.execute_trade(
