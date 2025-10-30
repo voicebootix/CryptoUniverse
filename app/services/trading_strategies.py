@@ -1344,24 +1344,35 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
                     take_profit_price = min(mean_price, current_price * (1 - reward_pct))
                     take_profit_price = max(take_profit_price, current_price * 0.1)
 
-                risk_amount_usd = abs(current_price - stop_loss_price) * quantity
-                potential_profit_usd = abs(take_profit_price - current_price) * quantity
-                risk_reward_ratio = (
-                    potential_profit_usd / risk_amount_usd if risk_amount_usd > 0 else 0.0
-                )
+                # Validate stop loss and take profit before using them
+                if stop_loss_price <= 0 or take_profit_price <= 0:
+                    self.logger.warning(
+                        "Skipping mean reversion trade due to invalid risk bounds",
+                        symbol=symbol,
+                        strategy_id=strategy_id,
+                        stop_loss=stop_loss_price,
+                        take_profit=take_profit_price,
+                    )
+                    action = "HOLD"
+                else:
+                    risk_amount_usd = abs(current_price - stop_loss_price) * quantity
+                    potential_profit_usd = abs(take_profit_price - current_price) * quantity
+                    risk_reward_ratio = (
+                        potential_profit_usd / risk_amount_usd if risk_amount_usd > 0 else 0.0
+                    )
 
-                trade_risk = {
-                    "entry_price": current_price,
-                    "stop_loss_price": round(stop_loss_price, 4),
-                    "take_profit_price": round(take_profit_price, 4),
-                    "stop_loss": round(stop_loss_price, 4),
-                    "take_profit": round(take_profit_price, 4),
-                    "risk_amount_usd": round(risk_amount_usd, 2),
-                    "potential_profit_usd": round(potential_profit_usd, 2),
-                    "risk_reward_ratio": round(risk_reward_ratio, 2),
-                    "risk_pct": round(risk_pct * 100, 2),
-                    "reward_pct": round(reward_pct * 100, 2),
-                }
+                    trade_risk = {
+                        "entry_price": current_price,
+                        "stop_loss_price": round(stop_loss_price, 4),
+                        "take_profit_price": round(take_profit_price, 4),
+                        "stop_loss": round(stop_loss_price, 4),
+                        "take_profit": round(take_profit_price, 4),
+                        "risk_amount_usd": round(risk_amount_usd, 2),
+                        "potential_profit_usd": round(potential_profit_usd, 2),
+                        "risk_reward_ratio": round(risk_reward_ratio, 2),
+                        "risk_pct": round(risk_pct * 100, 2),
+                        "reward_pct": round(reward_pct * 100, 2),
+                    }
 
             risk_management_block = {
                 "position_size": quantity,
