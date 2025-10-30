@@ -53,6 +53,8 @@ PORTFOLIO_FETCH_TIMEOUT_SECONDS: float = 65.0
 
 settings = get_settings()
 
+DEFAULT_STRATEGY_SYMBOL_LIMIT = 20
+
 
 @dataclass
 class OpportunityResult:
@@ -1524,7 +1526,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
         try:
             # Get top volume symbols from discovered assets for funding arbitrage
-            top_symbols = self._select_symbols_by_volume("funding_arbitrage", discovered_assets)
+            top_symbols = self._select_symbols_by_volume(
+                "funding_arbitrage", discovered_assets, default_limit=20
+            )
             if not top_symbols:
                 self.logger.info(
                     "No symbols available for funding arbitrage scan",
@@ -1621,7 +1625,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         try:
             # Get universe of assets for statistical arbitrage
             # Use higher tier assets for stat arb (more institutional approach)
-            stat_arb_limit = self._get_strategy_symbol_limit("statistical_arbitrage")
+            stat_arb_limit = self._get_strategy_symbol_limit(
+                "statistical_arbitrage", default=50
+            )
             universe_symbols = self._get_symbols_for_statistical_arbitrage(
                 discovered_assets, limit=stat_arb_limit
             )
@@ -1779,7 +1785,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             
             # Get symbols suitable for momentum trading
             momentum_symbols = self._select_symbols_by_volume(
-                "spot_momentum_strategy", discovered_assets
+                "spot_momentum_strategy", discovered_assets, default_limit=30
             )
             if not momentum_symbols:
                 self.logger.info(
@@ -1978,7 +1984,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         try:
             # Get symbols for mean reversion (prefer higher volume, established coins)
             reversion_symbols = self._select_symbols_by_volume(
-                "spot_mean_reversion", discovered_assets
+                "spot_mean_reversion", discovered_assets, default_limit=25
             )
             if not reversion_symbols:
                 self.logger.info(
@@ -2169,7 +2175,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         try:
             # Get symbols for breakout trading
             breakout_symbols = self._select_symbols_by_volume(
-                "spot_breakout_strategy", discovered_assets
+                "spot_breakout_strategy", discovered_assets, default_limit=20
             )
             if not breakout_symbols:
                 self.logger.info(
@@ -2770,7 +2776,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                    portfolio_strategies=len(owned_strategy_ids))
             
             # Get highest volume symbols for scalping (need liquidity)
-            symbols = self._select_symbols_by_volume("scalping_strategy", discovered_assets)
+            symbols = self._select_symbols_by_volume(
+                "scalping_strategy", discovered_assets, default_limit=8
+            )
             if not symbols:
                 self.logger.info(
                     "No symbols available for scalping scan",
@@ -2864,7 +2872,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                    portfolio_strategies=len(owned_strategy_ids))
             
             # Get highly liquid symbols for market making
-            symbols = self._select_symbols_by_volume("market_making", discovered_assets)
+            symbols = self._select_symbols_by_volume(
+                "market_making", discovered_assets, default_limit=10
+            )
             if not symbols:
                 self.logger.info(
                     "No symbols available for market making scan",
@@ -2956,7 +2966,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                    portfolio_strategies=len(owned_strategy_ids))
             
             # Get top volume symbols for futures analysis
-            symbols = self._select_symbols_by_volume("futures_trade", discovered_assets)
+            symbols = self._select_symbols_by_volume(
+                "futures_trade", discovered_assets, default_limit=20
+            )
             if not symbols:
                 self.logger.info(
                     "No symbols available for futures scan",
@@ -3018,7 +3030,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 return opportunities
             
             # Get top volume symbols for options analysis
-            symbols = self._select_symbols_by_volume("options_trade", discovered_assets)
+            symbols = self._select_symbols_by_volume(
+                "options_trade", discovered_assets, default_limit=15
+            )
             if not symbols:
                 self.logger.info(
                     "No symbols available for options scan",
@@ -3216,7 +3230,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     portfolio_strategies=len(owned_strategy_ids),
                 )
 
-            symbols = self._select_symbols_by_volume("volatility_trading", discovered_assets)
+            symbols = self._select_symbols_by_volume(
+                "volatility_trading", discovered_assets, default_limit=12
+            )
             if not symbols:
                 self.logger.info(
                     "No symbols available for volatility scan",
@@ -3322,7 +3338,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     portfolio_strategies=len(owned_strategy_ids),
                 )
 
-            symbols = self._select_symbols_by_volume("news_sentiment", discovered_assets)
+            symbols = self._select_symbols_by_volume(
+                "news_sentiment", discovered_assets, default_limit=12
+            )
             if not symbols:
                 self.logger.info(
                     "No symbols available for news sentiment scan",
@@ -3428,7 +3446,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             strategy_name = strategy_info.get("name", "Community Strategy")
 
             policy_key = strategy_info.get("strategy_id") or strategy_info.get("name") or "community_strategy"
-            symbols = self._select_symbols_by_volume(str(policy_key), discovered_assets)
+            symbols = self._select_symbols_by_volume(
+                str(policy_key), discovered_assets, default_limit=8
+            )
             if not symbols:
                 self.logger.info(
                     "No symbols available for community strategy scan",
@@ -4217,7 +4237,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     portfolio_strategies=len(owned_strategy_ids),
                 )
 
-            symbols = self._select_symbols_by_volume("futures_arbitrage", discovered_assets)
+            symbols = self._select_symbols_by_volume(
+                "futures_arbitrage", discovered_assets, default_limit=10
+            )
             if not symbols:
                 self.logger.info(
                     "No symbols available for futures arbitrage scan",
@@ -4333,7 +4355,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         opportunities: List[OpportunityResult] = []
 
         try:
-            candidate_symbols = self._select_symbols_by_volume("complex_strategy", discovered_assets)
+            candidate_symbols = self._select_symbols_by_volume(
+                "complex_strategy", discovered_assets, default_limit=10
+            )
             if not candidate_symbols:
                 candidate_symbols = ["BTC", "ETH", "SOL"]
 
@@ -4435,8 +4459,10 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         else:
             return "high"
     
-    def _get_strategy_symbol_limit(self, strategy_key: str, default: Optional[int] = None) -> Optional[int]:
-        """Return the configured symbol limit for a strategy or the provided default."""
+    def _get_strategy_symbol_limit(
+        self, strategy_key: str, default: Optional[int] = None
+    ) -> Optional[int]:
+        """Return the configured symbol limit for a strategy or a safe default."""
 
         policy = self.strategy_symbol_policies.get(strategy_key)
         if isinstance(policy, dict) and "max_symbols" in policy:
@@ -4451,7 +4477,10 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 return default
             return int_value if int_value > 0 else None
 
-        return default
+        if default is not None:
+            return default
+
+        return DEFAULT_STRATEGY_SYMBOL_LIMIT
 
     def _get_strategy_chunk_size(self, strategy_key: str) -> Optional[int]:
         """Return the configured chunk size for a strategy, if any."""
