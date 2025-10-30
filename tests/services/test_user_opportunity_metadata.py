@@ -1,6 +1,7 @@
 import os
 import sys
 from pathlib import Path
+from typing import Any, Dict, Optional
 
 import pytest
 from types import SimpleNamespace
@@ -364,3 +365,58 @@ async def test_spot_breakout_scanner_produces_enriched_trade(monkeypatch):
     assert opportunity.metadata["stop_loss"] > 0
     assert opportunity.metadata["take_profit"] > 0
     assert opportunity.profit_potential_usd > 0
+
+
+@pytest.mark.asyncio
+async def test_scan_strategy_opportunities_falls_back_to_synthetic(monkeypatch):
+    service = UserOpportunityDiscoveryService()
+
+    async def fake_scanner(*args, **kwargs):
+        return []
+
+    service.strategy_scanners["spot_momentum_strategy"] = fake_scanner
+
+    user_profile = UserOpportunityProfile(
+        user_id="admin-user",
+        active_strategy_count=14,
+        total_monthly_strategy_cost=0,
+        user_tier="enterprise",
+        max_asset_tier="tier_institutional",
+        opportunity_scan_limit=None,
+        last_scan_time=None,
+        strategy_fingerprint="synthetic",
+    )
+
+    discovered_assets = {
+        "tier_retail": [
+            SimpleNamespace(symbol="BTC", volume_24h_usd=5_000_000, exchange="binance"),
+            SimpleNamespace(symbol="ETH", volume_24h_usd=4_000_000, exchange="binance"),
+        ]
+    }
+
+    async def fake_snapshot(symbol: str, existing: Dict[str, Any], seed_entry: Optional[float] = None):
+        return 125.0, {"current": 125.0, "volume": 1_000_000.0}
+
+    monkeypatch.setattr(service, "_ensure_price_snapshot", fake_snapshot)
+
+    strategy_info = {"strategy_id": "ai_spot_momentum_strategy", "name": "AI Spot Momentum"}
+    portfolio_result = {"active_strategies": [strategy_info]}
+
+    result = await service._scan_strategy_opportunities(
+        strategy_info,
+        discovered_assets,
+        user_profile,
+        "scan-synth",
+        portfolio_result,
+    )
+
+    opportunities = result["opportunities"]
+    assert len(opportunities) == 1
+    synthetic_opportunity = opportunities[0]
+
+    assert synthetic_opportunity.strategy_id == "ai_spot_momentum_strategy"
+    assert synthetic_opportunity.entry_price and synthetic_opportunity.entry_price > 0
+    assert synthetic_opportunity.metadata.get("synthetic_opportunity") is True
+    assert synthetic_opportunity.metadata.get("stop_loss") > 0
+    assert synthetic_opportunity.metadata.get("take_profit") > 0
+    assert synthetic_opportunity.profit_potential_usd > 0
