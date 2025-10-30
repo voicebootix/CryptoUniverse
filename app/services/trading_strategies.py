@@ -1508,40 +1508,50 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
                     stop_loss_price = current_price * (0.98 if breakout_signal["direction"] == "BUY" else 1.02)
                     take_profit_price = current_price * (1.05 if breakout_signal["direction"] == "BUY" else 0.95)
 
-                risk_amount_usd = abs(current_price - stop_loss_price) * quantity
-                potential_profit_usd = abs(take_profit_price - current_price) * quantity
-                risk_reward_ratio = (
-                    potential_profit_usd / risk_amount_usd if risk_amount_usd > 0 else 0.0
-                )
+                if stop_loss_price <= 0 or take_profit_price <= 0:
+                    self.logger.warning(
+                        "Skipping breakout trade due to invalid risk bounds",
+                        symbol=symbol,
+                        strategy_id=strategy_id,
+                        stop_loss=stop_loss_price,
+                        take_profit=take_profit_price,
+                    )
+                    execution_result = None
+                else:
+                    risk_amount_usd = abs(current_price - stop_loss_price) * quantity
+                    potential_profit_usd = abs(take_profit_price - current_price) * quantity
+                    risk_reward_ratio = (
+                        potential_profit_usd / risk_amount_usd if risk_amount_usd > 0 else 0.0
+                    )
 
-                risk_management_block.update(
-                    {
-                        "entry_price": current_price,
-                        "stop_loss_price": round(stop_loss_price, 4),
-                        "take_profit_price": round(take_profit_price, 4),
+                    risk_management_block.update(
+                        {
+                            "entry_price": current_price,
+                            "stop_loss_price": round(stop_loss_price, 4),
+                            "take_profit_price": round(take_profit_price, 4),
+                            "stop_loss": round(stop_loss_price, 4),
+                            "take_profit": round(take_profit_price, 4),
+                            "risk_amount_usd": round(risk_amount_usd, 2),
+                            "potential_profit_usd": round(potential_profit_usd, 2),
+                            "risk_reward_ratio": round(risk_reward_ratio, 2),
+                        }
+                    )
+
+                    trade_request = {
+                        "action": breakout_signal["direction"],
+                        "symbol": symbol,
+                        "quantity": parameters.quantity * breakout_signal["conviction"],
+                        "order_type": "MARKET",
                         "stop_loss": round(stop_loss_price, 4),
                         "take_profit": round(take_profit_price, 4),
-                        "risk_amount_usd": round(risk_amount_usd, 2),
-                        "potential_profit_usd": round(potential_profit_usd, 2),
-                        "risk_reward_ratio": round(risk_reward_ratio, 2),
                     }
-                )
 
-                trade_request = {
-                    "action": breakout_signal["direction"],
-                    "symbol": symbol,
-                    "quantity": parameters.quantity * breakout_signal["conviction"],
-                    "order_type": "MARKET",
-                    "stop_loss": breakout_signal["stop_loss"],
-                    "take_profit": breakout_signal["take_profit"]
-                }
-
-                execution_result = await self.trade_executor.execute_trade(
-                    trade_request,
-                    user_id,
-                    simulation_mode=True,
-                    strategy_id=strategy_id,
-                )
+                    execution_result = await self.trade_executor.execute_trade(
+                        trade_request,
+                        user_id,
+                        simulation_mode=True,
+                        strategy_id=strategy_id,
+                    )
             else:
                 execution_result = None
 
