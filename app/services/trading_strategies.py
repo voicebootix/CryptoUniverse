@@ -1080,14 +1080,49 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
             )
             symbol_analysis = analysis_payload.get(symbol, {})
             momentum_data = symbol_analysis.get("analysis", {}).get("momentum", {})
-            
+            price_data = symbol_analysis.get("analysis", {}).get("price", {})
+
+            def _safe_float(value: Any, default: float = 0.0) -> float:
+                try:
+                    if value is None:
+                        return default
+                    return float(value)
+                except (TypeError, ValueError):
+                    return default
+
+            current_price = _safe_float(price_data.get("current"))
+            high_24h = _safe_float(price_data.get("high_24h")) or current_price
+            low_24h = _safe_float(price_data.get("low_24h")) or current_price
+            volume_24h = _safe_float(price_data.get("volume"))
+
+            if current_price <= 0:
+                fallback_price = await self._get_symbol_price("auto", symbol)
+                current_price = _safe_float(fallback_price.get("price"))
+                if current_price <= 0:
+                    return {
+                        "success": False,
+                        "error": "Price data unavailable",
+                        "timestamp": datetime.utcnow().isoformat(),
+                    }
+                high_24h = max(current_price, current_price * 1.02)
+                low_24h = min(current_price, current_price * 0.98)
+                volume_24h = _safe_float(fallback_price.get("volume"))
+
+            price_snapshot = {
+                "current": round(current_price, 2),
+                "high_24h": round(high_24h, 2) if high_24h else round(current_price, 2),
+                "low_24h": round(low_24h, 2) if low_24h else round(current_price, 2),
+                "volume_24h": round(volume_24h, 2) if volume_24h else 0.0,
+            }
+
             # Momentum signal logic
             rsi = momentum_data.get("rsi", 50)
             macd_trend = momentum_data.get("macd", {}).get("trend", "NEUTRAL")
-            
+
             # Generate trading signal
             signal_strength = 0
-            
+            action = "HOLD"
+
             if rsi > 60 and macd_trend == "BULLISH":
                 signal_strength = 8
                 action = "BUY"
@@ -1101,6 +1136,55 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
                 signal_strength = 5
                 action = "HOLD"
             
+            # Calculate risk profile if we have a directional signal
+            quantity = float(parameters.quantity or 0.01)
+            notional_value = quantity * current_price
+            volatility_pct = 0.0
+            if current_price > 0:
+                price_range = abs(high_24h - low_24h)
+                volatility_pct = price_range / current_price if current_price else 0.0
+            risk_pct = max(0.005, min(0.03, (volatility_pct / 2) if volatility_pct else 0.01))
+            reward_pct = min(risk_pct * 2.0, 0.10)
+
+            trade_risk = {}
+            if action in {"BUY", "SELL"}:
+                if action == "BUY":
+                    stop_loss_price = current_price * (1 - risk_pct)
+                    take_profit_price = current_price * (1 + reward_pct)
+                else:
+                    stop_loss_price = current_price * (1 + risk_pct)
+                    take_profit_price = current_price * (1 - reward_pct)
+                    take_profit_price = max(take_profit_price, current_price * 0.1)
+
+                risk_amount_usd = abs(current_price - stop_loss_price) * quantity
+                potential_profit_usd = abs(take_profit_price - current_price) * quantity
+                risk_reward_ratio = (
+                    potential_profit_usd / risk_amount_usd if risk_amount_usd > 0 else 0.0
+                )
+
+                trade_risk = {
+                    "entry_price": current_price,
+                    "stop_loss_price": round(stop_loss_price, 4),
+                    "take_profit_price": round(take_profit_price, 4),
+                    "stop_loss": round(stop_loss_price, 4),
+                    "take_profit": round(take_profit_price, 4),
+                    "risk_amount_usd": round(risk_amount_usd, 2),
+                    "potential_profit_usd": round(potential_profit_usd, 2),
+                    "risk_reward_ratio": round(risk_reward_ratio, 2),
+                    "risk_pct": round(risk_pct * 100, 2),
+                    "reward_pct": round(reward_pct * 100, 2),
+                }
+
+            risk_management_block = {
+                "position_size": quantity,
+                "notional_usd": round(notional_value, 2),
+                "price_snapshot": price_snapshot,
+                "price": price_snapshot,
+            }
+
+            if trade_risk:
+                risk_management_block.update(trade_risk)
+
             # Execute if signal is strong enough
             if signal_strength >= parameters.min_confidence / 10:
                 trade_request = {
@@ -1108,36 +1192,35 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
                     "symbol": symbol,
                     "quantity": parameters.quantity,
                     "order_type": "MARKET",
-                    "stop_loss": parameters.stop_loss,
-                    "take_profit": parameters.take_profit
+                    "stop_loss": trade_risk.get("stop_loss_price") if trade_risk else parameters.stop_loss,
+                    "take_profit": trade_risk.get("take_profit_price") if trade_risk else parameters.take_profit
                 }
-                
+
                 execution_result = await self.trade_executor.execute_trade(
                     trade_request,
                     user_id,
                     simulation_mode=True,
                     strategy_id=strategy_id,
                 )
-                
+
                 return {
                     "success": True,
                     "strategy": "momentum",
                     "signal": {
                         "action": action,
                         "strength": signal_strength,
-                        "confidence": signal_strength * 10
+                        "confidence": signal_strength * 10,
+                        "price_snapshot": price_snapshot,
                     },
                     "indicators": {
                         "rsi": rsi,
                         "macd_trend": macd_trend,
-                        "momentum_score": signal_strength
+                        "momentum_score": signal_strength,
+                        "price_snapshot": price_snapshot,
+                        "price": price_snapshot,
                     },
                     "execution_result": execution_result,
-                    "risk_management": {
-                        "stop_loss": parameters.stop_loss,
-                        "take_profit": parameters.take_profit,
-                        "position_size": parameters.quantity
-                    },
+                    "risk_management": risk_management_block,
                     "timestamp": datetime.utcnow().isoformat()
                 }
             else:
@@ -1148,12 +1231,16 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
                         "action": "HOLD",
                         "strength": signal_strength,
                         "confidence": signal_strength * 10,
-                        "reason": "Signal strength below threshold"
+                        "reason": "Signal strength below threshold",
+                        "price_snapshot": price_snapshot,
                     },
                     "indicators": {
                         "rsi": rsi,
-                        "macd_trend": macd_trend
+                        "macd_trend": macd_trend,
+                        "price_snapshot": price_snapshot,
+                        "price": price_snapshot,
                     },
+                    "risk_management": risk_management_block,
                     "timestamp": datetime.utcnow().isoformat()
                 }
                 
@@ -1218,6 +1305,74 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
                 action = "HOLD"
                 confidence = 30
 
+            current_price = float(reversion_signals.get("current_price") or 0.0)
+            mean_price = float(reversion_signals.get("mean_price") or current_price)
+            std_dev = float(reversion_signals.get("standard_deviation") or 0.0)
+            bollinger_upper = float(reversion_signals.get("bollinger_upper") or (mean_price + std_dev))
+            bollinger_lower = float(reversion_signals.get("bollinger_lower") or (mean_price - std_dev))
+
+            price_snapshot = {
+                "current": round(current_price, 4) if current_price else 0.0,
+                "mean": round(mean_price, 4) if mean_price else 0.0,
+                "bollinger_upper": round(bollinger_upper, 4),
+                "bollinger_lower": round(bollinger_lower, 4),
+                "standard_deviation": round(std_dev, 6),
+            }
+
+            reversion_signals["price_snapshot"] = price_snapshot
+            reversion_signals["price"] = price_snapshot
+
+            quantity = float(parameters.quantity or 0.01)
+            notional_value = current_price * quantity if current_price else 0.0
+            volatility_ratio = std_dev / current_price if current_price else 0.0
+            risk_pct = max(0.005, min(0.05, abs(volatility_ratio)))
+            reward_pct = min(risk_pct * 1.8, 0.12)
+
+            trade_risk = {}
+            if action in {"BUY", "SELL"} and current_price > 0:
+                if action == "BUY":
+                    stop_loss_price = min(
+                        current_price * (1 - risk_pct),
+                        current_price - std_dev if std_dev else current_price * 0.99,
+                    )
+                    take_profit_price = max(mean_price, current_price * (1 + reward_pct))
+                else:
+                    stop_loss_price = max(
+                        current_price * (1 + risk_pct),
+                        current_price + std_dev if std_dev else current_price * 1.01,
+                    )
+                    take_profit_price = min(mean_price, current_price * (1 - reward_pct))
+                    take_profit_price = max(take_profit_price, current_price * 0.1)
+
+                risk_amount_usd = abs(current_price - stop_loss_price) * quantity
+                potential_profit_usd = abs(take_profit_price - current_price) * quantity
+                risk_reward_ratio = (
+                    potential_profit_usd / risk_amount_usd if risk_amount_usd > 0 else 0.0
+                )
+
+                trade_risk = {
+                    "entry_price": current_price,
+                    "stop_loss_price": round(stop_loss_price, 4),
+                    "take_profit_price": round(take_profit_price, 4),
+                    "stop_loss": round(stop_loss_price, 4),
+                    "take_profit": round(take_profit_price, 4),
+                    "risk_amount_usd": round(risk_amount_usd, 2),
+                    "potential_profit_usd": round(potential_profit_usd, 2),
+                    "risk_reward_ratio": round(risk_reward_ratio, 2),
+                    "risk_pct": round(risk_pct * 100, 2),
+                    "reward_pct": round(reward_pct * 100, 2),
+                }
+
+            risk_management_block = {
+                "position_size": quantity,
+                "notional_usd": round(notional_value, 2),
+                "price_snapshot": price_snapshot,
+                "price": price_snapshot,
+            }
+
+            if trade_risk:
+                risk_management_block.update(trade_risk)
+
             # Execute if confidence is high enough
             execution_result = None
             if confidence >= parameters.min_confidence and action != "HOLD":
@@ -1227,10 +1382,10 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
                     "quantity": parameters.quantity,
                     "order_type": "LIMIT",
                     "price": reversion_signals["entry_price"],
-                    "stop_loss": parameters.stop_loss,
-                    "take_profit": parameters.take_profit
+                    "stop_loss": trade_risk.get("stop_loss_price") if trade_risk else parameters.stop_loss,
+                    "take_profit": trade_risk.get("take_profit_price") if trade_risk else parameters.take_profit
                 }
-                
+
                 execution_result = await self.trade_executor.execute_trade(
                     trade_request,
                     user_id,
@@ -1245,10 +1400,12 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
                     "action": action,
                     "confidence": confidence,
                     "z_score": z_score,
-                    "entry_price": reversion_signals.get("entry_price")
+                    "entry_price": reversion_signals.get("entry_price"),
+                    "price_snapshot": price_snapshot,
                 },
                 "indicators": reversion_signals,
                 "execution_result": execution_result,
+                "risk_management": risk_management_block,
                 "timestamp": datetime.utcnow().isoformat()
             }
             
@@ -1325,9 +1482,51 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
             breakout_signal = await self._detect_breakout(
                 current_price, resistance_levels, support_levels, parameters
             )
-            
-            execution_result = None
+
+            quantity = float(parameters.quantity or 0.01)
+            notional_value = current_price * quantity
+
+            price_snapshot = {
+                "current": round(current_price, 4),
+                "resistance_levels": resistance_levels[:3],
+                "support_levels": support_levels[:3],
+            }
+            breakout_signal["price_snapshot"] = price_snapshot
+            breakout_signal["price"] = price_snapshot
+
+            risk_management_block: Dict[str, Any] = {
+                "position_size": quantity,
+                "notional_usd": round(notional_value, 2),
+                "price_snapshot": price_snapshot,
+                "price": price_snapshot,
+            }
+
             if breakout_signal["breakout_detected"]:
+                stop_loss_price = float(breakout_signal.get("stop_loss") or 0.0)
+                take_profit_price = float(breakout_signal.get("take_profit") or 0.0)
+                if stop_loss_price <= 0 or take_profit_price <= 0:
+                    stop_loss_price = current_price * (0.98 if breakout_signal["direction"] == "BUY" else 1.02)
+                    take_profit_price = current_price * (1.05 if breakout_signal["direction"] == "BUY" else 0.95)
+
+                risk_amount_usd = abs(current_price - stop_loss_price) * quantity
+                potential_profit_usd = abs(take_profit_price - current_price) * quantity
+                risk_reward_ratio = (
+                    potential_profit_usd / risk_amount_usd if risk_amount_usd > 0 else 0.0
+                )
+
+                risk_management_block.update(
+                    {
+                        "entry_price": current_price,
+                        "stop_loss_price": round(stop_loss_price, 4),
+                        "take_profit_price": round(take_profit_price, 4),
+                        "stop_loss": round(stop_loss_price, 4),
+                        "take_profit": round(take_profit_price, 4),
+                        "risk_amount_usd": round(risk_amount_usd, 2),
+                        "potential_profit_usd": round(potential_profit_usd, 2),
+                        "risk_reward_ratio": round(risk_reward_ratio, 2),
+                    }
+                )
+
                 trade_request = {
                     "action": breakout_signal["direction"],
                     "symbol": symbol,
@@ -1336,14 +1535,16 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
                     "stop_loss": breakout_signal["stop_loss"],
                     "take_profit": breakout_signal["take_profit"]
                 }
-                
+
                 execution_result = await self.trade_executor.execute_trade(
                     trade_request,
                     user_id,
                     simulation_mode=True,
                     strategy_id=strategy_id,
                 )
-            
+            else:
+                execution_result = None
+
             return {
                 "success": True,
                 "strategy": "breakout",
@@ -1353,6 +1554,7 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
                     "resistance": resistance_levels[:3],
                     "support": support_levels[:3]
                 },
+                "risk_management": risk_management_block,
                 "execution_result": execution_result,
                 "timestamp": datetime.utcnow().isoformat()
             }
