@@ -6163,7 +6163,7 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
                 return {
                     "success": False,
                     "error": f"Unable to get real price for {symbol}",
-                    "function": "scalping_strategy"
+                    "function": "market_making"
                 }
             
             # Market microstructure analysis
