@@ -1494,8 +1494,11 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
                 current_price, resistance_levels, support_levels, parameters
             )
 
-            quantity = float(parameters.quantity or 0.01)
-            notional_value = current_price * quantity
+            # Calculate executed quantity with conviction multiplier
+            base_quantity = float(parameters.quantity or 0.01)
+            conviction = float(breakout_signal.get("conviction", 1.0))
+            executed_quantity = base_quantity * conviction
+            notional_value = current_price * executed_quantity
 
             price_snapshot = {
                 "current": round(current_price, 4),
@@ -1506,7 +1509,7 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
             breakout_signal["price"] = price_snapshot.get("current", 0)
 
             risk_management_block: Dict[str, Any] = {
-                "position_size": quantity,
+                "position_size": executed_quantity,
                 "notional_usd": round(notional_value, 2),
                 "price_snapshot": price_snapshot,
                 "price": price_snapshot.get("current", 0),
@@ -1529,8 +1532,8 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
                     )
                     execution_result = None
                 else:
-                    risk_amount_usd = abs(current_price - stop_loss_price) * quantity
-                    potential_profit_usd = abs(take_profit_price - current_price) * quantity
+                    risk_amount_usd = abs(current_price - stop_loss_price) * executed_quantity
+                    potential_profit_usd = abs(take_profit_price - current_price) * executed_quantity
                     risk_reward_ratio = (
                         potential_profit_usd / risk_amount_usd if risk_amount_usd > 0 else 0.0
                     )
@@ -1551,7 +1554,7 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
                     trade_request = {
                         "action": breakout_signal["direction"],
                         "symbol": symbol,
-                        "quantity": parameters.quantity * breakout_signal["conviction"],
+                        "quantity": executed_quantity,
                         "order_type": "MARKET",
                         "stop_loss": round(stop_loss_price, 4),
                         "take_profit": round(take_profit_price, 4),
