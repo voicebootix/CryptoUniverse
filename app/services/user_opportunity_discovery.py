@@ -17,13 +17,14 @@ Date: 2025-09-12
 import asyncio
 import copy
 import dataclasses
+import hashlib
 import json
 import math
 import re
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any, Tuple, Set
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -130,6 +131,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         self._scan_cache_ttl = 300  # 5 minutes to align with fast-refresh chat expectations
         self._partial_cache_ttl = 300  # 5 minutes - increased from 2 for better partial result reuse
         self._scan_response_budget = 150.0  # 150 seconds - allow all 14 strategies to complete (portfolio optimization takes ~80s)
+        self._scan_lookup: Dict[str, str] = {}
+        self._scan_lookup_lock = asyncio.Lock()
+        self._user_latest_scan_key: Dict[str, str] = {}
 
         # Strategy scanning methods mapping
         self.strategy_scanners = {
@@ -209,19 +213,27 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             self._base_strategy_symbol_policies
         )
 
-    async def _get_cached_scan_entry(self, user_id: str) -> Optional[_CachedOpportunityResult]:
+    async def _get_cached_scan_entry(
+        self,
+        user_id: str,
+        scan_id: Optional[str] = None,
+    ) -> Optional[_CachedOpportunityResult]:
+        cache_key = await self._resolve_scan_cache_key(user_id=user_id, scan_id=scan_id)
+        if not cache_key:
+            return None
+
         async with self._scan_cache_lock:
-            entry = self.opportunity_cache.get(user_id)
+            entry = self.opportunity_cache.get(cache_key)
             if not isinstance(entry, _CachedOpportunityResult):
                 return None
             if entry.expires_at <= time.monotonic():
-                self.opportunity_cache.pop(user_id, None)
+                self.opportunity_cache.pop(cache_key, None)
                 return None
             return entry
 
     async def _update_cached_scan_result(
         self,
-        user_id: str,
+        cache_key: str,
         payload: Dict[str, Any],
         *,
         partial: bool,
@@ -230,19 +242,23 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         expires_at = time.monotonic() + ttl
         cached_payload = copy.deepcopy(payload)
         async with self._scan_cache_lock:
-            self.opportunity_cache[user_id] = _CachedOpportunityResult(
+            self.opportunity_cache[cache_key] = _CachedOpportunityResult(
                 payload=cached_payload,
                 expires_at=expires_at,
                 partial=partial,
             )
 
-    def _schedule_scan_cleanup(self, user_id: str, task: asyncio.Task) -> None:
+    def _schedule_scan_cleanup(self, cache_key: str, task: asyncio.Task) -> None:
         def _cleanup(done: asyncio.Task) -> None:
             async def _cleanup_async() -> None:
                 async with self._scan_tasks_lock:
-                    current_task = self._scan_tasks.get(user_id)
+                    current_task = self._scan_tasks.get(cache_key)
                     if current_task is task:
-                        self._scan_tasks.pop(user_id, None)
+                        self._scan_tasks.pop(cache_key, None)
+
+                scan_id_value = getattr(task, "scan_id", None)
+                if scan_id_value:
+                    await self._unregister_scan_lookup(scan_id_value)
 
                 if done.cancelled():
                     return
@@ -259,6 +275,121 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
         task.add_done_callback(_cleanup)
 
+    async def _register_scan_lookup(self, user_id: str, cache_key: str, scan_id: str) -> None:
+        async with self._scan_lookup_lock:
+            self._scan_lookup[scan_id] = cache_key
+            self._user_latest_scan_key[user_id] = cache_key
+
+    async def _unregister_scan_lookup(self, scan_id: str) -> None:
+        async with self._scan_lookup_lock:
+            cache_key = self._scan_lookup.pop(scan_id, None)
+            if not cache_key:
+                return
+            user_id, *_ = cache_key.split(":", 1)
+            latest_key = self._user_latest_scan_key.get(user_id)
+            if latest_key == cache_key and scan_id not in self._scan_lookup:
+                # Keep latest mapping so subsequent lookups fall back gracefully.
+                return
+
+    async def _resolve_scan_cache_key(
+        self,
+        *,
+        user_id: str,
+        scan_id: Optional[str] = None,
+    ) -> Optional[str]:
+        async with self._scan_lookup_lock:
+            if scan_id:
+                cache_key = self._scan_lookup.get(scan_id)
+                if cache_key:
+                    return cache_key
+            return self._user_latest_scan_key.get(user_id)
+
+    def _build_scan_cache_key(
+        self,
+        user_id: str,
+        *,
+        symbols: Optional[List[str]] = None,
+        asset_tiers: Optional[List[str]] = None,
+        strategy_ids: Optional[List[str]] = None,
+    ) -> str:
+        normalized_filters = {
+            "symbols": self._normalize_filter_values(symbols, upper=True),
+            "asset_tiers": self._normalize_filter_values(asset_tiers),
+            "strategy_ids": self._normalize_filter_values(strategy_ids),
+        }
+        serialized = json.dumps(normalized_filters, sort_keys=True, separators=(",", ":"))
+        digest = hashlib.sha1(serialized.encode("utf-8")).hexdigest()[:16]
+        return f"{user_id}:{digest}"
+
+    @staticmethod
+    def _normalize_filter_values(
+        values: Optional[List[str]],
+        *,
+        upper: bool = False,
+    ) -> List[str]:
+        if not values:
+            return []
+        cleaned: List[str] = []
+        for item in values:
+            if not item:
+                continue
+            value = str(item).strip()
+            if not value:
+                continue
+            cleaned.append(value.upper() if upper else value.lower())
+        # Preserve deterministic ordering
+        return sorted(set(cleaned))
+
+    async def _peek_cached_scan_entry(
+        self,
+        cache_key: str,
+    ) -> Optional[_CachedOpportunityResult]:
+        async with self._scan_cache_lock:
+            entry = self.opportunity_cache.get(cache_key)
+            if not isinstance(entry, _CachedOpportunityResult):
+                return None
+            if entry.expires_at <= time.monotonic():
+                self.opportunity_cache.pop(cache_key, None)
+                return None
+            return entry
+
+    @staticmethod
+    def _summarize_scan_filters(
+        *,
+        symbols: Optional[List[str]] = None,
+        asset_tiers: Optional[List[str]] = None,
+        strategy_ids: Optional[List[str]] = None,
+    ) -> Dict[str, List[str]]:
+        summary: Dict[str, List[str]] = {}
+        if symbols:
+            summary["symbols"] = sorted({str(symbol).upper() for symbol in symbols if symbol})
+        if asset_tiers:
+            summary["asset_tiers"] = sorted({str(tier) for tier in asset_tiers if tier})
+        if strategy_ids:
+            summary["strategy_ids"] = sorted({str(strategy_id) for strategy_id in strategy_ids if strategy_id})
+        return summary
+
+    def _strategy_matches_filter(self, strategy: Dict[str, Any], filters: Set[str]) -> bool:
+        if not strategy or not filters:
+            return False
+
+        candidates = [
+            str(strategy.get("strategy_id", "")),
+            str(strategy.get("id", "")),
+            str(strategy.get("slug", "")),
+            str(strategy.get("name", "")),
+        ]
+        for candidate in candidates:
+            if not candidate:
+                continue
+            normalized = candidate.lower()
+            if normalized in filters:
+                return True
+            alias = self._resolve_strategy_alias(candidate)
+            if alias and alias in filters:
+                return True
+        return False
+
     def _assemble_response(
         self,
         *,
@@ -274,6 +405,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         partial: bool,
         strategies_completed: int,
         total_strategies: int,
+        applied_filters: Optional[Dict[str, List[str]]] = None,
     ) -> Dict[str, Any]:
         signal_stats = {
             "total_signals_analyzed": 0,
@@ -317,6 +449,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         projection_summary = self._summarize_profit_projections(ranked_opportunities)
         if projection_summary:
             metadata_payload["profit_projection_summary"] = projection_summary
+
+        if applied_filters:
+            metadata_payload["filters"] = applied_filters
 
         response = {
             "success": True,
@@ -607,44 +742,81 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         user_id: str,
         force_refresh: bool = False,
         include_strategy_recommendations: bool = True,
+        *,
+        symbols: Optional[List[str]] = None,
+        asset_tiers: Optional[List[str]] = None,
+        strategy_ids: Optional[List[str]] = None,
+        scan_id: Optional[str] = None,
+        cache_key: Optional[str] = None,
     ) -> Dict[str, Any]:
-        cached_entry = await self._get_cached_scan_entry(user_id)
+        cache_key = cache_key or self._build_scan_cache_key(
+            user_id,
+            symbols=symbols,
+            asset_tiers=asset_tiers,
+            strategy_ids=strategy_ids,
+        )
+
+        scan_id_local: Optional[str] = scan_id
+        cached_entry: Optional[_CachedOpportunityResult] = None
+
+        async with self._scan_tasks_lock:
+            task = self._scan_tasks.get(cache_key)
+            if task and task.done():
+                self._scan_tasks.pop(cache_key, None)
+                task = None
+            if scan_id_local is None and task is not None:
+                scan_id_local = getattr(task, "scan_id", None)
+
+        if scan_id_local is None:
+            cached_entry = await self._peek_cached_scan_entry(cache_key)
+            if cached_entry:
+                scan_id_local = cached_entry.payload.get("scan_id")
+
+        if scan_id_local is None:
+            scan_id_local = f"user_discovery_{user_id}_{int(time.time())}"
+
+        await self._register_scan_lookup(user_id, cache_key, scan_id_local)
+
+        if cached_entry is None:
+            cached_entry = await self._peek_cached_scan_entry(cache_key)
+
         if cached_entry and not force_refresh and not cached_entry.partial:
             return copy.deepcopy(cached_entry.payload)
 
         if force_refresh:
             async with self._scan_tasks_lock:
-                existing = self._scan_tasks.pop(user_id, None)
+                existing = self._scan_tasks.pop(cache_key, None)
             if existing and not existing.done():
                 existing.cancel()
 
-        scan_id_local: Optional[str] = None
         task: Optional[asyncio.Task] = None
-
         async with self._scan_tasks_lock:
-            task = self._scan_tasks.get(user_id)
+            task = self._scan_tasks.get(cache_key)
             if task and task.done():
-                self._scan_tasks.pop(user_id, None)
+                self._scan_tasks.pop(cache_key, None)
                 task = None
 
-            scan_id_local = getattr(task, "scan_id", None)
-
             if not task:
-                scan_id_local = f"user_discovery_{user_id}_{int(time.time())}"
                 task = asyncio.create_task(
                     self._execute_opportunity_discovery(
                         user_id=user_id,
                         force_refresh=force_refresh,
                         include_strategy_recommendations=include_strategy_recommendations,
+                        symbols=symbols,
+                        asset_tiers=asset_tiers,
+                        strategy_ids=strategy_ids,
                         existing_scan_id=scan_id_local,
+                        cache_key=cache_key,
                     ),
                     name=f"opportunity-discovery:{scan_id_local}",
                 )
                 task.scan_id = scan_id_local
-                self._scan_tasks[user_id] = task
-                self._schedule_scan_cleanup(user_id, task)
-
-        scan_id = scan_id_local or getattr(task, "scan_id", None)
+                task.cache_key = cache_key
+                self._scan_tasks[cache_key] = task
+                self._schedule_scan_cleanup(cache_key, task)
+            else:
+                scan_id_local = getattr(task, "scan_id", scan_id_local)
+                await self._register_scan_lookup(user_id, cache_key, scan_id_local)
 
         if cached_entry and not force_refresh:
             payload = copy.deepcopy(cached_entry.payload)
@@ -660,8 +832,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             metadata.setdefault("generated_at", self._current_timestamp().isoformat())
             return payload
 
-        # For force refresh requests allow a brief wait for fresh data
-        if force_refresh:
+        if force_refresh and task:
             try:
                 result = await asyncio.wait_for(
                     asyncio.shield(task),
@@ -671,57 +842,31 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             except asyncio.TimeoutError:
                 pass
 
-        if not scan_id:
-            scan_id = getattr(task, "scan_id", f"user_discovery_{user_id}_{int(time.time())}")
-
-        # Load portfolio first to get accurate strategy count
-        portfolio_result = await self._get_user_portfolio(user_id)
-        
-        if not portfolio_result.get("success") or not portfolio_result.get("active_strategies"):
-            self.logger.warning("❌ NO STRATEGIES FOUND IN PORTFOLIO",
-                              scan_id=scan_id,
-                              user_id=user_id,
-                              portfolio_result=portfolio_result)
-            return await self._handle_no_strategies_user(user_id, scan_id)
-        
-        active_strategies = portfolio_result.get("active_strategies", [])
-        total_strategies = len(active_strategies)
-        
-        # ENTERPRISE PERFORMANCE METRICS
-        metrics = {
-            'scan_id': scan_id,
-            'start_time': time.time(),  # Use current time since discovery_start_time is not in scope
-            'portfolio_fetch_time': 0,
-            'asset_discovery_time': 0,
-            'strategy_scan_times': {},
-            'total_strategies': total_strategies,  # Use the actual count
-            'total_opportunities': 0,
-            'cache_hits': 0,
-            'cache_misses': 0,
-            'timeouts': 0,
-            'errors': []
-        }
-        
         placeholder_payload = {
             "success": True,
-            "scan_id": scan_id,
+            "scan_id": scan_id_local,
             "user_id": user_id,
             "opportunities": [],
             "total_opportunities": 0,
-            "message": f"Opportunity scan started. Analyzing {total_strategies} strategies for opportunities...",
+            "message": "Opportunity scan started. Analyzing your strategies for opportunities...",
             "scan_state": "pending",
             "metadata": {
                 "scan_state": "pending",
-                "message": f"Scanning your {total_strategies} active strategies for new opportunities...",
+                "message": "Scanning your active strategies for new opportunities...",
                 "strategies_completed": 0,
-                "total_strategies": total_strategies,
+                "total_strategies": 0,
                 "generated_at": self._current_timestamp().isoformat(),
+                "filters": self._summarize_scan_filters(
+                    symbols=symbols,
+                    asset_tiers=asset_tiers,
+                    strategy_ids=strategy_ids,
+                ),
             },
             "background_scan": True,
         }
 
         await self._update_cached_scan_result(
-            user_id,
+            cache_key,
             placeholder_payload,
             partial=True,
         )
@@ -729,7 +874,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         self.logger.info(
             "Returning pending opportunity scan placeholder",
             user_id=user_id,
-            scan_id=scan_id,
+            scan_id=scan_id_local,
             force_refresh=force_refresh,
         )
 
@@ -741,7 +886,11 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         force_refresh: bool = False,
         include_strategy_recommendations: bool = True,
         *,
+        symbols: Optional[List[str]] = None,
+        asset_tiers: Optional[List[str]] = None,
+        strategy_ids: Optional[List[str]] = None,
         existing_scan_id: Optional[str] = None,
+        cache_key: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         MAIN ENTRY POINT: Discover all opportunities for user based on their strategy portfolio.
@@ -751,6 +900,17 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         
         discovery_start_time = time.time()
         scan_id = existing_scan_id or f"user_discovery_{user_id}_{int(time.time())}"
+        cache_key = cache_key or self._build_scan_cache_key(
+            user_id,
+            symbols=symbols,
+            asset_tiers=asset_tiers,
+            strategy_ids=strategy_ids,
+        )
+        filter_summary = self._summarize_scan_filters(
+            symbols=symbols,
+            asset_tiers=asset_tiers,
+            strategy_ids=strategy_ids,
+        )
 
         self.logger.info("🔍 ENTERPRISE User Opportunity Discovery Starting",
                         scan_id=scan_id,
@@ -815,12 +975,57 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                                 portfolio_result=portfolio_result)
                 return await self._handle_no_strategies_user(user_id, scan_id)
 
-            await self._track_scan_lifecycle(user_id, scan_id, "portfolio_fetch", "completed",
-                                           strategies_count=len(portfolio_result.get("active_strategies", [])),
-                                           duration_ms=metrics["portfolio_fetch_time"] * 1000)
-            
             active_strategies = portfolio_result["active_strategies"]
-            
+
+            if strategy_ids:
+                strategy_filter = {sid.lower() for sid in strategy_ids if sid}
+                filtered_strategies = [
+                    strategy
+                    for strategy in active_strategies
+                    if self._strategy_matches_filter(strategy, strategy_filter)
+                ]
+
+                if not filtered_strategies:
+                    self.logger.info(
+                        "No strategies matched filters",
+                        scan_id=scan_id,
+                        user_id=user_id,
+                        requested_filters=list(strategy_filter),
+                    )
+
+                    empty_payload = {
+                        "success": True,
+                        "scan_id": scan_id,
+                        "user_id": user_id,
+                        "opportunities": [],
+                        "total_opportunities": 0,
+                        "message": "No strategies matched the selected filters.",
+                        "metadata": {
+                            "scan_state": "complete",
+                            "strategies_completed": 0,
+                            "total_strategies": 0,
+                            "generated_at": self._current_timestamp().isoformat(),
+                            "filters": filter_summary,
+                            "message": "No strategies matched the selected filters.",
+                        },
+                    }
+
+                    await self._update_cached_scan_result(
+                        cache_key,
+                        empty_payload,
+                        partial=False,
+                    )
+
+                    return empty_payload
+
+                active_strategies = filtered_strategies
+                portfolio_result["active_strategies"] = active_strategies
+
+            await self._track_scan_lifecycle(user_id, scan_id, "portfolio_fetch", "completed",
+                                           strategies_count=len(active_strategies),
+                                           duration_ms=metrics["portfolio_fetch_time"] * 1000,
+                                           filters=filter_summary)
+
             # CRITICAL DEBUG: Log user's active strategies
             self.logger.info("🎯 USER ACTIVE STRATEGIES",
                            scan_id=scan_id,
@@ -838,11 +1043,49 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             )
             metrics["asset_discovery_time"] = time.time() - asset_discovery_start
 
+            if asset_tiers:
+                allowed_tiers = {tier.lower() for tier in asset_tiers if tier}
+                discovered_assets = {
+                    tier: assets
+                    for tier, assets in discovered_assets.items()
+                    if tier.lower() in allowed_tiers
+                }
+
+            if symbols:
+                symbol_filter = {symbol.upper() for symbol in symbols if symbol}
+                filtered_assets: Dict[str, List[Any]] = {}
+                for tier, assets in discovered_assets.items():
+                    filtered_list = [
+                        asset
+                        for asset in assets
+                        if getattr(asset, "symbol", "").upper() in symbol_filter
+                    ]
+                    if filtered_list:
+                        filtered_assets[tier] = filtered_list
+                discovered_assets = filtered_assets
+
             if not discovered_assets or sum(len(assets) for assets in discovered_assets.values()) == 0:
                 self.logger.warning("No assets discovered", scan_id=scan_id, user_tier=user_profile.user_tier)
                 await self._track_scan_lifecycle(user_id, scan_id, "asset_discovery", "error",
                                                 error="No tradeable assets found")
-                return {"success": False, "error": "No tradeable assets found", "opportunities": []}
+                payload = {
+                    "success": True,
+                    "scan_id": scan_id,
+                    "user_id": user_id,
+                    "opportunities": [],
+                    "total_opportunities": 0,
+                    "message": "No assets matched the selected filters.",
+                    "metadata": {
+                        "scan_state": "complete",
+                        "strategies_completed": 0,
+                        "total_strategies": len(active_strategies),
+                        "generated_at": self._current_timestamp().isoformat(),
+                        "filters": filter_summary,
+                        "message": "No assets matched the selected filters.",
+                    },
+                }
+                await self._update_cached_scan_result(cache_key, payload, partial=False)
+                return payload
 
             await self._track_scan_lifecycle(user_id, scan_id, "asset_discovery", "completed",
                                            total_assets=sum(len(assets) for assets in discovered_assets.values()),
@@ -878,8 +1121,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 partial=True,
                 strategies_completed=0,
                 total_strategies=total_strategies,
+                applied_filters=filter_summary,
             )
-            await self._update_cached_scan_result(user_id, initial_snapshot, partial=True)
+            await self._update_cached_scan_result(cache_key, initial_snapshot, partial=True)
 
             # Create semaphore for bounded concurrency - Optimized for performance
             concurrency_limit = 15  # Run max 15 strategies concurrently (increased from 3)
@@ -1090,9 +1334,10 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     partial=True,
                     strategies_completed=strategies_completed,
                     total_strategies=total_strategies,
+                    applied_filters=filter_summary,
                 )
                 await self._update_cached_scan_result(
-                    user_id,
+                    cache_key,
                     snapshot_response,
                     partial=True,
                 )
@@ -1160,6 +1405,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     partial=False,
                     strategies_completed=total_strategies,
                     total_strategies=total_strategies,
+                    applied_filters=filter_summary,
                 )
 
                 await self._track_debug_step(user_id, scan_id, 8, "Assemble response", "completed")
@@ -1172,7 +1418,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             try:
                 await self._track_debug_step(user_id, scan_id, 9, "Update cached scan result", "starting")
 
-                await self._update_cached_scan_result(user_id, final_response, partial=False)
+                await self._update_cached_scan_result(cache_key, final_response, partial=False)
 
                 await self._track_debug_step(user_id, scan_id, 9, "Update cached scan result", "completed")
             except Exception as cache_error:

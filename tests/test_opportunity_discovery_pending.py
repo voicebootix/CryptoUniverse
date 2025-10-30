@@ -24,19 +24,19 @@ from app.services.user_opportunity_discovery import (
 async def test_discover_returns_pending_placeholder(monkeypatch):
     service = UserOpportunityDiscoveryService()
 
-    async def fake_get_cached_scan_entry(user_id: str) -> Any:
+    async def fake_update_cached_scan_result(cache_key: str, payload: dict, *, partial: bool) -> None:
+        # Pretend we stored the payload successfully without touching Redis
         return None
 
-    async def fake_update_cached_scan_result(user_id: str, payload: dict, *, partial: bool) -> None:
-        # Pretend we stored the payload successfully without touching Redis
+    async def fake_peek_cached_scan_entry(cache_key: str) -> Any:
         return None
 
     async def fake_execute(*args, **kwargs):
         await asyncio.sleep(0.05)
         return {"success": True, "opportunities": [{"id": "demo"}]}
 
-    monkeypatch.setattr(service, "_get_cached_scan_entry", fake_get_cached_scan_entry)
     monkeypatch.setattr(service, "_update_cached_scan_result", fake_update_cached_scan_result)
+    monkeypatch.setattr(service, "_peek_cached_scan_entry", fake_peek_cached_scan_entry)
     monkeypatch.setattr(service, "_execute_opportunity_discovery", fake_execute)
     monkeypatch.setattr(service, "_schedule_scan_cleanup", lambda *args, **kwargs: None)
 
@@ -69,20 +69,20 @@ async def test_discover_returns_partial_cache(monkeypatch):
         },
     }
 
-    async def fake_get_cached_scan_entry(user_id: str) -> _CachedOpportunityResult:
+    async def fake_peek_cached_scan_entry(cache_key: str) -> _CachedOpportunityResult:
         return _CachedOpportunityResult(
             payload=cached_payload,
             expires_at=loop_time + 60,
             partial=True,
         )
 
-    async def fake_update_cached_scan_result(user_id: str, payload: dict, *, partial: bool) -> None:
+    async def fake_update_cached_scan_result(cache_key: str, payload: dict, *, partial: bool) -> None:
         return None
 
     async def fake_execute(*args, **kwargs):
         return {"success": True, "opportunities": []}
 
-    monkeypatch.setattr(service, "_get_cached_scan_entry", fake_get_cached_scan_entry)
+    monkeypatch.setattr(service, "_peek_cached_scan_entry", fake_peek_cached_scan_entry)
     monkeypatch.setattr(service, "_update_cached_scan_result", fake_update_cached_scan_result)
     monkeypatch.setattr(service, "_execute_opportunity_discovery", fake_execute)
     monkeypatch.setattr(service, "_schedule_scan_cleanup", lambda *args, **kwargs: None)
