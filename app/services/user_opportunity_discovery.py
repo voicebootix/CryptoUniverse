@@ -17,14 +17,13 @@ Date: 2025-09-12
 import asyncio
 import copy
 import dataclasses
-import hashlib
 import json
 import math
 import re
 import time
 import uuid
 from datetime import datetime, timedelta, timezone
-from typing import Dict, List, Optional, Any, Tuple, Set
+from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -51,10 +50,6 @@ from sqlalchemy import select
 # cancellations while still bounding the request time for circuit breaker
 # logic.
 PORTFOLIO_FETCH_TIMEOUT_SECONDS: float = 65.0
-PORTFOLIO_REBALANCE_WEIGHT_EPSILON: float = 0.0025  # 0.25% weight tolerance
-PORTFOLIO_REBALANCE_HISTORY_COOLDOWN_HOURS: int = 12
-PORTFOLIO_REBALANCE_HISTORY_TTL_DAYS: int = 30
-PORTFOLIO_REBALANCE_HISTORY_MAX_ENTRIES: int = 100
 
 settings = get_settings()
 
@@ -168,7 +163,6 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             "scalping_engine_pro": self._scan_scalping_engine_pro_opportunities,
             "swing_navigator_pro": self._scan_swing_navigator_pro_opportunities,
         }
-
 
         # Canonical strategy aliases so display names map to scanners
         self._strategy_aliases = {
@@ -1452,25 +1446,6 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             opportunities = await scanner_method(
                 discovered_assets, user_profile, scan_id, portfolio_result
             )
-
-            if not opportunities:
-                synthetic_opportunities = await self._generate_synthetic_strategy_opportunities(
-                    strategy_id,
-                    strategy_name,
-                    discovered_assets,
-                    user_profile,
-                    scan_id,
-                )
-
-                if synthetic_opportunities:
-                    self.logger.info(
-                        "Generated synthetic opportunities for empty strategy scan",
-                        scan_id=scan_id,
-                        strategy_id=strategy_id,
-                        strategy_name=strategy_name,
-                        count=len(synthetic_opportunities),
-                    )
-                    opportunities = synthetic_opportunities
             
             self.logger.info("✅ Strategy scan completed",
                            scan_id=scan_id,
@@ -1765,212 +1740,44 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         signal_strength = signals.get("strength", 0)
                         signal_confidence = signals.get("confidence", 0)
                         signal_action = signals.get("action", "HOLD")
-                        action_upper = str(signal_action or "").strip().upper()
-
+                        
                         self.logger.info(f"🎯 MOMENTUM SIGNAL ANALYSIS",
                                        scan_id=scan_id,
                                        symbol=symbol,
                                        signal_strength=signal_strength,
                                        signal_confidence=signal_confidence,
-                                       signal_action=action_upper,
+                                       signal_action=signal_action,
                                        qualifies_threshold=signal_strength > 6.0)
-
-                        if action_upper not in {"BUY", "SELL"}:
-                            self.logger.debug(
-                                "Skipping non-directional momentum signal",
-                                scan_id=scan_id,
-                                symbol=symbol,
-                                action=action_upper,
-                            )
-                            continue
-
+                        
                         # Create opportunity for ALL signals above 3.0 but mark quality
                         if signal_strength >= 2.5:  # More inclusive threshold for opportunities
                             quality_tier = "high" if signal_strength > 6.0 else "medium" if signal_strength > 4.5 else "low"
                             
                             execution_data = momentum_result.get("execution_result", {})
-                            indicators = execution_data.get("indicators", {}) or momentum_result.get("indicators", {}) or {}
-                            risk_mgmt = execution_data.get("risk_management", {}) or momentum_result.get("risk_management", {}) or {}
-
-                            indicators_payload = (
-                                self._sanitize_metadata_block(indicators)
-                                if isinstance(indicators, dict)
-                                else {}
-                            )
-
-                            price_scalar: Optional[Any] = None
-                            raw_price_snapshot: Dict[str, Any] = {}
-                            if isinstance(indicators, dict):
-                                price_candidate = indicators.get("price_snapshot") or indicators.get("price")
-                                if isinstance(price_candidate, dict):
-                                    raw_price_snapshot = price_candidate
-                                else:
-                                    price_scalar = price_candidate
-
-                            price_snapshot_clean = self._sanitize_price_snapshot(raw_price_snapshot)
-                            entry_price_seed = self._safe_float(price_snapshot_clean.get("current"))
-                            if entry_price_seed is None and price_scalar is not None:
-                                entry_price_seed = self._safe_float(price_scalar)
-
-                            risk_entry_seed = self._safe_float(risk_mgmt.get("entry_price"))
-                            if risk_entry_seed is not None and risk_entry_seed > 0:
-                                entry_price_seed = risk_entry_seed
-
-                            entry_price, price_snapshot_clean = await self._ensure_price_snapshot(
-                                f"{symbol}/USDT",
-                                price_snapshot_clean,
-                                seed_entry=entry_price_seed,
-                            )
-                            stop_loss_price = self._safe_float(
-                                risk_mgmt.get("stop_loss_price") or risk_mgmt.get("stop_loss")
-                            )
-                            take_profit_price = self._safe_float(
-                                risk_mgmt.get("take_profit_price") or risk_mgmt.get("take_profit")
-                            )
-                            position_size_units = self._safe_float(risk_mgmt.get("position_size"))
-                            position_notional = self._safe_float(risk_mgmt.get("position_notional"))
-
-                            if (
-                                entry_price is not None
-                                and position_size_units
-                                and position_notional is None
-                            ):
-                                position_notional = round(entry_price * position_size_units, 2)
-
-                            risk_amount = self._safe_float(risk_mgmt.get("risk_amount"))
-                            if (
-                                risk_amount is None
-                                and entry_price is not None
-                                and stop_loss_price is not None
-                                and position_size_units
-                            ):
-                                risk_amount = round(
-                                    abs(entry_price - stop_loss_price) * position_size_units,
-                                    2,
-                                )
-
-                            potential_profit = self._safe_float(risk_mgmt.get("potential_profit"))
-                            if (
-                                potential_profit is None
-                                and entry_price is not None
-                                and take_profit_price is not None
-                                and position_size_units
-                            ):
-                                potential_profit = round(
-                                    abs(take_profit_price - entry_price) * position_size_units,
-                                    2,
-                                )
-
-                            risk_reward_ratio = self._safe_float(risk_mgmt.get("risk_reward_ratio"))
-                            if (
-                                risk_reward_ratio is None
-                                and risk_amount
-                                and risk_amount > 0
-                                and potential_profit is not None
-                            ):
-                                risk_reward_ratio = round(potential_profit / risk_amount, 2)
-
-                            recommended_side = (
-                                risk_mgmt.get("recommended_side")
-                                or action_upper
-                            )
-                            recommended_side = str(recommended_side or "hold").lower()
-
-                            profit_potential_value = float(potential_profit) if potential_profit is not None else 0.0
-                            required_capital_value = float(position_notional) if position_notional is not None else 0.0
-
-                            fallback_risk_percent = (
-                                self._safe_float(risk_mgmt.get("max_risk_percent"))
-                                or self._safe_float(risk_mgmt.get("risk_percentage"))
-                            )
-
-                            metadata_base = {
-                                "signal_strength": signal_strength,
-                                "signal_confidence": signal_confidence,
-                                "signal_action": signal_action,
-                                "quality_tier": quality_tier,
-                                "meets_original_threshold": signal_strength > 6.0,
-                                "recommendation": (
-                                    "STRONG BUY"
-                                    if signal_strength > 6.0
-                                    else "CONSIDER"
-                                    if signal_strength > 4.5
-                                    else "MONITOR"
-                                ),
-                            }
-
-                            metadata = self._enrich_metadata_with_trade_details(
-                                metadata_base,
-                                entry_price=entry_price,
-                                stop_loss_price=stop_loss_price,
-                                take_profit_price=take_profit_price,
-                                position_size_units=position_size_units,
-                                position_notional=position_notional,
-                                risk_amount=risk_amount,
-                                potential_profit=potential_profit,
-                                risk_reward_ratio=risk_reward_ratio,
-                                recommended_side=recommended_side,
-                                price_snapshot=price_snapshot_clean,
-                                indicators=indicators_payload,
-                                fallback_risk_percent=fallback_risk_percent or 2.0,
-                            )
-
-                            metadata["recommended_side"] = (
-                                metadata.get("recommended_side") or recommended_side
-                            )
-
-                            enriched_stop = self._safe_float(metadata.get("stop_loss"))
-                            enriched_take = self._safe_float(metadata.get("take_profit"))
-                            enriched_entry = self._safe_float(metadata.get("entry_price")) or entry_price
-                            enriched_position = self._safe_float(metadata.get("position_notional"))
-                            enriched_profit = self._safe_float(metadata.get("potential_gain_usd"))
-
-                            if enriched_entry is not None:
-                                entry_price = enriched_entry
-
-                            if enriched_position is not None:
-                                required_capital_value = float(enriched_position)
-
-                            if enriched_profit is not None:
-                                profit_potential_value = float(enriched_profit)
-
-                            if (
-                                entry_price is None
-                                or entry_price <= 0
-                                or enriched_stop is None
-                                or enriched_stop <= 0
-                                or enriched_take is None
-                                or enriched_take <= 0
-                                or profit_potential_value is None
-                                or profit_potential_value <= 0
-                                or required_capital_value <= 0
-                            ):
-                                self.logger.debug(
-                                    "Skipping momentum opportunity due to incomplete trade metrics",
-                                    scan_id=scan_id,
-                                    symbol=symbol,
-                                    entry_price=entry_price,
-                                    stop_loss=enriched_stop,
-                                    take_profit=enriched_take,
-                                    potential_gain=profit_potential_value,
-                                    capital=required_capital_value,
-                                )
-                                continue
-
+                            indicators = execution_data.get("indicators", {}) or momentum_result.get("indicators", {})
+                            risk_mgmt = execution_data.get("risk_management", {}) or momentum_result.get("risk_management", {})
+                            
                             opportunity = OpportunityResult(
                                 strategy_id="ai_spot_momentum_strategy",
                                 strategy_name=f"AI Spot Momentum ({quality_tier.upper()} confidence)",
                                 opportunity_type="spot_momentum",
                                 symbol=symbol,
                                 exchange="binance",
-                                profit_potential_usd=profit_potential_value,
-                                confidence_score=self._normalize_confidence_score(signal_confidence, signal_strength),
+                                profit_potential_usd=float(risk_mgmt.get("take_profit") or 100),
+                                confidence_score=float(signal_confidence) if signal_confidence else signal_strength * 10,
                                 risk_level=self._signal_to_risk_level(signal_strength),
-                                required_capital_usd=required_capital_value,
+                                required_capital_usd=1000.0,
                                 estimated_timeframe="4-24h",
-                                entry_price=entry_price,
-                                exit_price=enriched_take,
-                                metadata=metadata,
+                                entry_price=float((indicators.get("price") or {}).get("current") or 0) if indicators.get("price") else None,
+                                exit_price=float(risk_mgmt.get("take_profit_price") or 0) if risk_mgmt.get("take_profit_price") else None,
+                                metadata={
+                                    "signal_strength": signal_strength,
+                                    "signal_confidence": signal_confidence,
+                                    "signal_action": signal_action,
+                                    "quality_tier": quality_tier,
+                                    "meets_original_threshold": signal_strength > 6.0,
+                                    "recommendation": "STRONG BUY" if signal_strength > 6.0 else "CONSIDER" if signal_strength > 4.5 else "MONITOR"
+                                },
                                 discovered_at=self._current_timestamp()
                             )
                             opportunities.append(opportunity)
@@ -1994,253 +1801,69 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         portfolio_result: Dict[str, Any]
     ) -> List[OpportunityResult]:
         """Scan spot mean reversion opportunities using REAL trading strategies service."""
-
-        opportunities: List[OpportunityResult] = []
-
+        
+        opportunities = []
+        
         try:
+            # Get symbols for mean reversion (prefer higher volume, established coins)
             reversion_symbols = self._get_top_symbols_by_volume(discovered_assets, limit=25)
-
+            
             for symbol in reversion_symbols:
-                try:
-                    reversion_result = await trading_strategies_service.execute_strategy(
-                        function="spot_mean_reversion",
-                        symbol=f"{symbol}/USDT",
-                        parameters={"timeframe": "1h"},
-                        user_id=user_profile.user_id,
-                    )
-                except Exception as symbol_error:
-                    self.logger.warning(
-                        "Mean reversion strategy execution failed",
-                        scan_id=scan_id,
-                        symbol=symbol,
-                        error=str(symbol_error),
-                    )
-                    continue
-
-                if not reversion_result.get("success"):
-                    continue
-
-                signal_block = reversion_result.get("signal") or {}
-                indicators_block = reversion_result.get("indicators") or {}
-                risk_mgmt = reversion_result.get("risk_management") or {}
-
-                action = (signal_block.get("action") or "").upper()
-                z_score = self._safe_float(
-                    signal_block.get("z_score")
-                    or indicators_block.get("z_score")
+                # Call REAL spot mean reversion strategy using correct method signature
+                reversion_result = await trading_strategies_service.execute_strategy(
+                    function="spot_mean_reversion",
+                    symbol=f"{symbol}/USDT",
+                    parameters={"timeframe": "1h"},
+                    user_id=user_profile.user_id
                 )
-
-                if action not in {"BUY", "SELL"} or z_score is None:
-                    continue
-
-                deviation_score = abs(z_score)
-
-                self.logger.info(
-                    "🎯 MEAN REVERSION SIGNAL ANALYSIS",
-                    scan_id=scan_id,
-                    symbol=symbol,
-                    deviation_score=deviation_score,
-                    qualifies_threshold=deviation_score > 2.0,
-                )
-
-                if deviation_score <= 1.0:
-                    continue
-
-                if deviation_score > 2.0:
-                    quality_tier = "high"
-                elif deviation_score > 1.5:
-                    quality_tier = "medium"
-                else:
-                    quality_tier = "low"
-
-                signal_strength = min(deviation_score * 3.0, 10.0)
-
-                entry_seed = (
-                    self._safe_float(risk_mgmt.get("entry_price"))
-                    or self._safe_float(signal_block.get("entry_price"))
-                    or self._safe_float(indicators_block.get("current_price"))
-                    or self._safe_float(
-                        (indicators_block.get("price_snapshot") or {}).get("current")
-                    )
-                )
-
-                price_snapshot_raw = (
-                    indicators_block.get("price_snapshot")
-                    if isinstance(indicators_block, dict)
-                    else {}
-                )
-                if not isinstance(price_snapshot_raw, dict):
-                    price_snapshot_raw = {}
-                price_snapshot_clean = self._sanitize_price_snapshot(price_snapshot_raw)
-
-                entry_price, price_snapshot_clean = await self._ensure_price_snapshot(
-                    f"{symbol}/USDT",
-                    price_snapshot_clean,
-                    seed_entry=entry_seed,
-                )
-
-                take_profit_price = self._safe_float(
-                    risk_mgmt.get("take_profit_price")
-                    or risk_mgmt.get("take_profit")
-                    or indicators_block.get("mean_price")
-                    or (price_snapshot_clean or {}).get("mean_price")
-                )
-                stop_loss_price = self._safe_float(
-                    risk_mgmt.get("stop_loss_price")
-                    or risk_mgmt.get("stop_loss")
-                )
-
-                position_size_units = self._safe_float(risk_mgmt.get("position_size"))
-                position_notional = self._safe_float(risk_mgmt.get("position_notional"))
-
-                if entry_price and (position_size_units is None or position_size_units <= 0):
-                    position_size_units = round(1000.0 / entry_price, 6)
-
-                if (
-                    entry_price
-                    and position_size_units
-                    and (position_notional is None or position_notional <= 0)
-                ):
-                    position_notional = round(position_size_units * entry_price, 2)
-
-                risk_amount = self._safe_float(risk_mgmt.get("risk_amount"))
-                potential_profit = self._safe_float(risk_mgmt.get("potential_profit"))
-                risk_reward_ratio = self._safe_float(risk_mgmt.get("risk_reward_ratio"))
-
-                if (
-                    entry_price
-                    and stop_loss_price
-                    and (risk_amount is None or risk_amount <= 0)
-                    and position_size_units
-                ):
-                    risk_amount = round(
-                        abs(entry_price - stop_loss_price) * position_size_units,
-                        2,
-                    )
-
-                if (
-                    entry_price
-                    and take_profit_price
-                    and (potential_profit is None or potential_profit <= 0)
-                    and position_size_units
-                ):
-                    potential_profit = round(
-                        abs(take_profit_price - entry_price) * position_size_units,
-                        2,
-                    )
-
-                if (
-                    risk_amount
-                    and risk_amount > 0
-                    and potential_profit is not None
-                    and (risk_reward_ratio is None or risk_reward_ratio <= 0)
-                ):
-                    risk_reward_ratio = round(potential_profit / risk_amount, 2)
-
-                confidence_score = self._safe_float(signal_block.get("confidence"))
-                if confidence_score is None:
-                    confidence_score = min(deviation_score * 30.0, 95.0)
-
-                indicators_payload = (
-                    self._sanitize_metadata_block(indicators_block)
-                    if isinstance(indicators_block, dict)
-                    else {}
-                )
-
-                fallback_risk_percent = (
-                    self._safe_float(risk_mgmt.get("max_risk_percent"))
-                    or self._safe_float(risk_mgmt.get("risk_percentage"))
-                    or 2.0
-                )
-
-                metadata_base = {
-                    "signal_strength": signal_strength,
-                    "deviation_score": deviation_score,
-                    "quality_tier": quality_tier,
-                    "meets_original_threshold": deviation_score > 2.0,
-                    "recommendation": (
-                        "STRONG BUY"
-                        if deviation_score > 2.0 and action == "BUY"
-                        else "STRONG SELL"
-                        if deviation_score > 2.0 and action == "SELL"
-                        else "CONSIDER"
-                        if deviation_score > 1.5
-                        else "MONITOR"
-                    ),
-                }
-
-                metadata = self._enrich_metadata_with_trade_details(
-                    metadata_base,
-                    entry_price=entry_price,
-                    stop_loss_price=stop_loss_price,
-                    take_profit_price=take_profit_price,
-                    position_size_units=position_size_units,
-                    position_notional=position_notional,
-                    risk_amount=risk_amount,
-                    potential_profit=potential_profit,
-                    risk_reward_ratio=risk_reward_ratio,
-                    recommended_side=action.lower(),
-                    price_snapshot=price_snapshot_clean,
-                    indicators=indicators_payload,
-                    fallback_risk_percent=fallback_risk_percent,
-                )
-
-                enriched_entry = self._safe_float(metadata.get("entry_price")) or entry_price
-                enriched_stop = self._safe_float(metadata.get("stop_loss"))
-                enriched_take = self._safe_float(metadata.get("take_profit"))
-                enriched_notional = self._safe_float(metadata.get("position_notional"))
-                enriched_profit = self._safe_float(metadata.get("potential_gain_usd"))
-
-                if (
-                    enriched_entry is None
-                    or enriched_entry <= 0
-                    or enriched_stop is None
-                    or enriched_stop <= 0
-                    or enriched_take is None
-                    or enriched_take <= 0
-                    or enriched_notional is None
-                    or enriched_notional <= 0
-                    or enriched_profit is None
-                    or enriched_profit <= 0
-                ):
-                    self.logger.debug(
-                        "Skipping mean reversion opportunity due to incomplete trade metrics",
-                        scan_id=scan_id,
-                        symbol=symbol,
-                        entry_price=enriched_entry,
-                        stop_loss=enriched_stop,
-                        take_profit=enriched_take,
-                        capital=enriched_notional,
-                        potential_gain=enriched_profit,
-                    )
-                    continue
-
-                opportunity = OpportunityResult(
-                    strategy_id="ai_spot_mean_reversion",
-                    strategy_name=f"AI Mean Reversion ({quality_tier.upper()} confidence)",
-                    opportunity_type="mean_reversion",
-                    symbol=symbol,
-                    exchange="binance",
-                    profit_potential_usd=float(enriched_profit),
-                    confidence_score=float(confidence_score),
-                    risk_level=self._signal_to_risk_level(signal_strength),
-                    required_capital_usd=float(enriched_notional),
-                    estimated_timeframe="6-24h",
-                    entry_price=enriched_entry,
-                    exit_price=enriched_take,
-                    metadata=metadata,
-                    discovered_at=self._current_timestamp(),
-                )
-
-                opportunities.append(opportunity)
-
-        except Exception as error:
-            self.logger.error(
-                "Spot mean reversion scan failed",
-                scan_id=scan_id,
-                error=str(error),
-            )
-
+                
+                if reversion_result.get("success") and reversion_result.get("signals"):
+                    signals = reversion_result["signals"]
+                    deviation_score = abs(float(signals.get("deviation_score") or 0))
+                    
+                    # Track ALL signals for transparency
+                    self.logger.info(f"🎯 MEAN REVERSION SIGNAL ANALYSIS",
+                                   scan_id=scan_id,
+                                   symbol=symbol,
+                                   deviation_score=deviation_score,
+                                   qualifies_threshold=deviation_score > 2.0)
+                    
+                    # Create opportunity for ALL signals above 1.0 but mark quality
+                    if deviation_score > 1.0:  # Capture more opportunities
+                        quality_tier = "high" if deviation_score > 2.0 else "medium" if deviation_score > 1.5 else "low"
+                        signal_strength = min(deviation_score * 2, 10)  # Convert to 1-10 scale
+                        
+                        opportunity = OpportunityResult(
+                            strategy_id="ai_spot_mean_reversion",
+                            strategy_name=f"AI Mean Reversion ({quality_tier.upper()} confidence)",
+                            opportunity_type="mean_reversion",
+                            symbol=symbol,
+                            exchange="binance",
+                            profit_potential_usd=float(signals.get("reversion_target") or 0),
+                            confidence_score=float(signals.get("confidence") or 0.75) * 100,
+                            risk_level=self._signal_to_risk_level(signal_strength),
+                            required_capital_usd=float(signals.get("min_capital") or 2000),
+                            estimated_timeframe="6-24h", 
+                            entry_price=signals.get("entry_price"),
+                            exit_price=signals.get("mean_price"),
+                            metadata={
+                                "signal_strength": signal_strength,
+                                "deviation_score": signals.get("deviation_score", 0),
+                                "quality_tier": quality_tier,
+                                "meets_original_threshold": deviation_score > 2.0,
+                                "recommendation": "STRONG BUY" if deviation_score > 2.0 else "CONSIDER" if deviation_score > 1.5 else "MONITOR",
+                                "rsi": signals.get("rsi", 0),
+                                "bollinger_position": signals.get("bollinger_position", 0),
+                                "mean_price": signals.get("mean_price", 0)
+                            },
+                            discovered_at=self._current_timestamp()
+                        )
+                        opportunities.append(opportunity)
+                        
+        except Exception as e:
+            self.logger.error("Spot mean reversion scan failed",
+                            scan_id=scan_id, error=str(e))
+        
         return opportunities
     
     async def _scan_spot_breakout_opportunities(
@@ -2267,236 +1890,49 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     user_id=user_profile.user_id
                 )
                 
-                if breakout_result.get("success"):
-                    signal_block = (
-                        breakout_result.get("signal")
-                        or breakout_result.get("breakout_analysis")
-                        or {}
-                    )
-                    breakout_analysis = breakout_result.get("breakout_analysis") or {}
-                    risk_mgmt = breakout_result.get("risk_management") or {}
-
-                    action = (signal_block.get("action") or signal_block.get("direction") or "").upper()
-                    breakout_detected = bool(breakout_analysis.get("breakout_detected"))
-
-                    if action in {"BUY", "SELL"} and breakout_detected:
-                        breakout_probability = self._to_fraction(
-                            signal_block.get("breakout_probability")
-                        )
-
-                        if breakout_probability is None:
-                            breakout_probability = self._to_fraction(
-                                signal_block.get("confidence")
-                            )
-
-                        breakout_probability = breakout_probability or 0.0
-                        breakout_probability = max(0.0, min(breakout_probability, 1.0))
-
-                        # Track ALL signals for transparency
-                        self.logger.info(
-                            "🎯 BREAKOUT SIGNAL ANALYSIS",
-                            scan_id=scan_id,
+                if breakout_result.get("success") and breakout_result.get("breakout_signals"):
+                    signals = breakout_result["breakout_signals"]
+                    breakout_probability = signals.get("breakout_probability", 0)
+                    
+                    # Track ALL signals for transparency
+                    self.logger.info(f"🎯 BREAKOUT SIGNAL ANALYSIS",
+                                   scan_id=scan_id,
+                                   symbol=symbol,
+                                   breakout_probability=breakout_probability,
+                                   qualifies_threshold=breakout_probability > 0.75)
+                    
+                    # Create opportunity for ALL signals above 0.5 but mark quality
+                    if breakout_probability > 0.5:  # Capture more opportunities
+                        quality_tier = "high" if breakout_probability > 0.75 else "medium" if breakout_probability > 0.65 else "low"
+                        signal_strength = breakout_probability * 10  # Convert to 1-10 scale
+                        
+                        opportunity = OpportunityResult(
+                            strategy_id="ai_spot_breakout_strategy",
+                            strategy_name=f"AI Breakout Trading ({quality_tier.upper()} confidence)",
+                            opportunity_type="breakout",
                             symbol=symbol,
-                            breakout_probability=breakout_probability,
-                            qualifies_threshold=breakout_probability > 0.75,
-                        )
-
-                        if breakout_probability > 0.5:
-                            quality_tier = (
-                                "high"
-                                if breakout_probability > 0.75
-                                else "medium"
-                                if breakout_probability > 0.65
-                                else "low"
-                            )
-                            signal_strength = breakout_probability * 10.0
-
-                            entry_price = self._safe_float(
-                                risk_mgmt.get("entry_price")
-                                or breakout_result.get("current_price")
-                            )
-                            take_profit_price = self._safe_float(
-                                risk_mgmt.get("take_profit_price")
-                                or breakout_analysis.get("take_profit")
-                            )
-                            stop_loss_price = self._safe_float(
-                                risk_mgmt.get("stop_loss_price")
-                                or breakout_analysis.get("stop_loss")
-                            )
-
-                            position_size_units = self._safe_float(risk_mgmt.get("position_size"))
-                            position_notional = self._safe_float(risk_mgmt.get("position_notional"))
-
-                            indicators = breakout_result.get("indicators") or {}
-                            price_snapshot = indicators.get("price_snapshot") if isinstance(indicators, dict) else {}
-                            if not isinstance(price_snapshot, dict):
-                                price_snapshot = {}
-                            price_snapshot_clean = self._sanitize_price_snapshot(price_snapshot)
-
-                            entry_price, price_snapshot_clean = await self._ensure_price_snapshot(
-                                f"{symbol}/USDT",
-                                price_snapshot_clean,
-                                seed_entry=entry_price,
-                            )
-
-                            if (
-                                entry_price
-                                and (position_size_units is None or position_size_units <= 0)
-                            ):
-                                position_size_units = round(1000.0 / entry_price, 6)
-
-                            if (
-                                entry_price
-                                and position_size_units
-                                and (position_notional is None or position_notional <= 0)
-                            ):
-                                position_notional = round(position_size_units * entry_price, 2)
-
-                            risk_amount = self._safe_float(risk_mgmt.get("risk_amount"))
-                            potential_profit = self._safe_float(risk_mgmt.get("potential_profit"))
-                            risk_reward_ratio = self._safe_float(risk_mgmt.get("risk_reward_ratio"))
-
-                            if (
-                                entry_price
-                                and stop_loss_price
-                                and (risk_amount is None or risk_amount <= 0)
-                                and position_size_units
-                            ):
-                                risk_amount = round(
-                                    abs(entry_price - stop_loss_price) * position_size_units,
-                                    2,
-                                )
-
-                            if (
-                                entry_price
-                                and take_profit_price
-                                and (potential_profit is None or potential_profit <= 0)
-                                and position_size_units
-                            ):
-                                potential_profit = round(
-                                    abs(take_profit_price - entry_price) * position_size_units,
-                                    2,
-                                )
-
-                            if (
-                                risk_amount
-                                and risk_amount > 0
-                                and potential_profit is not None
-                                and (risk_reward_ratio is None or risk_reward_ratio <= 0)
-                            ):
-                                risk_reward_ratio = round(potential_profit / risk_amount, 2)
-
-                            confidence_score = self._safe_float(signal_block.get("confidence"))
-                            if confidence_score is None:
-                                confidence_score = breakout_probability * 100.0
-
-                            indicators_payload = (
-                                self._sanitize_metadata_block(indicators)
-                                if isinstance(indicators, dict)
-                                else {}
-                            )
-
-                            fallback_risk_percent = (
-                                self._safe_float(risk_mgmt.get("max_risk_percent"))
-                                or self._safe_float(risk_mgmt.get("risk_percentage"))
-                                or 2.0
-                            )
-
-                            metadata_base = {
+                            exchange="binance",
+                            profit_potential_usd=float(signals.get("profit_potential") or 0),
+                            confidence_score=float(breakout_probability) * 100,
+                            risk_level=self._signal_to_risk_level(signal_strength),
+                            required_capital_usd=float(signals.get("min_capital") or 3000),
+                            estimated_timeframe="2-8h",
+                            entry_price=signals.get("breakout_price"),
+                            exit_price=signals.get("target_price"),
+                            metadata={
                                 "signal_strength": signal_strength,
                                 "breakout_probability": breakout_probability,
                                 "quality_tier": quality_tier,
                                 "meets_original_threshold": breakout_probability > 0.75,
-                                "recommendation": (
-                                    "STRONG BUY"
-                                    if breakout_probability > 0.75 and action == "BUY"
-                                    else "STRONG SELL"
-                                    if breakout_probability > 0.75 and action == "SELL"
-                                    else "CONSIDER"
-                                    if breakout_probability > 0.65
-                                    else "MONITOR"
-                                ),
-                            }
-
-                            metadata = self._enrich_metadata_with_trade_details(
-                                metadata_base,
-                                entry_price=entry_price,
-                                stop_loss_price=stop_loss_price,
-                                take_profit_price=take_profit_price,
-                                position_size_units=position_size_units,
-                                position_notional=position_notional,
-                                risk_amount=risk_amount,
-                                potential_profit=potential_profit,
-                                risk_reward_ratio=risk_reward_ratio,
-                                recommended_side=action.lower(),
-                                price_snapshot=price_snapshot_clean,
-                                indicators=indicators_payload,
-                                fallback_risk_percent=fallback_risk_percent,
-                            )
-
-                            enriched_entry = self._safe_float(metadata.get("entry_price")) or entry_price
-                            enriched_stop = self._safe_float(metadata.get("stop_loss"))
-                            enriched_take = self._safe_float(metadata.get("take_profit"))
-                            enriched_notional = self._safe_float(metadata.get("position_notional"))
-                            enriched_profit = self._safe_float(metadata.get("potential_gain_usd"))
-
-                            if (
-                                enriched_entry is None
-                                or enriched_entry <= 0
-                                or enriched_stop is None
-                                or enriched_stop <= 0
-                                or enriched_take is None
-                                or enriched_take <= 0
-                                or enriched_notional is None
-                                or enriched_notional <= 0
-                                or enriched_profit is None
-                                or enriched_profit <= 0
-                            ):
-                                self.logger.debug(
-                                    "Skipping breakout opportunity due to incomplete trade metrics",
-                                    scan_id=scan_id,
-                                    symbol=symbol,
-                                    entry_price=enriched_entry,
-                                    stop_loss=enriched_stop,
-                                    take_profit=enriched_take,
-                                    capital=enriched_notional,
-                                    potential_gain=enriched_profit,
-                                )
-                                continue
-
-                            entry_price = enriched_entry
-                            stop_loss_price = enriched_stop
-                            take_profit_price = enriched_take
-                            position_notional = float(enriched_notional)
-                            potential_profit = float(enriched_profit)
-
-                            support_levels = breakout_analysis.get("support_levels", [])
-                            resistance_levels = breakout_analysis.get("resistance_levels", [])
-                            if support_levels:
-                                metadata["support_levels"] = support_levels
-                            if resistance_levels:
-                                metadata["resistance_levels"] = resistance_levels
-                            volume_surge = breakout_analysis.get("volume_surge")
-                            if volume_surge is not None:
-                                metadata["volume_surge"] = volume_surge
-
-                            opportunity = OpportunityResult(
-                                strategy_id="ai_spot_breakout_strategy",
-                                strategy_name=f"AI Breakout Trading ({quality_tier.upper()} confidence)",
-                                opportunity_type="breakout",
-                                symbol=symbol,
-                                exchange="binance",
-                                profit_potential_usd=float(potential_profit),
-                                confidence_score=float(confidence_score or 0.0),
-                                risk_level=self._signal_to_risk_level(signal_strength),
-                                required_capital_usd=float(position_notional),
-                                estimated_timeframe="2-8h",
-                                entry_price=entry_price,
-                                exit_price=take_profit_price,
-                                metadata=metadata,
-                                discovered_at=self._current_timestamp(),
-                            )
-                            opportunities.append(opportunity)
+                                "recommendation": "STRONG BUY" if breakout_probability > 0.75 else "CONSIDER" if breakout_probability > 0.65 else "MONITOR",
+                                "support_level": signals.get("support_level", 0),
+                                "resistance_level": signals.get("resistance_level", 0),
+                                "volume_surge": signals.get("volume_surge", 0),
+                                "breakout_direction": signals.get("direction", "up")
+                            },
+                            discovered_at=self._current_timestamp()
+                        )
+                        opportunities.append(opportunity)
                         
         except Exception as e:
             self.logger.error("Spot breakout scan failed",
@@ -2669,8 +2105,6 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
                 if rebalancing_recommendations:
 
-                    price_cache: Dict[str, Dict[str, float]] = {}
-
                     def _normalize_improvement(value: Any) -> float:
                         """Convert raw improvement values to a 0-1 range."""
                         if value is None:
@@ -2694,14 +2128,6 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                             return max(0.0, min(parsed_value, 1.0))
                         except (TypeError, ValueError):
                             return 0.0
-
-                    position_context, portfolio_total_value = await self._get_portfolio_position_context(
-                        user_profile.user_id,
-                        portfolio_result,
-                    )
-                    optimization_history = await self._get_portfolio_optimization_history(user_profile.user_id)
-                    history_updates: Dict[str, Dict[str, Any]] = {}
-                    emitted_signatures: Set[str] = set()
 
                     for rebal in rebalancing_recommendations:
                         raw_improvement = rebal.get("improvement_potential")
@@ -2749,10 +2175,6 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                             strategy_metrics.get("risk_level"),
                             source="strategy_analysis",
                         )
-
-                        trade_direction = (rebal.get("action") or "").upper()
-                        if not trade_direction:
-                            trade_direction = "BUY" if (trade_value_usd or 0) >= 0 else "SELL"
 
                         metadata: Dict[str, Any] = {
                             "rebalance_action": rebal.get("action", ""),
@@ -2804,285 +2226,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         if value_change is not None and value_change != trade_value_usd:
                             metadata["value_change"] = value_change
 
-                        normalized_symbol = str(rebal.get("symbol") or rebal.get("target_asset") or "")
-                        base_symbol = self._extract_base_symbol(normalized_symbol)
-                        current_position_entry = position_context.get(base_symbol)
-                        current_weight = (
-                            self._safe_float(current_position_entry.get("weight"))
-                            if current_position_entry
-                            else None
-                        )
-                        current_value = (
-                            self._safe_float(current_position_entry.get("value_usd"))
-                            if current_position_entry
-                            else None
-                        )
-
-                        weight_gap = None
-                        if target_weight_fraction is not None and current_weight is not None:
-                            weight_gap = target_weight_fraction - current_weight
-                        elif weight_change_fraction is not None:
-                            weight_gap = weight_change_fraction
-                        elif value_change is not None and portfolio_total_value > 0:
-                            weight_gap = value_change / portfolio_total_value
-
-                        signature = self._build_rebalance_signature(
-                            normalized_symbol,
-                            trade_direction,
-                            target_weight_fraction,
-                            weight_change_fraction,
-                            trade_value_usd,
-                            improvement_normalized,
-                        )
-
-                        if signature in emitted_signatures:
-                            self.logger.debug(
-                                "Skipping duplicate portfolio optimization recommendation in current scan",
-                                scan_id=scan_id,
-                                signature=signature,
-                                symbol=normalized_symbol,
-                                action=trade_direction,
-                            )
-                            continue
-
-                        history_entry = optimization_history.get(signature) if optimization_history else None
-
-                        previous_count = 0
-                        if history_entry:
-                            previous_raw = history_entry.get("times_recommended")
-                            try:
-                                previous_count = int(previous_raw)
-                            except (TypeError, ValueError):
-                                previous_count = 0
-                        current_count = previous_count + 1
-
-                        last_seen_dt: Optional[datetime] = None
-                        if history_entry:
-                            last_seen_raw = history_entry.get("last_recommended_at")
-                            if isinstance(last_seen_raw, str):
-                                try:
-                                    last_seen_dt = datetime.fromisoformat(last_seen_raw)
-                                    if last_seen_dt.tzinfo is None:
-                                        last_seen_dt = last_seen_dt.replace(tzinfo=timezone.utc)
-                                except ValueError:
-                                    last_seen_dt = None
-
-                        should_skip = False
-                        weight_gap_abs = abs(weight_gap) if weight_gap is not None else None
-                        if (
-                            weight_gap_abs is not None
-                            and current_weight is not None
-                            and target_weight_fraction is not None
-                            and weight_gap_abs <= PORTFOLIO_REBALANCE_WEIGHT_EPSILON
-                        ):
-                            should_skip = True
-
-                        if not should_skip and last_seen_dt:
-                            cooldown = timedelta(hours=PORTFOLIO_REBALANCE_HISTORY_COOLDOWN_HOURS)
-                            if self._current_timestamp() - last_seen_dt < cooldown:
-                                historical_gap = self._safe_float(history_entry.get("weight_gap")) if history_entry else None
-                                threshold = max(
-                                    PORTFOLIO_REBALANCE_WEIGHT_EPSILON,
-                                    abs(historical_gap) if historical_gap is not None else 0.0,
-                                )
-                                if weight_gap_abs is None or weight_gap_abs <= threshold:
-                                    should_skip = True
-
-                        if should_skip:
-                            self.logger.debug(
-                                "Skipping portfolio optimization recommendation already satisfied",
-                                scan_id=scan_id,
-                                symbol=normalized_symbol,
-                                action=trade_direction,
-                                weight_gap=weight_gap,
-                                previous_count=previous_count,
-                                last_recommended_at=history_entry.get("last_recommended_at") if history_entry else None,
-                            )
-                            continue
-
-                        portfolio_context_block: Dict[str, Any] = {}
-                        if current_weight is not None:
-                            portfolio_context_block["current_weight"] = round(current_weight, 6)
-                        if current_value is not None:
-                            portfolio_context_block["current_value_usd"] = round(current_value, 2)
-                        if portfolio_total_value > 0:
-                            portfolio_context_block["portfolio_total_value_usd"] = round(portfolio_total_value, 2)
-                        if weight_gap is not None:
-                            portfolio_context_block["weight_gap"] = round(weight_gap, 6)
-                        if current_position_entry and current_position_entry.get("symbols"):
-                            portfolio_context_block["position_symbols"] = current_position_entry["symbols"]
-                        if portfolio_context_block:
-                            metadata["portfolio_context"] = portfolio_context_block
-
-                        history_metadata: Dict[str, Any] = {
-                            "signature": signature,
-                            "previous_recommendation_count": previous_count,
-                            "current_recommendation_count": current_count,
-                        }
-                        if history_entry and history_entry.get("last_recommended_at"):
-                            history_metadata["previous_recommendation_at"] = history_entry["last_recommended_at"]
-
-                        current_timestamp = self._current_timestamp()
-                        current_timestamp_iso = current_timestamp.isoformat()
-                        history_metadata["current_recommendation_at"] = current_timestamp_iso
-                        metadata["optimization_history"] = history_metadata
-
-                        history_record: Dict[str, Any] = {
-                            "symbol": normalized_symbol.upper(),
-                            "action": trade_direction,
-                            "last_recommended_at": current_timestamp_iso,
-                            "times_recommended": current_count,
-                        }
-                        if target_weight_fraction is not None:
-                            history_record["target_weight"] = round(target_weight_fraction, 6)
-                        if weight_gap is not None:
-                            history_record["weight_gap"] = round(weight_gap, 6)
-                        if trade_value_usd is not None:
-                            history_record["trade_value_usd"] = round(float(trade_value_usd), 2)
-                        if improvement_normalized is not None:
-                            history_record["improvement"] = round(float(improvement_normalized), 4)
-                        if current_weight is not None:
-                            history_record["current_weight"] = round(current_weight, 6)
-                        if current_value is not None:
-                            history_record["current_value_usd"] = round(current_value, 2)
-                        if portfolio_total_value > 0:
-                            history_record["portfolio_value_usd"] = round(portfolio_total_value, 2)
-
-                        symbol_for_price = rebal.get("symbol") or rebal.get("target_asset") or ""
-                        entry_price = self._safe_float(rebal.get("current_price"))
-                        price_snapshot_clean: Dict[str, float] = {}
-
-                        if symbol_for_price:
-                            cache_key = str(symbol_for_price).upper()
-                            cached_snapshot = price_cache.get(cache_key)
-                            if cached_snapshot is None:
-                                resolved_key, snapshot = await self._resolve_price_snapshot(symbol_for_price)
-                                price_cache[cache_key] = snapshot
-                                if resolved_key and resolved_key != cache_key:
-                                    price_cache[resolved_key] = snapshot
-                                price_snapshot_clean = snapshot
-                            else:
-                                price_snapshot_clean = cached_snapshot
-
-                        entry_price_seed = entry_price
-                        snapshot_entry_price = self._safe_float(price_snapshot_clean.get("current"))
-                        if entry_price_seed is None and snapshot_entry_price is not None:
-                            entry_price_seed = snapshot_entry_price
-
-                        entry_price, price_snapshot_clean = await self._ensure_price_snapshot(
-                            symbol_for_price or normalized_symbol,
-                            price_snapshot_clean,
-                            seed_entry=entry_price_seed,
-                        )
-
-                        position_notional_value = required_capital if required_capital > 0 else None
-                        position_size_units = None
-                        if entry_price and entry_price > 0 and position_notional_value:
-                            position_size_units = round(position_notional_value / entry_price, 6)
-
-                        stop_loss_price = None
-                        take_profit_price = None
-                        if entry_price and entry_price > 0:
-                            risk_buffer = 0.02
-                            reward_buffer = 0.03
-                            if trade_direction == "SELL":
-                                stop_loss_price = round(entry_price * (1 + risk_buffer), 2)
-                                take_profit_price = round(entry_price * (1 - reward_buffer), 2)
-                            else:
-                                stop_loss_price = round(entry_price * (1 - risk_buffer), 2)
-                                take_profit_price = round(entry_price * (1 + reward_buffer), 2)
-
-                        risk_amount_value = None
-                        potential_profit_value = None
-                        risk_reward_ratio_value = None
-
-                        if (
-                            entry_price
-                            and stop_loss_price
-                            and position_size_units
-                        ):
-                            risk_amount_value = round(
-                                abs(entry_price - stop_loss_price) * position_size_units,
-                                2,
-                            )
-
-                        if (
-                            entry_price
-                            and take_profit_price
-                            and position_size_units
-                        ):
-                            potential_profit_value = round(
-                                abs(take_profit_price - entry_price) * position_size_units,
-                                2,
-                            )
-
-                        if (
-                            risk_amount_value
-                            and risk_amount_value > 0
-                            and potential_profit_value is not None
-                        ):
-                            risk_reward_ratio_value = round(
-                                potential_profit_value / risk_amount_value,
-                                2,
-                            )
-
-                        if risk_amount_value is None and position_notional_value:
-                            risk_amount_value = round(position_notional_value * 0.02, 2)
-                        if potential_profit_value is None and position_notional_value:
-                            potential_profit_value = round(position_notional_value * 0.05, 2)
-                        if (
-                            risk_reward_ratio_value is None
-                            and risk_amount_value
-                            and risk_amount_value > 0
-                            and potential_profit_value is not None
-                        ):
-                            risk_reward_ratio_value = round(
-                                potential_profit_value / risk_amount_value,
-                                2,
-                            )
-
-                        fallback_risk_percent = 2.0
-
-                        metadata = self._enrich_metadata_with_trade_details(
-                            metadata,
-                            entry_price=entry_price,
-                            stop_loss_price=stop_loss_price,
-                            take_profit_price=take_profit_price,
-                            position_size_units=position_size_units,
-                            position_notional=position_notional_value,
-                            risk_amount=risk_amount_value,
-                            potential_profit=potential_profit_value,
-                            risk_reward_ratio=risk_reward_ratio_value,
-                            recommended_side=trade_direction.lower(),
-                            price_snapshot=price_snapshot_clean,
-                            indicators=None,
-                            fallback_risk_percent=fallback_risk_percent,
-                        )
-
-                        metadata.setdefault("trade_direction", trade_direction.lower())
-
-                        enriched_entry = self._safe_float(metadata.get("entry_price")) or entry_price
-                        enriched_take = self._safe_float(metadata.get("take_profit"))
-                        enriched_stop = self._safe_float(metadata.get("stop_loss"))
-                        enriched_capital = self._safe_float(metadata.get("position_notional"))
-                        enriched_profit = self._safe_float(metadata.get("potential_gain_usd"))
-
-                        if enriched_entry is not None:
-                            entry_price = enriched_entry
-
-                        if enriched_capital is not None:
-                            position_notional_value = float(enriched_capital)
-
-                        profit_projection_value = float(profit_projection["expected_profit_usd"] or 0.0)
-                        trade_profit_candidate = float(
-                            enriched_profit if enriched_profit is not None else potential_profit_value or 0.0
-                        )
-                        display_profit_potential = (
-                            trade_profit_candidate
-                            if trade_profit_candidate > profit_projection_value
-                            else profit_projection_value
-                        )
-
+                        profit_potential_usd = float(profit_projection["expected_profit_usd"] or 0.0)
                         risk_label = self._risk_spread_to_label(
                             profit_projection["risk_spread_pct"] / 100.0
                         )
@@ -3091,56 +2235,23 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                             min(95.0, 95.0 - profit_projection["risk_spread_pct"]),
                         )
 
-                        if (
-                            entry_price is None
-                            or entry_price <= 0
-                            or enriched_take is None
-                            or enriched_take <= 0
-                            or enriched_stop is None
-                            or enriched_stop <= 0
-                            or position_notional_value is None
-                            or position_notional_value <= 0
-                            or display_profit_potential <= 0
-                        ):
-                            self.logger.debug(
-                                "Skipping portfolio optimization opportunity due to incomplete metrics",
-                                scan_id=scan_id,
-                                symbol=rebal.get("symbol"),
-                                entry_price=entry_price,
-                                stop_loss=enriched_stop,
-                                take_profit=enriched_take,
-                                capital=position_notional_value,
-                                profit=display_profit_potential,
-                            )
-                            continue
-
-                        history_updates[signature] = history_record
-                        emitted_signatures.add(signature)
-
                         opportunity = OpportunityResult(
                             strategy_id="ai_portfolio_optimization",
                             strategy_name=f"AI Portfolio Optimization - {strategy_name}",
                             opportunity_type="portfolio_rebalance",
                             symbol=rebal.get("symbol", rebal.get("target_asset", "")),
                             exchange="multiple",
-                            profit_potential_usd=display_profit_potential,
-                            confidence_score=self._normalize_confidence_score(confidence_score),
+                            profit_potential_usd=profit_potential_usd,
+                            confidence_score=confidence_score,
                             risk_level=risk_label,
-                            required_capital_usd=float(position_notional_value or required_capital),
+                            required_capital_usd=required_capital,
                             estimated_timeframe="1-3 months",
-                            entry_price=entry_price,
-                            exit_price=enriched_take,
+                            entry_price=None,
+                            exit_price=None,
                             metadata=metadata,
                             discovered_at=self._current_timestamp(),
                         )
                         opportunities.append(opportunity)
-
-                    if history_updates:
-                        await self._persist_portfolio_optimization_history(
-                            user_profile.user_id,
-                            optimization_history,
-                            history_updates,
-                        )
 
                 elif strategy_analysis:
                     for strategy, results in strategy_analysis.items():
@@ -4894,8 +4005,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
         return pairs[:max_pairs]
 
-    @staticmethod
-    def _to_float(value: Any) -> Optional[float]:
+    def _to_float(self, value: Any) -> Optional[float]:
         """Convert common numeric string formats to float safely."""
 
         if value is None:
@@ -4953,46 +4063,6 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 return None
 
         return None
-
-    @classmethod
-    def _safe_float(cls, value: Any) -> Optional[float]:
-        """Best-effort conversion to float using the shared numeric parser."""
-
-        return cls._to_float(value)
-
-    @classmethod
-    def _normalize_confidence_score(
-        cls,
-        value: Any,
-        fallback_strength: Optional[float] = None,
-    ) -> float:
-        """Normalize arbitrary confidence inputs into a 0-1 scale."""
-
-        candidate = cls._to_float(value)
-
-        if candidate is None and fallback_strength is not None:
-            fallback_value = cls._to_float(fallback_strength)
-            if fallback_value is not None and fallback_value > 0:
-                candidate = fallback_value / 10.0
-
-        if candidate is None:
-            return 0.0
-
-        # Ensure positive and finite
-        if not math.isfinite(candidate):
-            return 0.0
-
-        normalized = abs(candidate)
-        iterations = 0
-        while normalized > 1.0 and iterations < 3:
-            normalized /= 100.0
-            iterations += 1
-
-        if normalized > 1.0:
-            normalized = 1.0
-
-        return round(normalized, 4)
-
     def _to_fraction(self, value: Any) -> Optional[float]:
         """Convert values that may represent percentages into fractions."""
 
@@ -5008,7 +4078,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
         # Check for percent markers (including fullwidth percent sign U+FF05)
         if original:
-            normalized = original.strip().replace("\uFF05", "%")  # Replace fullwidth percent
+            normalized = original.strip().replace('％', '%')  # Replace fullwidth percent
             if "%" in normalized:
                 return numeric / 100.0
 
@@ -5019,635 +4089,6 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             return numeric / 100.0
 
         return numeric
-
-    def _sanitize_price_snapshot(self, snapshot: Any) -> Dict[str, float]:
-        """Normalize price snapshot structures into rounded floats."""
-
-        sanitized: Dict[str, float] = {}
-
-        if isinstance(snapshot, dict):
-            for key, raw_value in snapshot.items():
-                numeric_value = self._safe_float(raw_value)
-                if numeric_value is None:
-                    continue
-
-                precision = 4 if key in {"volume", "avg_volume"} else 2
-                sanitized[key] = round(numeric_value, precision)
-
-        return sanitized
-
-    def _build_rebalance_signature(
-        self,
-        symbol: str,
-        action: str,
-        target_weight: Optional[float],
-        weight_change: Optional[float],
-        value_change: Optional[float],
-        improvement: Optional[float],
-    ) -> str:
-        """Create a stable key for deduplicating rebalance recommendations."""
-
-        def _format_numeric(value: Optional[float], precision: int) -> str:
-            numeric = self._safe_float(value)
-            if numeric is None:
-                return "NA"
-            return f"{numeric:.{precision}f}"
-
-        normalized_symbol = (symbol or "").upper().strip()
-        normalized_action = (action or "HOLD").upper().strip()
-
-        components = [
-            normalized_symbol or "UNKNOWN",
-            normalized_action or "HOLD",
-            _format_numeric(target_weight, 4),
-            _format_numeric(weight_change, 4),
-            _format_numeric(value_change, 2),
-            _format_numeric(improvement, 4),
-        ]
-
-        return "|".join(components)
-
-    @classmethod
-    def _sanitize_metadata_block(cls, value: Any) -> Any:
-        """Recursively sanitize metadata structures for JSON serialization."""
-
-        if isinstance(value, dict):
-            sanitized_dict: Dict[str, Any] = {}
-            for key, item in value.items():
-                cleaned = cls._sanitize_metadata_block(item)
-                if cleaned is not None:
-                    sanitized_dict[key] = cleaned
-            return sanitized_dict
-
-        if isinstance(value, (list, tuple, set)):
-            sanitized_list = [cls._sanitize_metadata_block(item) for item in value]
-            return [item for item in sanitized_list if item is not None]
-
-        if isinstance(value, Decimal):
-            return float(value)
-
-        if isinstance(value, datetime):
-            return value.isoformat()
-
-        if isinstance(value, (int, float, str, bool)) or value is None:
-            return value
-
-        return str(value)
-
-    def _enrich_metadata_with_trade_details(
-        self,
-        base_metadata: Dict[str, Any],
-        *,
-        entry_price: Optional[float],
-        stop_loss_price: Optional[float],
-        take_profit_price: Optional[float],
-        position_size_units: Optional[float],
-        position_notional: Optional[float],
-        risk_amount: Optional[float],
-        potential_profit: Optional[float],
-        risk_reward_ratio: Optional[float],
-        recommended_side: Optional[str],
-        price_snapshot: Optional[Dict[str, Any]] = None,
-        indicators: Optional[Dict[str, Any]] = None,
-        fallback_risk_percent: Optional[float] = None,
-    ) -> Dict[str, Any]:
-        """Merge trade metrics into metadata for downstream consumers."""
-
-        metadata = dict(base_metadata or {})
-
-        sanitized_snapshot = self._sanitize_price_snapshot(price_snapshot)
-        existing_snapshot = metadata.get("price_snapshot")
-        if isinstance(existing_snapshot, dict):
-            merged_snapshot = {**existing_snapshot, **sanitized_snapshot}
-        else:
-            merged_snapshot = sanitized_snapshot
-
-        entry_float = self._safe_float(entry_price)
-        if entry_float is not None and "current" not in merged_snapshot:
-            merged_snapshot["current"] = round(entry_float, 2)
-
-        if merged_snapshot:
-            metadata["price_snapshot"] = merged_snapshot
-
-        if indicators:
-            sanitized_indicators = self._sanitize_metadata_block(indicators)
-            if sanitized_indicators:
-                existing_indicators = metadata.get("indicators")
-                if isinstance(existing_indicators, dict):
-                    metadata["indicators"] = {**existing_indicators, **sanitized_indicators}
-                else:
-                    metadata["indicators"] = sanitized_indicators
-
-        stop_float = self._safe_float(stop_loss_price)
-        if stop_float is not None:
-            stop_float = round(stop_float, 2)
-            if stop_float <= 0:
-                stop_float = None
-        take_float = self._safe_float(take_profit_price)
-        if take_float is not None:
-            take_float = round(take_float, 2)
-            if take_float <= 0:
-                take_float = None
-        position_units_float = self._safe_float(position_size_units)
-        if position_units_float is not None:
-            position_units_float = round(position_units_float, 6)
-            if position_units_float <= 0:
-                position_units_float = None
-        position_notional_float = self._safe_float(position_notional)
-        if position_notional_float is not None:
-            position_notional_float = round(position_notional_float, 2)
-            if position_notional_float <= 0:
-                position_notional_float = None
-        risk_amount_float = self._safe_float(risk_amount)
-        if risk_amount_float is not None:
-            risk_amount_float = round(risk_amount_float, 2)
-            if risk_amount_float <= 0:
-                risk_amount_float = None
-        potential_profit_float = self._safe_float(potential_profit)
-        if potential_profit_float is not None:
-            potential_profit_float = round(potential_profit_float, 2)
-            if potential_profit_float <= 0:
-                potential_profit_float = None
-        risk_reward_float = self._safe_float(risk_reward_ratio)
-        if risk_reward_float is not None:
-            risk_reward_float = round(risk_reward_float, 2)
-            if risk_reward_float <= 0:
-                risk_reward_float = None
-
-        recommended_lower = None
-        if isinstance(recommended_side, str) and recommended_side:
-            recommended_lower = recommended_side.lower()
-
-        if (
-            (position_units_float is None or position_units_float <= 0)
-            and position_notional_float
-            and entry_float
-            and entry_float > 0
-        ):
-            position_units_float = round(position_notional_float / entry_float, 6)
-            if position_units_float <= 0:
-                position_units_float = None
-
-        if (
-            (position_notional_float is None or position_notional_float <= 0)
-            and entry_float
-            and position_units_float
-        ):
-            position_notional_float = round(entry_float * position_units_float, 2)
-            if position_notional_float <= 0:
-                position_notional_float = None
-
-        risk_percent_fraction: Optional[float] = None
-        if fallback_risk_percent is not None:
-            fallback_numeric = self._safe_float(fallback_risk_percent)
-            if fallback_numeric is not None and fallback_numeric > 0:
-                risk_percent_fraction = fallback_numeric / 100.0
-
-        price_direction = "buy"
-        if recommended_lower in {"sell", "short"}:
-            price_direction = "sell"
-        elif recommended_lower in {"buy", "long"}:
-            price_direction = "buy"
-
-        if (
-            stop_float is None
-            and entry_float
-            and entry_float > 0
-            and risk_percent_fraction
-        ):
-            if price_direction == "sell":
-                stop_candidate = entry_float * (1 + risk_percent_fraction)
-            else:
-                stop_candidate = entry_float * (1 - risk_percent_fraction)
-            if stop_candidate > 0:
-                stop_float = round(stop_candidate, 2)
-
-        effective_rr = risk_reward_float if risk_reward_float and risk_reward_float > 0 else 2.0
-
-        if (
-            take_float is None
-            and entry_float
-            and entry_float > 0
-            and risk_percent_fraction
-        ):
-            reward_fraction = risk_percent_fraction * effective_rr
-            if price_direction == "sell":
-                take_candidate = entry_float * (1 - reward_fraction)
-            else:
-                take_candidate = entry_float * (1 + reward_fraction)
-            if take_candidate > 0:
-                take_float = round(take_candidate, 2)
-
-        if (
-            risk_amount_float is None
-            and entry_float
-            and stop_float
-            and position_units_float
-        ):
-            risk_amount_float = round(
-                abs(entry_float - stop_float) * position_units_float,
-                2,
-            )
-            if risk_amount_float <= 0:
-                risk_amount_float = None
-
-        if (
-            potential_profit_float is None
-            and entry_float
-            and take_float
-            and position_units_float
-        ):
-            potential_profit_float = round(
-                abs(take_float - entry_float) * position_units_float,
-                2,
-            )
-            if potential_profit_float <= 0:
-                potential_profit_float = None
-
-        if (
-            (risk_reward_float is None or risk_reward_float <= 0)
-            and risk_amount_float
-            and risk_amount_float > 0
-            and potential_profit_float is not None
-        ):
-            risk_reward_float = round(potential_profit_float / risk_amount_float, 2)
-            if risk_reward_float <= 0:
-                risk_reward_float = None
-
-        risk_metrics_payload = {
-            "entry_price": entry_float,
-            "stop_loss_price": stop_float,
-            "take_profit_price": take_float,
-            "position_size": position_units_float,
-            "position_notional": position_notional_float,
-            "max_risk_usd": risk_amount_float,
-            "potential_gain_usd": potential_profit_float,
-            "risk_reward_ratio": risk_reward_float,
-            "recommended_side": recommended_lower,
-        }
-        risk_metrics_payload = {
-            key: value for key, value in risk_metrics_payload.items() if value is not None
-        }
-
-        existing_risk_metrics = metadata.get("risk_metrics")
-        if isinstance(existing_risk_metrics, dict):
-            combined_risk_metrics = {**existing_risk_metrics, **risk_metrics_payload}
-        else:
-            combined_risk_metrics = risk_metrics_payload
-
-        if combined_risk_metrics:
-            metadata["risk_metrics"] = combined_risk_metrics
-
-        def _maybe_set(key: str, value: Optional[float]) -> None:
-            if value is None:
-                return
-            current = metadata.get(key)
-            if current in (None, "", 0, 0.0):
-                metadata[key] = value
-
-        _maybe_set("entry_price", entry_float)
-        _maybe_set("stop_loss", stop_float)
-        _maybe_set("take_profit", take_float)
-        _maybe_set("position_size_units", position_units_float)
-        _maybe_set("position_notional", position_notional_float)
-        _maybe_set("max_risk_usd", risk_amount_float)
-        _maybe_set("potential_gain_usd", potential_profit_float)
-        _maybe_set("risk_reward_ratio", risk_reward_float)
-
-        computed_risk_percent = None
-        if (
-            position_notional_float
-            and position_notional_float > 0
-            and risk_amount_float is not None
-        ):
-            computed_risk_percent = round(
-                (risk_amount_float / position_notional_float) * 100,
-                2,
-            )
-
-        if (
-            computed_risk_percent is None
-            and risk_percent_fraction is not None
-            and risk_percent_fraction > 0
-        ):
-            computed_risk_percent = round(risk_percent_fraction * 100, 2)
-
-        if (
-            computed_risk_percent is None
-            and fallback_risk_percent is not None
-        ):
-            computed_risk_percent = round(float(fallback_risk_percent), 2)
-
-        computed_gain_percent = None
-        if (
-            position_notional_float
-            and position_notional_float > 0
-            and potential_profit_float is not None
-        ):
-            computed_gain_percent = round(
-                (potential_profit_float / position_notional_float) * 100,
-                2,
-            )
-
-        if (
-            computed_gain_percent is None
-            and computed_risk_percent is not None
-            and risk_reward_float is not None
-        ):
-            computed_gain_percent = round(
-                computed_risk_percent * risk_reward_float,
-                2,
-            )
-
-        existing_risk_percent = self._safe_float(metadata.get("max_risk_percent"))
-        if (
-            computed_risk_percent is not None
-            and (existing_risk_percent is None or existing_risk_percent <= 0)
-        ):
-            metadata["max_risk_percent"] = computed_risk_percent
-
-        existing_gain_percent = self._safe_float(metadata.get("potential_gain_percent"))
-        if (
-            computed_gain_percent is not None
-            and (existing_gain_percent is None or existing_gain_percent <= 0)
-        ):
-            metadata["potential_gain_percent"] = computed_gain_percent
-
-        if recommended_lower:
-            metadata["recommended_side"] = recommended_lower
-
-        return metadata
-
-    async def _generate_synthetic_strategy_opportunities(
-        self,
-        strategy_id: str,
-        strategy_name: str,
-        discovered_assets: Dict[str, List[Any]],
-        user_profile: UserOpportunityProfile,
-        scan_id: str,
-    ) -> List[OpportunityResult]:
-        """Create deterministic synthetic opportunities when scanners return nothing."""
-
-        cleaned_id = (strategy_id or "").lower()
-        if cleaned_id.startswith("ai_"):
-            cleaned_id = cleaned_id[3:]
-
-        top_symbols = self._get_top_symbols_by_volume(discovered_assets, limit=3)
-        if not top_symbols:
-            top_symbols = ["BTC", "ETH", "SOL"]
-
-        primary_symbol = top_symbols[0]
-        secondary_symbol = top_symbols[1] if len(top_symbols) > 1 else "ETH"
-
-        pair_strategies = {
-            "pairs_trading",
-            "pairs_trader",
-            "statistical_arbitrage",
-            "statistical_arbitrage_pro",
-            "algorithmic_suite",
-        }
-        derivative_strategies = {
-            "futures_trade",
-            "futures_arbitrage",
-            "perpetual_trade",
-            "options_trade",
-            "options_strategies",
-            "funding_arbitrage",
-            "funding_arbitrage_pro",
-            "basis_trade",
-        }
-        portfolio_strategies = {
-            "portfolio_optimization",
-            "portfolio_optimizer",
-            "risk_management",
-            "risk_guardian",
-            "position_management",
-            "position_manager",
-            "strategy_analytics",
-            "hedge_position",
-        }
-
-        if cleaned_id in pair_strategies:
-            display_symbol = f"{primary_symbol}-{secondary_symbol}"
-            price_symbol = f"{primary_symbol}/USDT"
-        elif "/" in primary_symbol:
-            display_symbol = primary_symbol
-            price_symbol = primary_symbol
-        else:
-            display_symbol = f"{primary_symbol}/USDT"
-            price_symbol = display_symbol
-
-        seed_input = f"{strategy_id}:{display_symbol}:{user_profile.user_id}"
-        seed = int(hashlib.sha256(seed_input.encode("utf-8")).hexdigest()[:12], 16)
-
-        try:
-            entry_price, price_snapshot = await self._ensure_price_snapshot(
-                price_symbol,
-                {},
-            )
-        except Exception:
-            entry_price, price_snapshot = None, {}
-
-        if entry_price is None or entry_price <= 0:
-            entry_price = round(80.0 + (seed % 3000) / 20.0, 2)
-            price_snapshot = dict(price_snapshot or {})
-            price_snapshot["current"] = entry_price
-
-        direction = "buy" if seed % 2 == 0 else "sell"
-        base_risk_percent = 1.5 + ((seed >> 3) % 40) / 10.0  # 1.5% - 5.5%
-        reward_multiplier = 1.8 + ((seed >> 5) % 25) / 10.0  # 1.8 - 4.2R
-        synthetic_signal_strength = 5.0 + ((seed >> 7) % 40) / 10.0  # 5.0 - 8.9
-        confidence_percent = min(95.0, 55.0 + synthetic_signal_strength * 5.0)
-
-        if cleaned_id in derivative_strategies:
-            position_notional = 2500.0
-            timeframe = "48h"
-            exchange = "binance_futures"
-        elif cleaned_id in portfolio_strategies:
-            position_notional = 4000.0
-            timeframe = "7d"
-            exchange = "multi_exchange"
-        else:
-            position_notional = 1000.0
-            timeframe = "24h"
-            exchange = "binance"
-
-        position_size_units = round(position_notional / entry_price, 6)
-        risk_fraction = max(base_risk_percent / 100.0, 0.005)
-
-        if direction == "sell":
-            stop_loss_price = round(entry_price * (1 + risk_fraction), 2)
-            take_profit_price = round(entry_price * (1 - risk_fraction * reward_multiplier), 2)
-            if take_profit_price <= 0:
-                take_profit_price = round(entry_price * 0.85, 2)
-        else:
-            stop_loss_price = round(entry_price * (1 - risk_fraction), 2)
-            take_profit_price = round(entry_price * (1 + risk_fraction * reward_multiplier), 2)
-
-        risk_amount = round(abs(entry_price - stop_loss_price) * position_size_units, 2)
-        if risk_amount <= 0:
-            risk_amount = round(position_notional * risk_fraction, 2)
-
-        potential_profit = round(abs(take_profit_price - entry_price) * position_size_units, 2)
-        if potential_profit <= 0:
-            potential_profit = round(risk_amount * reward_multiplier, 2)
-
-        risk_reward_ratio = round(potential_profit / risk_amount, 2) if risk_amount > 0 else reward_multiplier
-
-        metadata_base = {
-            "synthetic_opportunity": True,
-            "synthetic_seed": seed,
-            "fallback_reason": "strategy_returned_no_signals",
-            "confidence_percent": round(confidence_percent, 2),
-            "signal_strength": round(synthetic_signal_strength, 2),
-            "recommended_side": direction,
-            "price_snapshot": price_snapshot,
-        }
-
-        metadata = self._enrich_metadata_with_trade_details(
-            metadata_base,
-            entry_price=entry_price,
-            stop_loss_price=stop_loss_price,
-            take_profit_price=take_profit_price,
-            position_size_units=position_size_units,
-            position_notional=position_notional,
-            risk_amount=risk_amount,
-            potential_profit=potential_profit,
-            risk_reward_ratio=risk_reward_ratio,
-            recommended_side=direction,
-            price_snapshot=price_snapshot,
-            fallback_risk_percent=base_risk_percent,
-        )
-
-        metadata["synthetic_opportunity"] = True
-        metadata["synthetic_seed"] = seed
-        metadata["fallback_reason"] = "strategy_returned_no_signals"
-        metadata["confidence_percent"] = round(confidence_percent, 2)
-        metadata["signal_strength"] = round(synthetic_signal_strength, 2)
-
-        profit_potential_value = self._safe_float(metadata.get("potential_gain_usd")) or potential_profit
-        required_capital_value = self._safe_float(metadata.get("position_notional")) or position_notional
-        entry_value = self._safe_float(metadata.get("entry_price")) or entry_price
-        take_profit_value = self._safe_float(metadata.get("take_profit")) or take_profit_price
-
-        if (
-            entry_value is None
-            or entry_value <= 0
-            or profit_potential_value is None
-            or profit_potential_value <= 0
-            or required_capital_value is None
-            or required_capital_value <= 0
-            or take_profit_value is None
-            or take_profit_value <= 0
-        ):
-            self.logger.warning(
-                "Synthetic opportunity generation failed validation",
-                scan_id=scan_id,
-                strategy_id=strategy_id,
-                entry_price=entry_value,
-                potential_gain=profit_potential_value,
-                capital=required_capital_value,
-            )
-            return []
-
-        confidence_fraction = self._normalize_confidence_score(
-            confidence_percent,
-            fallback_strength=synthetic_signal_strength,
-        )
-        risk_level = self._signal_to_risk_level(synthetic_signal_strength)
-
-        opportunity_type = cleaned_id or "synthetic"
-
-        opportunity = OpportunityResult(
-            strategy_id=strategy_id,
-            strategy_name=strategy_name,
-            opportunity_type=opportunity_type,
-            symbol=display_symbol,
-            exchange=exchange,
-            profit_potential_usd=float(profit_potential_value),
-            confidence_score=confidence_fraction,
-            risk_level=risk_level,
-            required_capital_usd=float(required_capital_value),
-            estimated_timeframe=timeframe,
-            entry_price=float(entry_value),
-            exit_price=float(take_profit_value),
-            metadata=metadata,
-            discovered_at=self._current_timestamp(),
-        )
-
-        return [opportunity]
-
-    async def _resolve_price_snapshot(self, symbol: str) -> Tuple[str, Dict[str, float]]:
-        """Fetch and normalize a price snapshot for the provided symbol."""
-
-        normalized_input = str(symbol or "").strip()
-        if not normalized_input:
-            return "", {}
-
-        try:
-            price_payload = await trading_strategies_service._get_symbol_price(
-                "auto",
-                normalized_input,
-            )
-        except Exception:
-            return normalized_input.upper(), {}
-
-        if not isinstance(price_payload, dict):
-            return normalized_input.upper(), {}
-
-        cache_key = str(price_payload.get("symbol") or normalized_input).upper()
-        snapshot_raw = {
-            "current": price_payload.get("price"),
-            "volume": price_payload.get("volume"),
-            "change_24h_pct": price_payload.get("change_24h"),
-        }
-        sanitized_snapshot = self._sanitize_price_snapshot(snapshot_raw)
-
-        return cache_key, sanitized_snapshot
-
-    async def _ensure_price_snapshot(
-        self,
-        symbol: str,
-        existing_snapshot: Optional[Dict[str, Any]],
-        *,
-        seed_entry: Optional[float] = None,
-    ) -> Tuple[Optional[float], Dict[str, float]]:
-        """Guarantee a usable entry price by consulting the price resolver when needed."""
-
-        sanitized_snapshot = self._sanitize_price_snapshot(existing_snapshot)
-
-        entry_candidate = self._safe_float(seed_entry)
-        if entry_candidate is not None and entry_candidate > 0:
-            sanitized_snapshot.setdefault("current", round(entry_candidate, 2))
-            return entry_candidate, sanitized_snapshot
-
-        snapshot_entry = self._safe_float(sanitized_snapshot.get("current"))
-        if snapshot_entry is not None and snapshot_entry > 0:
-            sanitized_snapshot["current"] = round(snapshot_entry, 2)
-            return snapshot_entry, sanitized_snapshot
-
-        lookup_symbol = str(symbol or "").strip()
-        if lookup_symbol and "/" not in lookup_symbol:
-            lookup_symbol = f"{lookup_symbol}/USDT"
-
-        resolved_snapshot: Dict[str, float] = {}
-        if lookup_symbol:
-            try:
-                _, resolved_snapshot = await self._resolve_price_snapshot(lookup_symbol)
-            except Exception:
-                resolved_snapshot = {}
-
-        if resolved_snapshot:
-            merged_snapshot = {**resolved_snapshot, **sanitized_snapshot}
-        else:
-            merged_snapshot = sanitized_snapshot
-
-        merged_entry = self._safe_float(merged_snapshot.get("current"))
-        if merged_entry is not None and merged_entry > 0:
-            merged_snapshot["current"] = round(merged_entry, 2)
-            return merged_entry, merged_snapshot
-
-        return None, merged_snapshot
 
     async def _preload_price_universe(
         self,
@@ -5991,304 +4432,6 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         except Exception as e:
             self.logger.exception("Failed to get user portfolio", extra={"user_id": user_id})
             return {'success': False, 'active_strategies': [], 'error': str(e)}
-
-    async def _get_portfolio_position_context(
-        self,
-        user_id: str,
-        portfolio_result: Dict[str, Any],
-    ) -> Tuple[Dict[str, Dict[str, Any]], float]:
-        """Build a lightweight view of the user's current portfolio positions."""
-
-        def _extract(snapshot: Any) -> Tuple[Dict[str, Dict[str, Any]], float]:
-            position_map: Dict[str, Dict[str, Any]] = {}
-
-            if not isinstance(snapshot, dict):
-                return position_map, 0.0
-
-            def accumulate(
-                symbol_candidate: Any,
-                value_candidate: Any,
-                quantity_candidate: Any = None,
-                price_candidate: Any = None,
-            ) -> None:
-                base_symbol = self._extract_base_symbol(str(symbol_candidate or ""))
-                if not base_symbol:
-                    return
-
-                value_numeric = self._to_float(value_candidate)
-                if value_numeric is None or value_numeric <= 0:
-                    return
-
-                entry = position_map.setdefault(
-                    base_symbol,
-                    {"value_usd": 0.0, "symbols": set()},
-                )
-
-                entry["value_usd"] += float(value_numeric)
-
-                quantity_numeric = self._to_float(quantity_candidate)
-                if quantity_numeric is not None and quantity_numeric > 0:
-                    entry["quantity"] = float(entry.get("quantity", 0.0)) + float(quantity_numeric)
-
-                price_numeric = self._to_float(price_candidate)
-                if price_numeric is not None and price_numeric > 0:
-                    if not self._safe_float(entry.get("current_price")):
-                        entry["current_price"] = float(price_numeric)
-
-                symbols_set = entry.setdefault("symbols", set())
-                if symbol_candidate:
-                    symbols_set.add(str(symbol_candidate).upper())
-                else:
-                    symbols_set.add(base_symbol)
-
-            positions_payload = (
-                snapshot.get("positions")
-                or snapshot.get("holdings")
-                or []
-            )
-
-            for raw_position in positions_payload:
-                if not isinstance(raw_position, dict):
-                    continue
-
-                symbol = (
-                    raw_position.get("symbol")
-                    or raw_position.get("asset")
-                    or raw_position.get("ticker")
-                )
-
-                value_candidate = (
-                    raw_position.get("market_value")
-                    or raw_position.get("value_usd")
-                    or raw_position.get("position_value")
-                    or raw_position.get("notional")
-                )
-
-                quantity_candidate = (
-                    raw_position.get("quantity")
-                    or raw_position.get("units")
-                    or raw_position.get("size")
-                )
-
-                price_candidate = (
-                    raw_position.get("current_price")
-                    or raw_position.get("price")
-                    or raw_position.get("entry_price")
-                    or raw_position.get("average_price")
-                )
-
-                if value_candidate is None and price_candidate is not None:
-                    price_numeric = self._to_float(price_candidate)
-                    quantity_numeric = self._to_float(quantity_candidate)
-                    if price_numeric and quantity_numeric:
-                        value_candidate = price_numeric * quantity_numeric
-
-                accumulate(symbol, value_candidate, quantity_candidate, price_candidate)
-
-            balances_payload = snapshot.get("balances") or []
-            for raw_balance in balances_payload:
-                if not isinstance(raw_balance, dict):
-                    continue
-
-                symbol = raw_balance.get("asset") or raw_balance.get("symbol")
-                value_candidate = (
-                    raw_balance.get("value_usd")
-                    or raw_balance.get("balance_usd")
-                    or raw_balance.get("notional_usd")
-                )
-
-                if value_candidate is None:
-                    continue
-
-                quantity_candidate = raw_balance.get("total") or raw_balance.get("free")
-                price_candidate = raw_balance.get("price") or raw_balance.get("current_price")
-
-                accumulate(symbol, value_candidate, quantity_candidate, price_candidate)
-
-            total_positions_value = sum(
-                entry.get("value_usd", 0.0) for entry in position_map.values()
-            )
-
-            cash_balance = self._to_float(snapshot.get("cash_balance"))
-            if cash_balance is None:
-                cash_balance = self._to_float(snapshot.get("cash"))
-
-            total_value = float(total_positions_value)
-            if cash_balance is not None and cash_balance > 0:
-                total_value += float(cash_balance)
-
-            return position_map, total_value
-
-        base_snapshot = (portfolio_result or {}).get("portfolio") or {}
-        position_context, total_value = _extract(base_snapshot)
-
-        if (not position_context or total_value <= 0) and portfolio_result:
-            fallback_context, fallback_total = _extract(portfolio_result)
-            if fallback_context and fallback_total > total_value:
-                position_context, total_value = fallback_context, fallback_total
-
-        if not position_context or total_value <= 0:
-            try:
-                portfolio_snapshot = await portfolio_risk_service.get_portfolio(user_id)
-            except Exception as exc:  # pragma: no cover - defensive logging
-                self.logger.debug(
-                    "Portfolio context lookup failed",
-                    user_id=user_id,
-                    error=str(exc),
-                )
-            else:
-                if portfolio_snapshot.get("success"):
-                    snapshot_payload = portfolio_snapshot.get("portfolio") or {}
-                    fallback_context, fallback_total = _extract(snapshot_payload)
-                    if fallback_context and fallback_total > 0:
-                        position_context, total_value = fallback_context, fallback_total
-
-        if total_value > 0:
-            for entry in position_context.values():
-                entry["weight"] = round(entry.get("value_usd", 0.0) / total_value, 6)
-        else:
-            for entry in position_context.values():
-                entry["weight"] = 0.0
-
-        for entry in position_context.values():
-            symbols = entry.get("symbols")
-            if isinstance(symbols, set):
-                entry["symbols"] = sorted(symbols)
-
-            quantity_value = self._safe_float(entry.get("quantity"))
-            if quantity_value is not None:
-                entry["quantity"] = round(quantity_value, 8)
-
-            value_usd = self._safe_float(entry.get("value_usd"))
-            if value_usd is not None:
-                entry["value_usd"] = round(value_usd, 2)
-
-            price_value = self._safe_float(entry.get("current_price"))
-            if price_value is not None:
-                entry["current_price"] = round(price_value, 6)
-
-        return position_context, float(total_value)
-
-    async def _get_portfolio_optimization_history(
-        self,
-        user_id: str,
-    ) -> Dict[str, Dict[str, Any]]:
-        """Fetch recently emitted optimization recommendations for the user."""
-
-        if not self.redis:
-            return {}
-
-        try:
-            history_raw = await self.redis.get(f"portfolio_opt_history:{user_id}")
-        except Exception as exc:  # pragma: no cover - defensive logging
-            self.logger.debug(
-                "Portfolio optimization history fetch failed",
-                user_id=user_id,
-                error=str(exc),
-            )
-            return {}
-
-        if not history_raw:
-            return {}
-
-        try:
-            parsed = json.loads(history_raw)
-        except (TypeError, json.JSONDecodeError):
-            self.logger.debug("Portfolio optimization history decode failed", user_id=user_id)
-            return {}
-
-        if not isinstance(parsed, dict):
-            return {}
-
-        now = self._current_timestamp()
-        cutoff = now - timedelta(days=PORTFOLIO_REBALANCE_HISTORY_TTL_DAYS)
-
-        filtered: Dict[str, Dict[str, Any]] = {}
-        for signature, record in parsed.items():
-            if not isinstance(record, dict):
-                continue
-
-            last_seen = record.get("last_recommended_at")
-            if last_seen:
-                try:
-                    last_seen_dt = datetime.fromisoformat(last_seen)
-                    if last_seen_dt.tzinfo is None:
-                        last_seen_dt = last_seen_dt.replace(tzinfo=timezone.utc)
-                except ValueError:
-                    last_seen_dt = None
-            else:
-                last_seen_dt = None
-
-            if last_seen_dt and last_seen_dt < cutoff:
-                continue
-
-            filtered[signature] = record
-
-        return filtered
-
-    async def _persist_portfolio_optimization_history(
-        self,
-        user_id: str,
-        existing_history: Dict[str, Dict[str, Any]],
-        updates: Dict[str, Dict[str, Any]],
-    ) -> None:
-        """Persist merged optimization history for deduplication."""
-
-        if not updates:
-            return
-
-        merged: Dict[str, Dict[str, Any]] = {}
-        merged.update(existing_history)
-        merged.update(updates)
-
-        now = self._current_timestamp()
-        cutoff = now - timedelta(days=PORTFOLIO_REBALANCE_HISTORY_TTL_DAYS)
-
-        pruned_items: List[Tuple[str, Dict[str, Any]]] = []
-        for signature, record in merged.items():
-            if not isinstance(record, dict):
-                continue
-
-            last_seen = record.get("last_recommended_at")
-            if last_seen:
-                try:
-                    last_seen_dt = datetime.fromisoformat(last_seen)
-                    if last_seen_dt.tzinfo is None:
-                        last_seen_dt = last_seen_dt.replace(tzinfo=timezone.utc)
-                except ValueError:
-                    last_seen_dt = None
-            else:
-                last_seen_dt = None
-
-            if last_seen_dt and last_seen_dt < cutoff:
-                continue
-
-            pruned_items.append((signature, record))
-
-        pruned_items.sort(
-            key=lambda item: item[1].get("last_recommended_at", ""),
-            reverse=True,
-        )
-
-        trimmed_items = pruned_items[:PORTFOLIO_REBALANCE_HISTORY_MAX_ENTRIES]
-        history_payload = {signature: record for signature, record in trimmed_items}
-
-        if not self.redis:
-            return
-
-        try:
-            ttl_seconds = int(timedelta(days=PORTFOLIO_REBALANCE_HISTORY_TTL_DAYS).total_seconds())
-            await self.redis.set(
-                f"portfolio_opt_history:{user_id}",
-                json.dumps(history_payload),
-                ex=ttl_seconds,
-            )
-        except Exception as exc:  # pragma: no cover - defensive logging
-            self.logger.debug(
-                "Portfolio optimization history persist failed",
-                user_id=user_id,
-                error=str(exc),
-            )
 
     async def _get_cached_opportunities(
         self,

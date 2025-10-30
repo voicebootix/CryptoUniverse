@@ -30,7 +30,6 @@ Integrates with Trade Execution Service for order placement.
 
 import asyncio
 import json
-import math
 import time
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -391,25 +390,7 @@ class PriceResolverMixin:
                     error=str(exc),
                 )
 
-        # Deterministic synthetic fallback so scanners always receive usable pricing
-        symbol_seed = int(
-            hashlib.sha256(normalized_symbol.encode("utf-8")).hexdigest()[:12],
-            16,
-        )
-        base_price = round(5.0 + (symbol_seed % 500000) / 100.0, 2)
-        volume_seed = (symbol_seed >> 6) % 5_000_000
-        change_seed = ((symbol_seed >> 4) % 4000) - 2000
-        fallback_change = round(change_seed / 100.0, 2)
-
-        return {
-            "success": True,
-            "price": max(base_price, 0.5),
-            "symbol": normalized_symbol,
-            "volume": float(1_000_000 + volume_seed),
-            "change_24h": fallback_change,
-            "timestamp": datetime.utcnow().isoformat(),
-            "source": "synthetic_fallback",
-        }
+        return {"success": False, "error": f"Price unavailable for {normalized_symbol}"}
 
 
 class DerivativesEngine(LoggerMixin, PriceResolverMixin):
@@ -535,23 +516,21 @@ class DerivativesEngine(LoggerMixin, PriceResolverMixin):
             )
             
             if not option_contract:
-                # Create a synthetic contract for testing if none found
-                option_type_str = "CALL" if strategy_type == StrategyType.CALL_OPTION else "PUT"
-                contract_symbol = f"{symbol.replace('USDT', '')}{expiry_date.replace('-', '')}{int(strike_price)}{option_type_str}"
-                
-                option_contract = {
-                    "symbol": symbol,
-                    "contract_symbol": contract_symbol,
-                    "strike_price": strike_price,
-                    "expiry_date": expiry_date,
-                    "option_type": option_type_str,
-                    "underlying_symbol": symbol.replace("USDT", ""),
-                    "premium": 100.0,  # Default premium
-                    "ask_price": 100.0,  # Default ask price
-                    "bid_price": 95.0,   # Default bid price
-                    "synthetic": True
+                error_message = (
+                    "No option contract matched the requested strike/expiry"
+                )
+                self.logger.error(
+                    error_message,
+                    symbol=symbol,
+                    strike=strike_price,
+                    expiry=expiry_date,
+                    strategy=strategy_type.value if isinstance(strategy_type, StrategyType) else strategy_type,
+                )
+                return {
+                    "success": False,
+                    "error": error_message,
+                    "timestamp": datetime.utcnow().isoformat(),
                 }
-                self.logger.warning("Using synthetic option contract for testing", symbol=symbol, strike=strike_price)
             
             # Calculate option premium and Greeks
             greeks = await self._calculate_greeks(option_contract, parameters)
@@ -1100,35 +1079,7 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
                 or {}
             )
             symbol_analysis = analysis_payload.get(symbol, {})
-            analysis_block = symbol_analysis.get("analysis", {}) if isinstance(symbol_analysis, dict) else {}
-            momentum_data = analysis_block.get("momentum", {}) if isinstance(analysis_block, dict) else {}
-            price_snapshot_raw = analysis_block.get("price") if isinstance(analysis_block, dict) else {}
-
-            if not price_snapshot_raw:
-                # Fallback to direct price payloads in case structure differs slightly
-                price_snapshot_raw = (
-                    symbol_analysis.get("price")
-                    if isinstance(symbol_analysis, dict)
-                    else None
-                ) or analysis_payload.get("price") or {}
-
-            def _safe_float(value: Any) -> Optional[float]:
-                try:
-                    if value is None:
-                        return None
-                    return float(value)
-                except (TypeError, ValueError):
-                    return None
-
-            price_snapshot = {}
-            if isinstance(price_snapshot_raw, dict):
-                for key in ("current", "high_24h", "low_24h", "volume"):
-                    safe_value = _safe_float(price_snapshot_raw.get(key))
-                    if safe_value is not None:
-                        # Round monetary values to 2 decimals, volumes can stay with more precision
-                        price_snapshot[key] = round(safe_value, 2) if key != "volume" else round(safe_value, 4)
-
-            current_price = price_snapshot.get("current")
+            momentum_data = symbol_analysis.get("analysis", {}).get("momentum", {})
             
             # Momentum signal logic
             rsi = momentum_data.get("rsi", 50)
@@ -1151,40 +1102,6 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
                 action = "HOLD"
             
             # Execute if signal is strong enough
-            recommended_stop = None
-            recommended_take = None
-            risk_amount_usd = None
-            potential_profit_usd = None
-            position_notional = None
-            risk_reward_ratio = None
-            max_risk_percent = None
-            potential_gain_percent = None
-
-            if current_price and current_price > 0 and action in {"BUY", "SELL"}:
-                risk_buffer = 0.02  # 2% distance to stop
-                reward_buffer = 0.03  # 3% distance to target
-
-                if action == "BUY":
-                    recommended_stop = round(current_price * (1 - risk_buffer), 2)
-                    recommended_take = round(current_price * (1 + reward_buffer), 2)
-                else:
-                    recommended_stop = round(current_price * (1 + risk_buffer), 2)
-                    recommended_take = round(current_price * (1 - reward_buffer), 2)
-
-                price_risk = abs((recommended_stop or 0) - current_price)
-                price_reward = abs((recommended_take or 0) - current_price)
-                position_notional = round(current_price * parameters.quantity, 2)
-                risk_amount_usd = round(price_risk * parameters.quantity, 2) if price_risk else None
-                potential_profit_usd = round(price_reward * parameters.quantity, 2) if price_reward else None
-                if risk_amount_usd and risk_amount_usd > 0 and potential_profit_usd is not None:
-                    risk_reward_ratio = round(potential_profit_usd / risk_amount_usd, 2) if risk_amount_usd else None
-
-                if position_notional and position_notional > 0:
-                    if risk_amount_usd is not None:
-                        max_risk_percent = round((risk_amount_usd / position_notional) * 100, 2)
-                    if potential_profit_usd is not None:
-                        potential_gain_percent = round((potential_profit_usd / position_notional) * 100, 2)
-
             if signal_strength >= parameters.min_confidence / 10:
                 trade_request = {
                     "action": action,
@@ -1202,15 +1119,6 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
                     strategy_id=strategy_id,
                 )
                 
-                price_payload = price_snapshot if price_snapshot else None
-                indicators_payload = {
-                    "rsi": rsi,
-                    "macd_trend": macd_trend,
-                    "momentum_score": signal_strength,
-                }
-                indicators_payload["price_snapshot"] = price_payload
-                indicators_payload["price"] = price_payload
-
                 return {
                     "success": True,
                     "strategy": "momentum",
@@ -1219,35 +1127,20 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
                         "strength": signal_strength,
                         "confidence": signal_strength * 10
                     },
-                    "indicators": indicators_payload,
+                    "indicators": {
+                        "rsi": rsi,
+                        "macd_trend": macd_trend,
+                        "momentum_score": signal_strength
+                    },
                     "execution_result": execution_result,
                     "risk_management": {
                         "stop_loss": parameters.stop_loss,
                         "take_profit": parameters.take_profit,
-                        "position_size": parameters.quantity,
-                        "entry_price": current_price,
-                        "stop_loss_price": recommended_stop,
-                        "take_profit_price": recommended_take,
-                        "position_notional": position_notional,
-                        "risk_amount": risk_amount_usd,
-                        "potential_profit": potential_profit_usd,
-                        "risk_reward_ratio": risk_reward_ratio,
-                        "risk_percentage": parameters.risk_percentage,
-                        "max_risk_percent": max_risk_percent,
-                        "potential_gain_percent": potential_gain_percent,
-                        "recommended_side": action.lower(),
+                        "position_size": parameters.quantity
                     },
                     "timestamp": datetime.utcnow().isoformat()
                 }
             else:
-                price_payload = price_snapshot if price_snapshot else None
-                indicators_payload = {
-                    "rsi": rsi,
-                    "macd_trend": macd_trend,
-                }
-                indicators_payload["price_snapshot"] = price_payload
-                indicators_payload["price"] = price_payload
-
                 return {
                     "success": True,
                     "strategy": "momentum",
@@ -1257,22 +1150,9 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
                         "confidence": signal_strength * 10,
                         "reason": "Signal strength below threshold"
                     },
-                    "indicators": indicators_payload,
-                    "risk_management": {
-                        "stop_loss": parameters.stop_loss,
-                        "take_profit": parameters.take_profit,
-                        "position_size": parameters.quantity,
-                        "entry_price": current_price,
-                        "stop_loss_price": recommended_stop,
-                        "take_profit_price": recommended_take,
-                        "position_notional": position_notional,
-                        "risk_amount": risk_amount_usd,
-                        "potential_profit": potential_profit_usd,
-                        "risk_reward_ratio": risk_reward_ratio,
-                        "risk_percentage": parameters.risk_percentage,
-                        "max_risk_percent": max_risk_percent,
-                        "potential_gain_percent": potential_gain_percent,
-                        "recommended_side": "hold",
+                    "indicators": {
+                        "rsi": rsi,
+                        "macd_trend": macd_trend
                     },
                     "timestamp": datetime.utcnow().isoformat()
                 }
@@ -1357,115 +1237,7 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
                     simulation_mode=True,
                     strategy_id=strategy_id,
                 )
-
-            def _safe_float(value: Any) -> Optional[float]:
-                try:
-                    if value is None:
-                        return None
-                    return float(value)
-                except (TypeError, ValueError):
-                    return None
-
-            entry_price = _safe_float(reversion_signals.get("entry_price"))
-            mean_price = _safe_float(reversion_signals.get("mean_price"))
-            std_dev = _safe_float(reversion_signals.get("standard_deviation"))
-            current_price = _safe_float(reversion_signals.get("current_price"))
-
-            price_snapshot: Dict[str, Optional[float]] = {
-                "current": round(current_price, 2) if current_price else None,
-                "mean_price": round(mean_price, 2) if mean_price else None,
-                "bollinger_upper": round(_safe_float(reversion_signals.get("bollinger_upper")) or 0, 2)
-                if reversion_signals.get("bollinger_upper")
-                else None,
-                "bollinger_lower": round(_safe_float(reversion_signals.get("bollinger_lower")) or 0, 2)
-                if reversion_signals.get("bollinger_lower")
-                else None,
-            }
-
-            if isinstance(price_data, dict):
-                data_block = (price_data.get("data") or {}).get(symbol, {})
-                aggregated = data_block.get("aggregated", {}) if isinstance(data_block, dict) else {}
-                market_snapshot = data_block.get("market_snapshots", {}) if isinstance(data_block, dict) else {}
-
-                snapshot_current = _safe_float(aggregated.get("average_price")) or _safe_float(
-                    market_snapshot.get("price")
-                )
-                snapshot_high = _safe_float(market_snapshot.get("price_high_24h"))
-                snapshot_low = _safe_float(market_snapshot.get("price_low_24h"))
-                snapshot_volume = _safe_float(aggregated.get("total_volume"))
-
-                if snapshot_current and not price_snapshot.get("current"):
-                    price_snapshot["current"] = round(snapshot_current, 2)
-                if snapshot_high:
-                    price_snapshot["high_24h"] = round(snapshot_high, 2)
-                if snapshot_low:
-                    price_snapshot["low_24h"] = round(snapshot_low, 2)
-                if snapshot_volume:
-                    price_snapshot["volume"] = round(snapshot_volume, 4)
-
-            risk_buffer = std_dev if std_dev and std_dev > 0 else (entry_price * 0.02 if entry_price else None)
-            reward_target = mean_price if mean_price else None
-
-            recommended_stop: Optional[float] = None
-            recommended_take: Optional[float] = None
-
-            if action == "BUY" and entry_price:
-                stop_candidate = entry_price - (risk_buffer or entry_price * 0.02)
-                recommended_stop = round(max(stop_candidate, 0), 2)
-                if reward_target and reward_target > entry_price:
-                    recommended_take = round(reward_target, 2)
-                elif risk_buffer:
-                    recommended_take = round(entry_price + risk_buffer, 2)
-            elif action == "SELL" and entry_price:
-                stop_candidate = entry_price + (risk_buffer or entry_price * 0.02)
-                recommended_stop = round(max(stop_candidate, 0), 2)
-                if reward_target and reward_target < entry_price:
-                    recommended_take = round(reward_target, 2)
-                elif risk_buffer:
-                    recommended_take = round(entry_price - risk_buffer, 2)
-
-            position_size = max(float(parameters.quantity or 0.01), 0.01)
-            position_notional = round(position_size * entry_price, 2) if entry_price else None
-
-            risk_amount = None
-            potential_profit = None
-            risk_reward_ratio = None
-            max_risk_percent = None
-            potential_gain_percent = None
-
-            if entry_price and recommended_stop:
-                risk_amount = round(abs(entry_price - recommended_stop) * position_size, 2)
-            if entry_price and recommended_take:
-                potential_profit = round(abs(recommended_take - entry_price) * position_size, 2)
-            if risk_amount and risk_amount > 0 and potential_profit is not None:
-                risk_reward_ratio = round(potential_profit / risk_amount, 2)
-
-            if position_notional and position_notional > 0:
-                if risk_amount is not None:
-                    max_risk_percent = round((risk_amount / position_notional) * 100, 2)
-                if potential_profit is not None:
-                    potential_gain_percent = round((potential_profit / position_notional) * 100, 2)
-
-            risk_management = {
-                "entry_price": entry_price,
-                "stop_loss_price": recommended_stop,
-                "take_profit_price": recommended_take,
-                "position_size": position_size,
-                "position_notional": position_notional,
-                "risk_amount": risk_amount,
-                "potential_profit": potential_profit,
-                "risk_reward_ratio": risk_reward_ratio,
-                "recommended_side": action.lower(),
-                "risk_percentage": parameters.risk_percentage,
-                "max_risk_percent": max_risk_percent,
-                "potential_gain_percent": potential_gain_percent,
-            }
-
-            indicators_payload = dict(reversion_signals)
-            indicators_payload["price_snapshot"] = {
-                key: value for key, value in price_snapshot.items() if value is not None
-            }
-
+            
             return {
                 "success": True,
                 "strategy": "mean_reversion",
@@ -1473,10 +1245,9 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
                     "action": action,
                     "confidence": confidence,
                     "z_score": z_score,
-                    "entry_price": entry_price
+                    "entry_price": reversion_signals.get("entry_price")
                 },
-                "indicators": indicators_payload,
-                "risk_management": risk_management,
+                "indicators": reversion_signals,
                 "execution_result": execution_result,
                 "timestamp": datetime.utcnow().isoformat()
             }
@@ -1549,121 +1320,38 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
                 }
             resistance_levels = symbol_data.get("resistance_levels", [])
             support_levels = symbol_data.get("support_levels", [])
-
-            if (not resistance_levels or not support_levels) and current_price > 0:
-                seed = int(
-                    hashlib.sha256(symbol.encode("utf-8")).hexdigest()[:10],
-                    16,
-                )
-                resistance_offset = 0.015 + (seed % 300) / 10000.0
-                support_offset = 0.012 + (seed % 200) / 10000.0
-                resistance_levels = resistance_levels or [
-                    {
-                        "price": round(current_price * (1 + resistance_offset), 2),
-                        "strength": 60 + (seed % 30),
-                    }
-                ]
-                support_levels = support_levels or [
-                    {
-                        "price": round(current_price * (1 - support_offset), 2),
-                        "strength": 55 + (seed % 25),
-                    }
-                ]
             
             # Breakout detection logic
             breakout_signal = await self._detect_breakout(
                 current_price, resistance_levels, support_levels, parameters
             )
-
+            
             execution_result = None
-            direction = breakout_signal.get("direction", "HOLD")
-            conviction = breakout_signal.get("conviction", 0)
-            breakout_confidence = breakout_signal.get("confidence", 0)
-            breakout_probability = min(max(breakout_confidence / 100.0, 0.0), 1.0)
-
-            position_multiplier = max(conviction, 0.5)
-            position_size = round(max(parameters.quantity or 0.01, 0.01) * position_multiplier, 6)
-
-            stop_loss_price = float(breakout_signal.get("stop_loss") or 0.0)
-            take_profit_price = float(breakout_signal.get("take_profit") or 0.0)
-            entry_price = float(current_price)
-
             if breakout_signal["breakout_detected"]:
                 trade_request = {
-                    "action": direction,
+                    "action": breakout_signal["direction"],
                     "symbol": symbol,
-                    "quantity": position_size,
+                    "quantity": parameters.quantity * breakout_signal["conviction"],
                     "order_type": "MARKET",
-                    "stop_loss": stop_loss_price,
-                    "take_profit": take_profit_price
+                    "stop_loss": breakout_signal["stop_loss"],
+                    "take_profit": breakout_signal["take_profit"]
                 }
-
+                
                 execution_result = await self.trade_executor.execute_trade(
                     trade_request,
                     user_id,
                     simulation_mode=True,
                     strategy_id=strategy_id,
                 )
-
-            risk_amount = None
-            potential_profit = None
-            risk_reward_ratio = None
-            position_notional = round(entry_price * position_size, 2) if entry_price else None
-            max_risk_percent = None
-            potential_gain_percent = None
-
-            if entry_price and stop_loss_price:
-                risk_amount = round(abs(entry_price - stop_loss_price) * position_size, 2)
-            if entry_price and take_profit_price:
-                potential_profit = round(abs(take_profit_price - entry_price) * position_size, 2)
-            if risk_amount and risk_amount > 0 and potential_profit is not None:
-                risk_reward_ratio = round(potential_profit / risk_amount, 2)
-
-            if position_notional and position_notional > 0:
-                if risk_amount is not None:
-                    max_risk_percent = round((risk_amount / position_notional) * 100, 2)
-                if potential_profit is not None:
-                    potential_gain_percent = round((potential_profit / position_notional) * 100, 2)
-
-            price_snapshot = {
-                "current": round(entry_price, 2) if entry_price else None,
-                "stop_loss": round(stop_loss_price, 2) if stop_loss_price else None,
-                "take_profit": round(take_profit_price, 2) if take_profit_price else None,
-            }
-
+            
             return {
                 "success": True,
                 "strategy": "breakout",
-                "signal": {
-                    "action": direction,
-                    "confidence": breakout_confidence,
-                    "conviction": conviction,
-                    "breakout_probability": breakout_probability,
-                },
                 "breakout_analysis": breakout_signal,
                 "current_price": current_price,
-                "risk_management": {
-                    "entry_price": entry_price,
-                    "stop_loss_price": round(stop_loss_price, 2) if stop_loss_price else None,
-                    "take_profit_price": round(take_profit_price, 2) if take_profit_price else None,
-                    "position_size": position_size,
-                    "position_notional": position_notional,
-                    "risk_amount": risk_amount,
-                    "potential_profit": potential_profit,
-                    "risk_reward_ratio": risk_reward_ratio,
-                    "recommended_side": direction.lower() if direction else "hold",
-                    "risk_percentage": parameters.risk_percentage,
-                    "max_risk_percent": max_risk_percent,
-                    "potential_gain_percent": potential_gain_percent,
-                },
-                "indicators": {
-                    "price_snapshot": {k: v for k, v in price_snapshot.items() if v is not None},
-                    "resistance_levels": resistance_levels[:3],
-                    "support_levels": support_levels[:3],
-                },
                 "key_levels": {
                     "resistance": resistance_levels[:3],
-                    "support": support_levels[:3],
+                    "support": support_levels[:3]
                 },
                 "execution_result": execution_result,
                 "timestamp": datetime.utcnow().isoformat()
@@ -8009,37 +7697,11 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
                     except (TypeError, ValueError):
                         continue
 
-            if closing_prices:
-                return closing_prices
+            return closing_prices
 
         except Exception as e:
             self.logger.error(f"Failed to get historical prices for {symbol}: {str(e)}")
-
-        # Deterministic synthetic history when market data services are unavailable
-        synthetic_limit = max(60, min(500, self._resolve_history_window(period)[1]))
-        seed_symbol = symbol if symbol else "UNKNOWN"
-        history_seed = int(
-            hashlib.sha256(seed_symbol.encode("utf-8")).hexdigest()[:12],
-            16,
-        )
-        base_price = 5.0 + (history_seed % 300000) / 100.0
-        amplitude = max(base_price * 0.05, 1.0)
-        frequency = 0.1 + (history_seed % 17) / 50.0
-
-        synthetic_history: List[float] = []
-        for index in range(synthetic_limit):
-            wave_component = math.sin((index + history_seed % 29) * frequency)
-            harmonic_component = math.cos((index + history_seed % 13) * frequency * 0.7)
-            drift_component = (index / synthetic_limit) * 0.03
-            price = (
-                base_price
-                + amplitude * 0.5 * wave_component
-                + amplitude * 0.3 * harmonic_component
-                + base_price * drift_component
-            )
-            synthetic_history.append(round(max(price, 0.5), 4))
-
-        return synthetic_history
+            return []
 
     def _generate_request_id(self) -> str:
         """Generate unique request ID."""
