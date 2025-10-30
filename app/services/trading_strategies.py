@@ -1179,7 +1179,7 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
                 "position_size": quantity,
                 "notional_usd": round(notional_value, 2),
                 "price_snapshot": price_snapshot,
-                "price": price_snapshot,
+                "price": price_snapshot.get("current", 0),
             }
 
             if trade_risk:
@@ -1217,7 +1217,7 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
                         "macd_trend": macd_trend,
                         "momentum_score": signal_strength,
                         "price_snapshot": price_snapshot,
-                        "price": price_snapshot,
+                        "price": price_snapshot.get("current", 0),
                     },
                     "execution_result": execution_result,
                     "risk_management": risk_management_block,
@@ -1238,12 +1238,12 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
                         "rsi": rsi,
                         "macd_trend": macd_trend,
                         "price_snapshot": price_snapshot,
-                        "price": price_snapshot,
+                        "price": price_snapshot.get("current", 0),
                     },
                     "risk_management": risk_management_block,
                     "timestamp": datetime.utcnow().isoformat()
                 }
-                
+
         except Exception as e:
             self.logger.error("Momentum strategy failed", error=str(e), exc_info=True)
             return {
@@ -1320,7 +1320,7 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
             }
 
             reversion_signals["price_snapshot"] = price_snapshot
-            reversion_signals["price"] = price_snapshot
+            reversion_signals["price"] = price_snapshot.get("current", 0)
 
             quantity = float(parameters.quantity or 0.01)
             notional_value = current_price * quantity if current_price else 0.0
@@ -1378,7 +1378,7 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
                 "position_size": quantity,
                 "notional_usd": round(notional_value, 2),
                 "price_snapshot": price_snapshot,
-                "price": price_snapshot,
+                "price": price_snapshot.get("current", 0),
             }
 
             if trade_risk:
@@ -1503,13 +1503,13 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
                 "support_levels": support_levels[:3],
             }
             breakout_signal["price_snapshot"] = price_snapshot
-            breakout_signal["price"] = price_snapshot
+            breakout_signal["price"] = price_snapshot.get("current", 0)
 
             risk_management_block: Dict[str, Any] = {
                 "position_size": quantity,
                 "notional_usd": round(notional_value, 2),
                 "price_snapshot": price_snapshot,
-                "price": price_snapshot,
+                "price": price_snapshot.get("current", 0),
             }
 
             if breakout_signal["breakout_detected"]:
