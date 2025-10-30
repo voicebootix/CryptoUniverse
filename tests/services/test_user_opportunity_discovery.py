@@ -383,6 +383,225 @@ async def test_portfolio_optimization_profit_scales_with_capital(monkeypatch, ca
     assert capital_assumptions["deployable_capital_usd"] == pytest.approx(capital)
 
 
+@pytest.mark.asyncio
+async def test_portfolio_optimization_skips_when_alignment_met(monkeypatch):
+    service = UserOpportunityDiscoveryService()
+
+    fake_recommendation = {
+        "strategy": "Core",
+        "symbol": "BTCUSDT",
+        "action": "buy",
+        "target_weight": "25%",
+        "value_change": 1500,
+        "improvement_potential": "12%",
+    }
+
+    fake_response = {
+        "success": True,
+        "execution_result": {
+            "rebalancing_recommendations": [fake_recommendation]
+        },
+        "strategy_analysis": {
+            "core": {"expected_return": 0.12, "risk_level": 0.18, "sharpe_ratio": 1.2}
+        },
+    }
+
+    monkeypatch.setattr(
+        discovery_module.trading_strategies_service,
+        "execute_strategy",
+        AsyncMock(return_value=fake_response),
+    )
+
+    capital_payload = {
+        "deployable_capital_usd": 10000.0,
+        "capital_basis_used_usd": 10000.0,
+        "components": {"portfolio_value_usd": 10000.0},
+        "inputs": {},
+        "credit_profile": None,
+        "assumptions": ["Test capital override"],
+        "fallback_used": False,
+        "calculation_timestamp": "2024-01-01T00:00:00Z",
+    }
+
+    monkeypatch.setattr(
+        service,
+        "_estimate_user_deployable_capital",
+        AsyncMock(return_value=capital_payload),
+    )
+
+    monkeypatch.setattr(
+        service,
+        "_get_portfolio_position_context",
+        AsyncMock(
+            return_value=(
+                {"BTC": {"weight": 0.25, "value_usd": 2500.0, "symbols": ["BTCUSDT"]}},
+                10000.0,
+            )
+        ),
+    )
+
+    monkeypatch.setattr(
+        service,
+        "_get_portfolio_optimization_history",
+        AsyncMock(return_value={}),
+    )
+
+    monkeypatch.setattr(
+        service,
+        "_resolve_price_snapshot",
+        AsyncMock(return_value=("BTCUSDT", {"current": 25000.0})),
+    )
+
+    persist_mock = AsyncMock()
+    monkeypatch.setattr(service, "_persist_portfolio_optimization_history", persist_mock)
+
+    profile = UserOpportunityProfile(
+        user_id="user-1",
+        active_strategy_count=1,
+        total_monthly_strategy_cost=0,
+        user_tier="pro",
+        max_asset_tier="tier_professional",
+        opportunity_scan_limit=10,
+        last_scan_time=None,
+        strategy_fingerprint="abc123",
+    )
+
+    portfolio_result = {
+        "active_strategies": [
+            {"strategy_id": "ai_portfolio_optimization"}
+        ]
+    }
+
+    opportunities = await service._scan_portfolio_optimization_opportunities(
+        discovered_assets={},
+        user_profile=profile,
+        scan_id="scan-1",
+        portfolio_result=portfolio_result,
+    )
+
+    assert opportunities == []
+    persist_mock.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_portfolio_optimization_records_history(monkeypatch):
+    service = UserOpportunityDiscoveryService()
+
+    fake_recommendation = {
+        "strategy": "Core",
+        "symbol": "BTCUSDT",
+        "action": "buy",
+        "target_weight": "25%",
+        "value_change": 1500,
+        "improvement_potential": "12%",
+    }
+
+    fake_response = {
+        "success": True,
+        "execution_result": {
+            "rebalancing_recommendations": [fake_recommendation]
+        },
+        "strategy_analysis": {
+            "core": {"expected_return": 0.12, "risk_level": 0.18, "sharpe_ratio": 1.2}
+        },
+    }
+
+    monkeypatch.setattr(
+        discovery_module.trading_strategies_service,
+        "execute_strategy",
+        AsyncMock(return_value=fake_response),
+    )
+
+    capital_payload = {
+        "deployable_capital_usd": 10000.0,
+        "capital_basis_used_usd": 10000.0,
+        "components": {"portfolio_value_usd": 10000.0},
+        "inputs": {},
+        "credit_profile": None,
+        "assumptions": ["Test capital override"],
+        "fallback_used": False,
+        "calculation_timestamp": "2024-01-01T00:00:00Z",
+    }
+
+    monkeypatch.setattr(
+        service,
+        "_estimate_user_deployable_capital",
+        AsyncMock(return_value=capital_payload),
+    )
+
+    monkeypatch.setattr(
+        service,
+        "_get_portfolio_position_context",
+        AsyncMock(
+            return_value=(
+                {"BTC": {"weight": 0.10, "value_usd": 1000.0, "symbols": ["BTCUSDT"]}},
+                10000.0,
+            )
+        ),
+    )
+
+    monkeypatch.setattr(
+        service,
+        "_get_portfolio_optimization_history",
+        AsyncMock(return_value={}),
+    )
+
+    monkeypatch.setattr(
+        service,
+        "_resolve_price_snapshot",
+        AsyncMock(return_value=("BTCUSDT", {"current": 25000.0})),
+    )
+
+    persist_mock = AsyncMock()
+    monkeypatch.setattr(service, "_persist_portfolio_optimization_history", persist_mock)
+
+    profile = UserOpportunityProfile(
+        user_id="user-1",
+        active_strategy_count=1,
+        total_monthly_strategy_cost=0,
+        user_tier="pro",
+        max_asset_tier="tier_professional",
+        opportunity_scan_limit=10,
+        last_scan_time=None,
+        strategy_fingerprint="abc123",
+    )
+
+    portfolio_result = {
+        "active_strategies": [
+            {"strategy_id": "ai_portfolio_optimization"}
+        ]
+    }
+
+    opportunities = await service._scan_portfolio_optimization_opportunities(
+        discovered_assets={},
+        user_profile=profile,
+        scan_id="scan-1",
+        portfolio_result=portfolio_result,
+    )
+
+    assert len(opportunities) == 1
+    opportunity = opportunities[0]
+
+    context = opportunity.metadata.get("portfolio_context", {})
+    assert context["current_weight"] == pytest.approx(0.10)
+    assert context["weight_gap"] == pytest.approx(0.15)
+
+    history_meta = opportunity.metadata.get("optimization_history", {})
+    assert history_meta["current_recommendation_count"] == 1
+    assert history_meta["previous_recommendation_count"] == 0
+    assert "signature" in history_meta
+    assert "current_recommendation_at" in history_meta
+
+    persist_mock.assert_awaited()
+    await_args = persist_mock.await_args
+    history_updates = await_args.args[2]
+    assert isinstance(history_updates, dict)
+    assert history_updates
+    persisted_record = next(iter(history_updates.values()))
+    assert persisted_record["times_recommended"] == 1
+    assert persisted_record["symbol"] == "BTCUSDT"
+    assert persisted_record["weight_gap"] == pytest.approx(0.15)
+
 
 @pytest.mark.asyncio
 async def test_discover_opportunities_returns_partial_then_final(monkeypatch):
