@@ -16,6 +16,9 @@ from app.core.logging import LoggerMixin
 from app.models.opportunity import StrategyScanningPolicy
 
 
+_UNSET = object()
+
+
 class StrategyScanningPolicyService(LoggerMixin):
     """Provide cached access to strategy scanning policies with database overrides."""
 
@@ -170,20 +173,32 @@ class StrategyScanningPolicyService(LoggerMixin):
         self,
         strategy_key: str,
         *,
-        max_symbols: Optional[Any] = None,
-        chunk_size: Optional[Any] = None,
-        priority: Optional[Any] = None,
+        max_symbols: Any = _UNSET,
+        chunk_size: Any = _UNSET,
+        priority: Any = _UNSET,
         enabled: Optional[bool] = None,
     ) -> Dict[str, Any]:
         key = str(strategy_key or "").strip().lower()
         if not key:
             raise ValueError("strategy_key must be provided")
 
-        max_symbols_value = self._normalize_int(max_symbols)
-        chunk_size_value = self._normalize_int(chunk_size)
-        priority_value = self._normalize_int(priority, allow_zero=True)
-        if priority_value is None:
-            priority_value = 100
+        max_symbols_provided = max_symbols is not _UNSET
+        chunk_size_provided = chunk_size is not _UNSET
+        priority_provided = priority is not _UNSET
+
+        max_symbols_value: Optional[int] = None
+        if max_symbols_provided:
+            max_symbols_value = self._normalize_int(max_symbols)
+
+        chunk_size_value: Optional[int] = None
+        if chunk_size_provided:
+            chunk_size_value = self._normalize_int(chunk_size)
+
+        priority_value: Optional[int] = None
+        if priority_provided:
+            priority_value = self._normalize_int(priority, allow_zero=True)
+            if priority_value is None:
+                priority_value = 100
 
         await self._load_policies()
         async with get_database_session() as session:
@@ -196,17 +211,24 @@ class StrategyScanningPolicyService(LoggerMixin):
 
             if policy:
                 enabled_value = policy.enabled if enabled is None else bool(enabled)
-                policy.max_symbols = max_symbols_value
-                policy.chunk_size = chunk_size_value
-                policy.priority = priority_value
+                if max_symbols_provided:
+                    policy.max_symbols = max_symbols_value
+                if chunk_size_provided:
+                    policy.chunk_size = chunk_size_value
+                if priority_provided:
+                    policy.priority = priority_value if priority_value is not None else 100
                 policy.enabled = enabled_value
             else:
                 enabled_value = True if enabled is None else bool(enabled)
                 policy = StrategyScanningPolicy(
                     strategy_key=key,
-                    max_symbols=max_symbols_value,
-                    chunk_size=chunk_size_value,
-                    priority=priority_value,
+                    max_symbols=max_symbols_value if max_symbols_provided else None,
+                    chunk_size=chunk_size_value if chunk_size_provided else None,
+                    priority=(
+                        priority_value
+                        if priority_provided and priority_value is not None
+                        else 100
+                    ),
                     enabled=enabled_value,
                 )
                 session.add(policy)

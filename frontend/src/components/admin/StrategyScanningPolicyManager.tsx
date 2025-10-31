@@ -133,7 +133,8 @@ const StrategyScanningPolicyManager: React.FC = () => {
       let parsed: number | null = null;
       if (value.trim() !== '') {
         const numeric = Number.parseInt(value, 10);
-        parsed = Number.isNaN(numeric) || numeric < 1 ? null : numeric;
+        const minValue = field === 'priority' ? 0 : 1;
+        parsed = Number.isNaN(numeric) || numeric < minValue ? null : numeric;
       }
 
       next[strategyKey] = {
