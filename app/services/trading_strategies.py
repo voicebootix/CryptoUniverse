@@ -1185,64 +1185,68 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
             if trade_risk:
                 risk_management_block.update(trade_risk)
 
-            # Execute if signal is strong enough
+            # Execute only if signal is strong enough AND action is BUY/SELL with valid stop/take
+            execution_result = None
             if signal_strength >= parameters.min_confidence / 10:
-                trade_request = {
+                # Validate action and risk bounds before executing
+                if action in {"BUY", "SELL"} and trade_risk:
+                    stop_loss_val = trade_risk.get("stop_loss_price", 0)
+                    take_profit_val = trade_risk.get("take_profit_price", 0)
+
+                    if stop_loss_val > 0 and take_profit_val > 0:
+                        trade_request = {
+                            "action": action,
+                            "symbol": symbol,
+                            "quantity": parameters.quantity,
+                            "order_type": "MARKET",
+                            "stop_loss": stop_loss_val,
+                            "take_profit": take_profit_val
+                        }
+
+                        execution_result = await self.trade_executor.execute_trade(
+                            trade_request,
+                            user_id,
+                            simulation_mode=True,
+                            strategy_id=strategy_id,
+                        )
+                    else:
+                        self.logger.warning(
+                            "Skipping momentum trade due to invalid stop/take profit",
+                            symbol=symbol,
+                            strategy_id=strategy_id,
+                            action=action,
+                            stop_loss=stop_loss_val,
+                            take_profit=take_profit_val,
+                        )
+                else:
+                    self.logger.info(
+                        "Skipping momentum trade execution",
+                        symbol=symbol,
+                        strategy_id=strategy_id,
+                        action=action,
+                        reason="HOLD action or missing trade_risk",
+                    )
+
+            return {
+                "success": True,
+                "strategy": "momentum",
+                "signal": {
                     "action": action,
-                    "symbol": symbol,
-                    "quantity": parameters.quantity,
-                    "order_type": "MARKET",
-                    "stop_loss": trade_risk.get("stop_loss_price") if trade_risk else parameters.stop_loss,
-                    "take_profit": trade_risk.get("take_profit_price") if trade_risk else parameters.take_profit
-                }
-
-                execution_result = await self.trade_executor.execute_trade(
-                    trade_request,
-                    user_id,
-                    simulation_mode=True,
-                    strategy_id=strategy_id,
-                )
-
-                return {
-                    "success": True,
-                    "strategy": "momentum",
-                    "signal": {
-                        "action": action,
-                        "strength": signal_strength,
-                        "confidence": signal_strength * 10,
-                        "price_snapshot": price_snapshot,
-                    },
-                    "indicators": {
-                        "rsi": rsi,
-                        "macd_trend": macd_trend,
-                        "momentum_score": signal_strength,
-                        "price_snapshot": price_snapshot,
-                        "price": price_snapshot.get("current", 0),
-                    },
-                    "execution_result": execution_result,
-                    "risk_management": risk_management_block,
-                    "timestamp": datetime.utcnow().isoformat()
-                }
-            else:
-                return {
-                    "success": True,
-                    "strategy": "momentum",
-                    "signal": {
-                        "action": "HOLD",
-                        "strength": signal_strength,
-                        "confidence": signal_strength * 10,
-                        "reason": "Signal strength below threshold",
-                        "price_snapshot": price_snapshot,
-                    },
-                    "indicators": {
-                        "rsi": rsi,
-                        "macd_trend": macd_trend,
-                        "price_snapshot": price_snapshot,
-                        "price": price_snapshot.get("current", 0),
-                    },
-                    "risk_management": risk_management_block,
-                    "timestamp": datetime.utcnow().isoformat()
-                }
+                    "strength": signal_strength,
+                    "confidence": signal_strength * 10,
+                    "price_snapshot": price_snapshot,
+                },
+                "indicators": {
+                    "rsi": rsi,
+                    "macd_trend": macd_trend,
+                    "momentum_score": signal_strength,
+                    "price_snapshot": price_snapshot,
+                    "price": price_snapshot.get("current", 0),
+                },
+                "execution_result": execution_result,
+                "risk_management": risk_management_block,
+                "timestamp": datetime.utcnow().isoformat()
+            }
 
         except Exception as e:
             self.logger.error("Momentum strategy failed", error=str(e), exc_info=True)
