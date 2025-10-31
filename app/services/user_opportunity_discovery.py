@@ -4853,16 +4853,30 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     ) -> List[str]:
         """Get top symbols by volume across all tiers."""
 
-        all_assets = []
+        all_assets: List[Any] = []
         for tier_assets in discovered_assets.values():
             all_assets.extend(tier_assets)
 
-        # Sort by volume and get top symbols
-        sorted_assets = sorted(all_assets, key=lambda x: x.volume_24h_usd, reverse=True)
-        if limit is None or limit <= 0:
-            return [asset.symbol for asset in sorted_assets]
+        # Sort by volume and get top symbols while handling partial asset payloads
+        sorted_assets = sorted(
+            all_assets,
+            key=lambda asset: getattr(asset, "volume_24h_usd", 0) or 0,
+            reverse=True,
+        )
 
-        return [asset.symbol for asset in sorted_assets[:limit]]
+        def _extract_symbols(assets: List[Any]) -> List[str]:
+            symbols: List[str] = []
+            for asset in assets:
+                symbol = getattr(asset, "symbol", None)
+                if not symbol:
+                    continue
+                symbols.append(symbol)
+            return symbols
+
+        if limit is None or limit <= 0:
+            return _extract_symbols(sorted_assets)
+
+        return _extract_symbols(sorted_assets[:limit])
 
     def _get_symbols_for_statistical_arbitrage(
         self, discovered_assets: Dict[str, List[Any]], limit: Optional[int] = None

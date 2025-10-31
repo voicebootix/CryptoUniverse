@@ -122,27 +122,9 @@ class StrategyScanningPolicyService(LoggerMixin):
         baseline = self._baseline()
 
         policies: Dict[str, Dict[str, Any]] = {}
-        for key, base_entry in baseline.items():
-            entry = {
-                "strategy_key": key,
-                "max_symbols": base_entry.get("max_symbols"),
-                "chunk_size": base_entry.get("chunk_size"),
-                "priority": base_entry.get("priority", 100),
-                "enabled": bool(base_entry.get("enabled", True)),
-                "source": base_entry.get("source", "default"),
-                "id": None,
-                "created_at": None,
-                "updated_at": None,
-            }
-            policies[key] = entry
-
-        for key in list(self._cache.keys()):
+        all_keys = set(baseline.keys()) | set(self._cache.keys())
+        for key in all_keys:
             policies[key] = self._compose_policy_view(key, baseline)
-
-        # Include any overrides for strategies not present in the baseline.
-        for key in self._cache.keys():
-            if key not in policies:
-                policies[key] = self._compose_policy_view(key, baseline)
 
         sorted_policies = sorted(
             policies.values(),
