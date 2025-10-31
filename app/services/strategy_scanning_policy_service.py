@@ -178,9 +178,14 @@ class StrategyScanningPolicyService(LoggerMixin):
 
         priority_value: Optional[int] = None
         if priority_provided:
-            priority_value = self._normalize_int(priority, allow_zero=True)
-            if priority_value is None:
+            if priority is None:
                 priority_value = 100
+            else:
+                priority_value = self._normalize_int(priority, allow_zero=True)
+                if priority_value is None:
+                    raise ValueError(
+                        "Invalid priority value: must be a non-negative integer"
+                    )
 
         await self._load_policies()
         async with get_database_session() as session:
@@ -198,7 +203,7 @@ class StrategyScanningPolicyService(LoggerMixin):
                 if chunk_size_provided:
                     policy.chunk_size = chunk_size_value
                 if priority_provided:
-                    policy.priority = priority_value if priority_value is not None else 100
+                    policy.priority = priority_value
                 policy.enabled = enabled_value
             else:
                 enabled_value = True if enabled is None else bool(enabled)
@@ -206,11 +211,7 @@ class StrategyScanningPolicyService(LoggerMixin):
                     strategy_key=key,
                     max_symbols=max_symbols_value if max_symbols_provided else None,
                     chunk_size=chunk_size_value if chunk_size_provided else None,
-                    priority=(
-                        priority_value
-                        if priority_provided and priority_value is not None
-                        else 100
-                    ),
+                    priority=(priority_value if priority_provided else 100),
                     enabled=enabled_value,
                 )
                 session.add(policy)

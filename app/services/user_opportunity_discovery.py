@@ -4891,13 +4891,23 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         # Prefer institutional and enterprise tier assets for stat arb
         preferred_tiers = ["tier_institutional", "tier_enterprise", "tier_professional"]
 
-        symbols = []
-        for tier in preferred_tiers:
-            tier_assets = discovered_assets.get(tier, [])
-            symbols.extend(asset.symbol for asset in tier_assets)
+        symbols: List[str] = []
+        seen: Set[str] = set()
 
-        if "tier_retail" in discovered_assets:
-            symbols.extend(asset.symbol for asset in discovered_assets["tier_retail"])
+        def _append_symbol(symbol: Optional[str]) -> None:
+            if not symbol:
+                return
+            if symbol in seen:
+                return
+            seen.add(symbol)
+            symbols.append(symbol)
+
+        for tier in preferred_tiers:
+            for asset in discovered_assets.get(tier, []) or []:
+                _append_symbol(getattr(asset, "symbol", None))
+
+        for asset in discovered_assets.get("tier_retail", []) or []:
+            _append_symbol(getattr(asset, "symbol", None))
 
         if limit is None or limit <= 0:
             return symbols
