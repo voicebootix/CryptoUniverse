@@ -56,7 +56,7 @@ class StrategyScanningPolicyService(LoggerMixin):
                             "updated_at": policy.updated_at,
                         }
             except SQLAlchemyError as error:
-                self.logger.error(
+                self.logger.exception(
                     "Failed to load strategy scanning policies", error=str(error)
                 )
                 # Preserve existing cache but shorten expiry so we retry soon.
