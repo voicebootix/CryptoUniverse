@@ -34,6 +34,7 @@ import {
 import AdminCreditManagement from '@/components/admin/AdminCreditManagement';
 import RevenueAnalytics from '@/components/admin/RevenueAnalytics';
 import StrategyApproval from '@/components/admin/StrategyApproval';
+import StrategyScanningPolicyManager from '@/components/admin/StrategyScanningPolicyManager';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -531,6 +532,7 @@ const AdminPage: React.FC = () => {
           <TabsTrigger value="credits">Credits</TabsTrigger>
           <TabsTrigger value="revenue">Revenue</TabsTrigger>
           <TabsTrigger value="strategies">Strategies</TabsTrigger>
+          <TabsTrigger value="opportunities">Opportunities</TabsTrigger>
           <TabsTrigger value="system">System</TabsTrigger>
           <TabsTrigger value="audit">Audit Logs</TabsTrigger>
           <TabsTrigger value="settings">Settings</TabsTrigger>
@@ -847,6 +849,11 @@ const AdminPage: React.FC = () => {
         {/* Strategy Approval Tab */}
         <TabsContent value="strategies" className="space-y-6">
           <StrategyApproval />
+        </TabsContent>
+
+        {/* Opportunity Policies Tab */}
+        <TabsContent value="opportunities" className="space-y-6">
+          <StrategyScanningPolicyManager />
         </TabsContent>
 
         {/* System Tab */}
