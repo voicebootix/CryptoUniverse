@@ -5557,3 +5557,12 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
         except Exception as track_error:
             self.logger.debug("Scan metrics tracking failed", error=str(track_error))
+
+
+# Global service instance
+user_opportunity_discovery = UserOpportunityDiscoveryService()
+
+
+async def get_user_opportunity_discovery() -> UserOpportunityDiscoveryService:
+    """Dependency injection for FastAPI."""
+    return user_opportunity_discovery
