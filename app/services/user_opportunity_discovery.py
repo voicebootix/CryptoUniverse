@@ -249,6 +249,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             )
 
     def _schedule_scan_cleanup(self, cache_key: str, task: asyncio.Task) -> None:
+        user_id_hint = cache_key.split(":", 1)[0] if cache_key else None
+
         def _cleanup(done: asyncio.Task) -> None:
             async def _cleanup_async() -> None:
                 async with self._scan_tasks_lock:
@@ -267,7 +269,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 if exc:
                     self.logger.warning(
                         "Opportunity discovery task finished with error",
-                        user_id=user_id,
+                        user_id=user_id_hint,
+                        cache_key=cache_key,
                         error=str(exc),
                     )
 

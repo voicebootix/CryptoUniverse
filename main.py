@@ -64,12 +64,13 @@ def _determine_worker_identity() -> Tuple[str, bool]:
     raw_app_worker = os.environ.get("APP_WORKER_ID")
     if raw_app_worker is not None:
         normalized = raw_app_worker.strip().lower()
-        return raw_app_worker, normalized in {"0", "1", "primary"}
+        is_primary = normalized == "primary" or normalized == "0"
+        return raw_app_worker, is_primary
 
     raw_gunicorn_worker = os.environ.get("GUNICORN_WORKER_ID")
     if raw_gunicorn_worker is not None:
         normalized = raw_gunicorn_worker.strip().lower()
-        return raw_gunicorn_worker, normalized in {"0", "1"}
+        return raw_gunicorn_worker, normalized == "0"
 
     # Fall back to a simple file lock so only one worker claims the primary role.
     worker_identifier = str(os.getpid())
