@@ -2359,7 +2359,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         breakout_probability = breakout_probability / 100.0
 
                     breakout_probability = breakout_probability or 0.0
+                    breakout_probability = max(0.0, min(breakout_probability, 1.0))
 
+                    # Track ALL signals for transparency
                     self.logger.info(
                         "?? BREAKOUT SIGNAL ANALYSIS",
                         scan_id=scan_id,
@@ -2369,31 +2371,6 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     )
 
                     if breakout_probability > 0.5 and breakout_analysis.get("breakout_detected"):
-                        quality_tier = "high" if breakout_probability > 0.75 else "medium" if breakout_probability > 0.65 else "low"
-                        signal_strength = breakout_probability * 10
-
-                        entry_price = self._to_float(risk_mgmt.get("entry_price") or breakout_result.get("current_price"))
-                        take_profit_price = self._to_float(risk_mgmt.get("take_profit_price") or breakout_analysis.get("take_profit"))
-                        stop_loss_price = self._to_float(risk_mgmt.get("stop_loss_price") or breakout_analysis.get("stop_loss"))
-
-                        potential_profit_usd = self._to_float(risk_mgmt.get("potential_profit_usd")) or 0.0
-                        required_capital_usd = self._to_float(risk_mgmt.get("notional_usd")) or 0.0
-                        risk_amount_usd = self._to_float(risk_mgmt.get("risk_amount_usd"))
-                        risk_reward_ratio = self._to_float(risk_mgmt.get("risk_reward_ratio"))
-
-                        breakout_probability = breakout_probability or 0.0
-                        breakout_probability = max(0.0, min(breakout_probability, 1.0))
-
-                        # Track ALL signals for transparency
-                        self.logger.info(
-                            "?? BREAKOUT SIGNAL ANALYSIS",
-                            scan_id=scan_id,
-                            symbol=symbol,
-                            breakout_probability=breakout_probability,
-                            qualifies_threshold=breakout_probability > 0.75,
-                        )
-
-                        if breakout_probability > 0.5:
                             quality_tier = (
                                 "high"
                                 if breakout_probability > 0.75
