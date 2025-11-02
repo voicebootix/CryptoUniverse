@@ -521,7 +521,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
             await self._refresh_strategy_symbol_policies(force=True)
 
-            self.logger.info("🎯 User Opportunity Discovery Service initialized")
+            self.logger.info("?? User Opportunity Discovery Service initialized")
 
         except Exception as e:
             self.logger.error("Failed to initialize User Opportunity Discovery", error=str(e))
@@ -608,7 +608,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         return normalized
 
     def _parse_usd_value(self, value: Any, default: float = 0.0) -> float:
-        """Safely parse USD-like values ("$50,000" → 50000)."""
+        """Safely parse USD-like values ("$50,000" ? 50000)."""
 
         if value is None:
             return default
@@ -659,13 +659,13 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         # Check cache first
         cached = self._portfolio_cache.get(user_id)
         if cached and cached['expires'] > time.time():
-            self.logger.debug("🎯 Portfolio cache hit", user_id=user_id)
+            self.logger.debug("?? Portfolio cache hit", user_id=user_id)
             return cached['data']
         
         # Check circuit breaker
         if self._circuit_breaker['is_open']:
             if time.time() - self._circuit_breaker['last_failure'] < self._circuit_breaker['timeout']:
-                self.logger.warning("⚡ Circuit breaker open, returning cached or default", user_id=user_id)
+                self.logger.warning("? Circuit breaker open, returning cached or default", user_id=user_id)
                 return cached['data'] if cached else {'success': True, 'active_strategies': []}
             else:
                 # Reset circuit breaker
@@ -689,12 +689,12 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             # Reset circuit breaker on success
             self._circuit_breaker['failures'] = 0
             
-            self.logger.debug("✅ Portfolio fetched and cached", user_id=user_id)
+            self.logger.debug("? Portfolio fetched and cached", user_id=user_id)
             return portfolio_result
             
         except asyncio.TimeoutError:
             self.logger.exception(
-                f"❌ Portfolio fetch TIMEOUT after {PORTFOLIO_FETCH_TIMEOUT_SECONDS}s",
+                f"? Portfolio fetch TIMEOUT after {PORTFOLIO_FETCH_TIMEOUT_SECONDS}s",
                 user_id=user_id,
                 timeout_seconds=PORTFOLIO_FETCH_TIMEOUT_SECONDS,
             )
@@ -705,17 +705,17 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             
             if self._circuit_breaker['failures'] >= self._circuit_breaker['threshold']:
                 self._circuit_breaker['is_open'] = True
-                self.logger.warning("🔥 Circuit breaker opened due to repeated failures")
+                self.logger.warning("?? Circuit breaker opened due to repeated failures")
             
             # Return cached data if available, otherwise empty
             if cached:
-                self.logger.info("🔄 Returning stale cache due to timeout", user_id=user_id)
+                self.logger.info("?? Returning stale cache due to timeout", user_id=user_id)
                 return cached['data']
             
             return {'success': True, 'active_strategies': [], 'error': 'portfolio_fetch_timeout'}
             
         except Exception as e:
-            self.logger.error("❌ Portfolio fetch EXCEPTION", 
+            self.logger.error("? Portfolio fetch EXCEPTION", 
                             user_id=user_id, 
                             error=str(e),
                             error_type=type(e).__name__,
@@ -727,11 +727,11 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             
             if self._circuit_breaker['failures'] >= self._circuit_breaker['threshold']:
                 self._circuit_breaker['is_open'] = True
-                self.logger.warning("🔥 Circuit breaker opened due to repeated failures")
+                self.logger.warning("?? Circuit breaker opened due to repeated failures")
             
             # Return cached data if available, otherwise empty
             if cached:
-                self.logger.info("🔄 Returning stale cache due to exception", user_id=user_id)
+                self.logger.info("?? Returning stale cache due to exception", user_id=user_id)
                 return cached['data']
             
             return {'success': True, 'active_strategies': [], 'error': f'portfolio_fetch_error: {type(e).__name__}'}
@@ -911,7 +911,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             strategy_ids=strategy_ids,
         )
 
-        self.logger.info("🔍 ENTERPRISE User Opportunity Discovery Starting",
+        self.logger.info("?? ENTERPRISE User Opportunity Discovery Starting",
                         scan_id=scan_id,
                         user_id=user_id,
                         force_refresh=force_refresh)
@@ -952,7 +952,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             if not force_refresh:
                 cached_opportunities = await self._get_cached_opportunities(user_id, user_profile)
                 if cached_opportunities:
-                    self.logger.info("📦 Using cached opportunity data", 
+                    self.logger.info("?? Using cached opportunity data", 
                                    scan_id=scan_id,
                                    opportunities_count=len(cached_opportunities.get("opportunities", [])))
                     return cached_opportunities
@@ -965,7 +965,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             metrics["portfolio_fetch_time"] = time.time() - portfolio_fetch_start
 
             if not portfolio_result.get("success") or not portfolio_result.get("active_strategies"):
-                self.logger.warning("❌ NO STRATEGIES FOUND IN PORTFOLIO",
+                self.logger.warning("? NO STRATEGIES FOUND IN PORTFOLIO",
                                   scan_id=scan_id,
                                   user_id=user_id,
                                   portfolio_result=portfolio_result)
@@ -1026,7 +1026,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                            filters=filter_summary)
 
             # CRITICAL DEBUG: Log user's active strategies
-            self.logger.info("🎯 USER ACTIVE STRATEGIES",
+            self.logger.info("?? USER ACTIVE STRATEGIES",
                            scan_id=scan_id,
                            user_id=user_id,
                            strategy_count=len(active_strategies),
@@ -1125,11 +1125,16 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             concurrency_limit = 15  # Run max 15 strategies concurrently (increased from 3)
             strategy_semaphore = asyncio.Semaphore(concurrency_limit)
 
-            # Calculate per-strategy timeout from total scan budget, accounting for concurrency
+            # Calculate remaining budget for strategy scans; do not overshoot SLA
+            elapsed_since_start = time.time() - discovery_start_time
+            remaining_budget = max(0.0, self._scan_response_budget - elapsed_since_start)
+
+            # Calculate per-strategy timeout from remaining budget, accounting for concurrency
             # With 15 concurrent strategies, we process in batches, so timeout should reflect batch time
             batches = max(1, math.ceil(total_strategies / concurrency_limit))
-            # Allocate budget per batch; allow longer-running strategies to finish (upper bound 180s for heavy scanners)
-            per_strategy_timeout_s = max(10.0, min(30.0, self._scan_response_budget / batches))
+            # Allocate remaining budget per batch; allow longer-running strategies to finish (upper bound 180s to match gunicorn timeout)
+            # High timeout prevents premature failures while optimizations take effect
+            per_strategy_timeout_s = max(10.0, min(180.0, remaining_budget / batches))
 
             async def scan_strategy_with_semaphore(strategy_info, strategy_index):
                 strategy_identifier = strategy_info.get("strategy_id", "Unknown")
@@ -1212,7 +1217,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         strategy_timings[strategy_identifier] = time.time() - start_time
 
             # Run all strategy scans concurrently
-            self.logger.info("🚀 STARTING CONCURRENT STRATEGY SCANS",
+            self.logger.info("?? STARTING CONCURRENT STRATEGY SCANS",
                            scan_id=scan_id,
                            total_strategies=total_strategies,
                            concurrency_limit=15)
@@ -1224,7 +1229,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
             strategy_scan_results = await asyncio.gather(*strategy_tasks, return_exceptions=True)
 
-            self.logger.info("✅ ALL STRATEGY SCANS COMPLETED",
+            self.logger.info("? ALL STRATEGY SCANS COMPLETED",
                            scan_id=scan_id,
                            total_strategies=total_strategies,
                            total_time_s=sum(strategy_timings.values()))
@@ -1249,7 +1254,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         metrics['timeouts'] += 1
                 else:
                     # CRITICAL DEBUG: Log what each strategy scanner returned
-                    self.logger.info("🔍 STRATEGY SCAN RESULT",
+                    self.logger.info("?? STRATEGY SCAN RESULT",
                                    scan_id=scan_id,
                                    strategy_name=strategy_name,
                                    strategy_id=strategy_id,
@@ -1261,7 +1266,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         result_strategy_id = result["strategy_id"]
                         opportunities = result["opportunities"]
 
-                        self.logger.info("✅ OPPORTUNITIES FOUND FROM STRATEGY",
+                        self.logger.info("? OPPORTUNITIES FOUND FROM STRATEGY",
                                        scan_id=scan_id,
                                        strategy_id=result_strategy_id,
                                        opportunities_count=len(opportunities))
@@ -1274,13 +1279,13 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
                         all_opportunities.extend(opportunities)
                     elif isinstance(result, dict):
-                        self.logger.warning("❌ STRATEGY RETURNED EMPTY OPPORTUNITIES",
+                        self.logger.warning("? STRATEGY RETURNED EMPTY OPPORTUNITIES",
                                           scan_id=scan_id,
                                           strategy_name=strategy_name,
                                           strategy_id=strategy_id,
                                           result_keys=list(result.keys()))
                     else:
-                        self.logger.warning("❌ STRATEGY RETURNED INVALID RESULT TYPE",
+                        self.logger.warning("? STRATEGY RETURNED INVALID RESULT TYPE",
                                           scan_id=scan_id,
                                           strategy_name=strategy_name,
                                           result_type=type(result).__name__)
@@ -1315,7 +1320,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             metrics['strategy_scan_times'] = strategy_timings
 
             # DEBUG: Log entry to aggregation phase
-            self.logger.info("🔄 STARTING AGGREGATION PHASE",
+            self.logger.info("?? STARTING AGGREGATION PHASE",
                            scan_id=scan_id,
                            user_id=user_id,
                            total_opportunities_collected=len(all_opportunities),
@@ -1397,7 +1402,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 raise
 
             # ENTERPRISE MONITORING: Log comprehensive metrics
-            self.logger.info("📊 OPPORTUNITY DISCOVERY METRICS",
+            self.logger.info("?? OPPORTUNITY DISCOVERY METRICS",
                            scan_id=scan_id,
                            user_id=user_id,
                            total_time_ms=execution_time,
@@ -1409,7 +1414,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
             # PERFORMANCE ALERTING: Alert if performance degraded
             if execution_time > 10000:  # >10 seconds
-                self.logger.warning("🚨 OPPORTUNITY DISCOVERY PERFORMANCE DEGRADED",
+                self.logger.warning("?? OPPORTUNITY DISCOVERY PERFORMANCE DEGRADED",
                                   scan_id=scan_id,
                                   user_id=user_id,
                                   total_time_ms=execution_time,
@@ -1477,7 +1482,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                             "failed", error=str(final_lifecycle_error))
                 raise
 
-            self.logger.info("✅ ENTERPRISE User Opportunity Discovery Completed",
+            self.logger.info("? ENTERPRISE User Opportunity Discovery Completed",
                            scan_id=scan_id,
                            user_id=user_id,
                            total_opportunities=len(ranked_opportunities),
@@ -1491,7 +1496,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             error_type = type(e).__name__
             is_timeout = "Timeout" in error_type or "timeout" in str(e).lower()
 
-            self.logger.error("💥 ENTERPRISE User Opportunity Discovery Failed",
+            self.logger.error("?? ENTERPRISE User Opportunity Discovery Failed",
                             scan_id=scan_id,
                             user_id=user_id,
                             execution_time_ms=execution_time,
@@ -1705,7 +1710,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 strategy_func = candidate
                 break
         
-        self.logger.info("🎯 Scanning strategy opportunities",
+        self.logger.info("?? Scanning strategy opportunities",
                         scan_id=scan_id,
                         strategy=strategy_name,
                         strategy_id=strategy_id,
@@ -1718,7 +1723,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             if not strategy_func or strategy_func not in self.strategy_scanners:
                 if self._looks_like_uuid(strategy_id):
                     self.logger.info(
-                        "⚙️ Routing UUID strategy to community scanner",
+                        "?? Routing UUID strategy to community scanner",
                         scan_id=scan_id,
                         strategy_id=strategy_id,
                         strategy_name=strategy_name,
@@ -1739,7 +1744,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         "opportunities": community_opportunities,
                     }
 
-                self.logger.warning("❌ No scanner found for strategy",
+                self.logger.warning("? No scanner found for strategy",
                                   strategy_id=strategy_id,
                                   strategy_func=strategy_func,
                                   tried_candidates=strategy_func_candidates,
@@ -1755,7 +1760,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 discovered_assets, user_profile, scan_id, portfolio_result
             )
             
-            self.logger.info("✅ Strategy scan completed",
+            self.logger.info("? Strategy scan completed",
                            scan_id=scan_id,
                            strategy=strategy_name,
                            opportunities_found=len(opportunities))
@@ -1981,7 +1986,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     signal_strength = signals.get("signal_strength", 0)
                     
                     # Track ALL signals for transparency
-                    self.logger.info(f"🎯 PAIRS TRADING SIGNAL ANALYSIS",
+                    self.logger.info(f"?? PAIRS TRADING SIGNAL ANALYSIS",
                                    scan_id=scan_id,
                                    symbol=pair_str,
                                    signal_strength=signal_strength,
@@ -2090,7 +2095,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         signal_action = signals.get("action", "HOLD")
                         
                         self.logger.info(
-                            "🎯 MOMENTUM SIGNAL ANALYSIS",
+                            "?? MOMENTUM SIGNAL ANALYSIS",
                             scan_id=scan_id,
                             symbol=symbol,
                             signal_strength=signal_strength,
@@ -2229,7 +2234,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     deviation_score = abs(z_score)
 
                     self.logger.info(
-                        "🎯 MEAN REVERSION SIGNAL ANALYSIS",
+                        "?? MEAN REVERSION SIGNAL ANALYSIS",
                         scan_id=scan_id,
                         symbol=symbol,
                         deviation_score=deviation_score,
@@ -2372,7 +2377,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     breakout_probability = breakout_probability or 0.0
 
                     self.logger.info(
-                        "🎯 BREAKOUT SIGNAL ANALYSIS",
+                        "?? BREAKOUT SIGNAL ANALYSIS",
                         scan_id=scan_id,
                         symbol=symbol,
                         breakout_probability=breakout_probability,
@@ -2924,7 +2929,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     self.logger.debug(f"Scalping analysis failed for {symbol}", error=str(e))
                     continue
             
-            self.logger.info(f"✅ Scalping scanner found {len(opportunities)} opportunities", 
+            self.logger.info(f"? Scalping scanner found {len(opportunities)} opportunities", 
                            scan_id=scan_id, strategy_id=strategy_id)
             
         except Exception as e:
@@ -3018,7 +3023,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     self.logger.debug(f"Market making analysis failed for {symbol}", error=str(e))
                     continue
             
-            self.logger.info(f"✅ Market making scanner found {len(opportunities)} opportunities", 
+            self.logger.info(f"? Market making scanner found {len(opportunities)} opportunities", 
                            scan_id=scan_id, strategy_id=strategy_id)
             
         except Exception as e:
@@ -3078,7 +3083,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 if result and result.confidence_score > 30:  # 3.0 signal strength * 10
                     opportunities.append(result)
             
-            self.logger.info(f"✅ Futures scanner found {len(opportunities)} opportunities", 
+            self.logger.info(f"? Futures scanner found {len(opportunities)} opportunities", 
                            scan_id=scan_id, strategy_id=strategy_id)
             
         except Exception as e:
@@ -3153,7 +3158,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     if result and result.confidence_score > 30:  # 3.0 signal strength * 10
                         opportunities.append(result)
 
-            self.logger.info(f"✅ Options scanner found {len(opportunities)} opportunities",
+            self.logger.info(f"? Options scanner found {len(opportunities)} opportunities",
                            scan_id=scan_id, strategy_id=strategy_id)
             
         except Exception:
@@ -3384,7 +3389,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 )
 
             self.logger.info(
-                "✅ Volatility trading scanner completed",
+                "? Volatility trading scanner completed",
                 scan_id=scan_id,
                 opportunities=len(opportunities),
             )
@@ -3498,7 +3503,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 )
 
             self.logger.info(
-                "✅ News sentiment scanner completed",
+                "? News sentiment scanner completed",
                 scan_id=scan_id,
                 opportunities=len(opportunities),
             )
@@ -3602,7 +3607,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 )
 
             self.logger.info(
-                "✅ Community strategy sentiment scanner completed",
+                "? Community strategy sentiment scanner completed",
                 scan_id=scan_id,
                 strategy_id=strategy_id,
                 opportunities=len(opportunities),
@@ -4421,7 +4426,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     continue
 
             self.logger.info(
-                "✅ Futures arbitrage scanner completed",
+                "? Futures arbitrage scanner completed",
                 scan_id=scan_id,
                 opportunities=len(opportunities),
             )
@@ -4838,7 +4843,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
         # Check for percent markers (including fullwidth percent sign U+FF05)
         if original:
-            normalized = original.strip().replace('％', '%')  # Replace fullwidth percent
+            normalized = original.strip().replace('?', '%')  # Replace fullwidth percent
             if "%" in normalized:
                 return numeric / 100.0
 
@@ -4948,7 +4953,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         else:
             limited_opportunities = ranked_opportunities  # Return all opportunities
         
-        self.logger.info("🎯 Opportunities ranked and filtered",
+        self.logger.info("?? Opportunities ranked and filtered",
                         scan_id=scan_id,
                         total_found=len(opportunities),
                         after_filtering=len(limited_opportunities),
@@ -5037,7 +5042,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             onboarding_result = await user_onboarding_service.trigger_onboarding_if_needed(user_id)
             
             if onboarding_result.get("success"):
-                self.logger.info("🎯 User automatically onboarded with free strategies", 
+                self.logger.info("?? User automatically onboarded with free strategies", 
                                scan_id=scan_id, user_id=user_id)
                 
                 # Now try to discover opportunities again with the new strategies
@@ -5392,7 +5397,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             await self.redis.zremrangebyscore(index_key, 0, current_time - 3600)
             await self.redis.expire(index_key, 3600)
 
-            self.logger.info(f"📍 Scan lifecycle: {phase}",
+            self.logger.info(f"?? Scan lifecycle: {phase}",
                            scan_id=scan_id,
                            status=status,
                            **extra_data)
@@ -5446,7 +5451,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             await self.redis.expire(debug_key, 3600)  # 1 hour TTL
 
             # Log to application logs as well
-            emoji = "🔄" if status == "starting" else "✅" if status == "completed" else "❌"
+            emoji = "??" if status == "starting" else "?" if status == "completed" else "?"
             self.logger.info(f"{emoji} STEP {step_number}: {step_name}",
                            scan_id=scan_id,
                            status=status,
@@ -5536,7 +5541,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             )
 
             self.logger.info(
-                "📊 User-initiated scan metrics tracked (atomic)",
+                "?? User-initiated scan metrics tracked (atomic)",
                 scan_id=scan_id,
                 user_id=user_id,
                 opportunities=opportunities_count,
@@ -5585,7 +5590,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                 # Return subset of cached opportunities with warning
                                 limited_opportunities = opportunities[:5]  # Limit to 5
                                 
-                                self.logger.info("🔄 Fallback opportunities provided from cache",
+                                self.logger.info("?? Fallback opportunities provided from cache",
                                                scan_id=scan_id,
                                                user_id=user_id,
                                                count=len(limited_opportunities))
@@ -5642,7 +5647,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     async def _scan_funding_arbitrage_pro_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
         """Pro version of funding arbitrage with enhanced analysis"""
         try:
-            self.logger.info("🔍 Scanning funding arbitrage pro opportunities", scan_id=scan_id)
+            self.logger.info("?? Scanning funding arbitrage pro opportunities", scan_id=scan_id)
             
             # Use base funding arbitrage scanner with enhanced analysis
             base_opportunities = await self._scan_funding_arbitrage_opportunities(
@@ -5677,7 +5682,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     async def _scan_market_making_pro_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
         """Pro version of market making with advanced order book analysis"""
         try:
-            self.logger.info("🔍 Scanning market making pro opportunities", scan_id=scan_id)
+            self.logger.info("?? Scanning market making pro opportunities", scan_id=scan_id)
             
             # Use base market making scanner with enhanced analysis
             base_opportunities = await self._scan_market_making_opportunities(
@@ -5711,7 +5716,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     async def _scan_scalping_engine_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
         """Advanced scalping engine with high-frequency analysis"""
         try:
-            self.logger.info("🔍 Scanning scalping engine opportunities", scan_id=scan_id)
+            self.logger.info("?? Scanning scalping engine opportunities", scan_id=scan_id)
             
             # Use base scalping scanner with enhanced analysis
             base_opportunities = await self._scan_scalping_opportunities(
@@ -5745,7 +5750,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     async def _scan_swing_navigator_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
         """Swing trading navigator with trend analysis"""
         try:
-            self.logger.info("🔍 Scanning swing navigator opportunities", scan_id=scan_id)
+            self.logger.info("?? Scanning swing navigator opportunities", scan_id=scan_id)
             
             # Use momentum strategy as base with swing-specific enhancements
             base_opportunities = await self._scan_spot_momentum_opportunities(
@@ -5780,7 +5785,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     async def _scan_position_manager_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
         """Position management with risk-adjusted sizing"""
         try:
-            self.logger.info("🔍 Scanning position manager opportunities", scan_id=scan_id)
+            self.logger.info("?? Scanning position manager opportunities", scan_id=scan_id)
             
             # Use risk management as base with position-specific enhancements
             base_opportunities = await self._scan_risk_management_opportunities(
@@ -5814,7 +5819,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     async def _scan_risk_guardian_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
         """Advanced risk guardian with comprehensive protection"""
         try:
-            self.logger.info("🔍 Scanning risk guardian opportunities", scan_id=scan_id)
+            self.logger.info("?? Scanning risk guardian opportunities", scan_id=scan_id)
             
             # Use risk management as base with guardian-specific enhancements
             base_opportunities = await self._scan_risk_management_opportunities(
@@ -5848,7 +5853,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     async def _scan_portfolio_optimizer_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
         """Portfolio optimizer with advanced allocation strategies"""
         try:
-            self.logger.info("🔍 Scanning portfolio optimizer opportunities", scan_id=scan_id)
+            self.logger.info("?? Scanning portfolio optimizer opportunities", scan_id=scan_id)
             
             # Use portfolio optimization as base with optimizer-specific enhancements
             base_opportunities = await self._scan_portfolio_optimization_opportunities(
@@ -5882,7 +5887,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     async def _scan_strategy_analytics_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
         """Strategy analytics with performance insights"""
         try:
-            self.logger.info("🔍 Scanning strategy analytics opportunities", scan_id=scan_id)
+            self.logger.info("?? Scanning strategy analytics opportunities", scan_id=scan_id)
             
             # Use statistical arbitrage as base with analytics-specific enhancements
             base_opportunities = await self._scan_statistical_arbitrage_opportunities(
@@ -5916,7 +5921,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     async def _scan_momentum_trader_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
         """Momentum trader with enhanced trend following"""
         try:
-            self.logger.info("🔍 Scanning momentum trader opportunities", scan_id=scan_id)
+            self.logger.info("?? Scanning momentum trader opportunities", scan_id=scan_id)
             
             # Use spot momentum as base with trader-specific enhancements
             base_opportunities = await self._scan_spot_momentum_opportunities(
@@ -5950,7 +5955,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     async def _scan_mean_reversion_pro_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
         """Pro version of mean reversion with advanced statistical analysis"""
         try:
-            self.logger.info("🔍 Scanning mean reversion pro opportunities", scan_id=scan_id)
+            self.logger.info("?? Scanning mean reversion pro opportunities", scan_id=scan_id)
             
             # Use spot mean reversion as base with pro enhancements
             base_opportunities = await self._scan_spot_mean_reversion_opportunities(
@@ -5984,7 +5989,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     async def _scan_breakout_hunter_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
         """Breakout hunter with advanced pattern recognition"""
         try:
-            self.logger.info("🔍 Scanning breakout hunter opportunities", scan_id=scan_id)
+            self.logger.info("?? Scanning breakout hunter opportunities", scan_id=scan_id)
             
             # Use spot breakout as base with hunter-specific enhancements
             base_opportunities = await self._scan_spot_breakout_opportunities(
@@ -6018,7 +6023,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     async def _scan_algorithmic_suite_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
         """Algorithmic suite with multi-strategy coordination"""
         try:
-            self.logger.info("🔍 Scanning algorithmic suite opportunities", scan_id=scan_id)
+            self.logger.info("?? Scanning algorithmic suite opportunities", scan_id=scan_id)
             
             # Use complex strategy as base with suite-specific enhancements
             base_opportunities = await self._scan_complex_strategy_opportunities(
@@ -6052,7 +6057,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     async def _scan_pairs_trader_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
         """Pairs trader with enhanced correlation analysis"""
         try:
-            self.logger.info("🔍 Scanning pairs trader opportunities", scan_id=scan_id)
+            self.logger.info("?? Scanning pairs trader opportunities", scan_id=scan_id)
             
             # Use pairs trading as base with trader-specific enhancements
             base_opportunities = await self._scan_pairs_trading_opportunities(
@@ -6086,7 +6091,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     async def _scan_statistical_arbitrage_pro_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
         """Pro version of statistical arbitrage with advanced models"""
         try:
-            self.logger.info("🔍 Scanning statistical arbitrage pro opportunities", scan_id=scan_id)
+            self.logger.info("?? Scanning statistical arbitrage pro opportunities", scan_id=scan_id)
             
             # Use statistical arbitrage as base with pro enhancements
             base_opportunities = await self._scan_statistical_arbitrage_opportunities(
@@ -6120,7 +6125,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     async def _scan_market_maker_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
         """Market maker with advanced liquidity provision"""
         try:
-            self.logger.info("🔍 Scanning market maker opportunities", scan_id=scan_id)
+            self.logger.info("?? Scanning market maker opportunities", scan_id=scan_id)
             
             # Use market making as base with maker-specific enhancements
             base_opportunities = await self._scan_market_making_opportunities(
@@ -6154,7 +6159,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     async def _scan_scalping_engine_pro_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
         """Pro version of scalping engine with ultra-high frequency analysis"""
         try:
-            self.logger.info("🔍 Scanning scalping engine pro opportunities", scan_id=scan_id)
+            self.logger.info("?? Scanning scalping engine pro opportunities", scan_id=scan_id)
             
             # Use scalping as base with pro engine enhancements
             base_opportunities = await self._scan_scalping_opportunities(
@@ -6188,7 +6193,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     async def _scan_swing_navigator_pro_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
         """Pro version of swing navigator with advanced trend analysis"""
         try:
-            self.logger.info("🔍 Scanning swing navigator pro opportunities", scan_id=scan_id)
+            self.logger.info("?? Scanning swing navigator pro opportunities", scan_id=scan_id)
             
             # Use momentum strategy as base with pro navigator enhancements
             base_opportunities = await self._scan_spot_momentum_opportunities(
