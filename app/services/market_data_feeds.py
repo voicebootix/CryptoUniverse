@@ -10,8 +10,10 @@ import copy
 import json
 import random
 import time
+import socket
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Any, Tuple
+from collections import deque
 
 import aiohttp
 import numpy as np
@@ -28,6 +30,45 @@ from app.services.market_data_profiles import (
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
+
+
+class RateLimitQueue:
+    """Queue for handling rate-limited API requests."""
+
+    def __init__(self) -> None:
+        self._queues: Dict[str, deque] = {}
+        self._locks: Dict[str, asyncio.Lock] = {}
+
+    async def add_request(self, api_name: str, callback, *args, **kwargs) -> None:
+        if api_name not in self._queues:
+            self._queues[api_name] = deque()
+            self._locks[api_name] = asyncio.Lock()
+
+        self._queues[api_name].append((callback, args, kwargs))
+
+    async def process_queue(self, api_name: str) -> None:
+        if api_name not in self._queues:
+            return
+
+        async with self._locks[api_name]:
+            queue = self._queues[api_name]
+            while queue:
+                callback, args, kwargs = queue.popleft()
+                try:
+                    await callback(*args, **kwargs)
+                except Exception as exc:  # pragma: no cover - defensive logging
+                    logger.error(
+                        "Queued rate-limited request failed",
+                        api=api_name,
+                        error=str(exc),
+                    )
+
+
+_rate_limit_queue = RateLimitQueue()
+
+
+# Critical symbols prioritized during rate limiting
+CRITICAL_SYMBOLS = {"BTC", "ETH", "USDT", "USDC", "BNB", "SOL", "XRP", "ADA"}
 
 
 # Custom exceptions for market data operations
@@ -138,6 +179,10 @@ class MarketDataFeeds:
                 "requires_key": False
             }
         }
+
+    async def _process_queue_after_delay(self, api_name: str, delay_seconds: int) -> None:
+        await asyncio.sleep(max(delay_seconds, 1))
+        await _rate_limit_queue.process_queue(api_name)
         
         # Rate limiting tracking
         self.rate_limiters = {}
@@ -976,11 +1021,26 @@ class MarketDataFeeds:
                                 }
                             }
                     elif response.status == 429:
-                        # ENTERPRISE: Handle rate limiting specifically
-                        retry_after = response.headers.get("Retry-After", "60")
+                        retry_after = int(response.headers.get("Retry-After", 60))
                         error_msg = f"API error: 429 - Rate limited (retry after {retry_after}s)"
-                        logger.debug(f"CoinGecko rate limited", symbol=symbol, retry_after=retry_after)
-                        
+                        logger.warning(
+                            "CoinGecko rate limited",
+                            symbol=symbol,
+                            retry_after=retry_after,
+                        )
+
+                        redis = await get_redis_client()
+                        if redis:
+                            rate_limit_key = "rate_limit:coingecko:resets_at"
+                            reset_timestamp = time.time() + retry_after
+                            try:
+                                await redis.setex(rate_limit_key, retry_after + 10, str(reset_timestamp))
+                            except Exception as cache_error:
+                                logger.debug(
+                                    "Failed to persist CoinGecko rate limit window",
+                                    error=str(cache_error),
+                                )
+
                         cached_price = await self._load_cached_price_entry(symbol)
                         if cached_price:
                             cached_payload = copy.deepcopy(cached_price)
@@ -994,9 +1054,48 @@ class MarketDataFeeds:
                                 },
                             }
 
-                        return {"success": False, "error": error_msg}
+                        raise MarketDataRateLimitError(
+                            message="CoinGecko rate limited",
+                            retry_after=retry_after,
+                        )
                     
                     return {"success": False, "error": f"API error: {response.status}"}
+
+        except MarketDataRateLimitError as rate_error:
+            await _rate_limit_queue.add_request("coingecko", self.get_real_time_price, symbol)
+            if rate_error.retry_after:
+                asyncio.create_task(
+                    self._process_queue_after_delay("coingecko", rate_error.retry_after)
+                )
+
+            is_critical = symbol.upper() in CRITICAL_SYMBOLS
+
+            if is_critical and rate_error.retry_after:
+                await asyncio.sleep(rate_error.retry_after)
+                try:
+                    return await self.get_real_time_price(symbol)
+                except MarketDataRateLimitError:
+                    pass
+
+            cached_price = await self._load_cached_price_entry(symbol)
+            if cached_price:
+                cached_payload = copy.deepcopy(cached_price)
+                cached_payload["from_cache"] = True
+                return {
+                    "success": True,
+                    "data": cached_payload,
+                    "metadata": {
+                        "source": "cache",
+                        "rate_limited": True,
+                        "retry_after": rate_error.retry_after,
+                    },
+                }
+
+            return {
+                "success": False,
+                "error": str(rate_error),
+                "retry_after": rate_error.retry_after,
+            }
 
         except Exception as e:
             return {"success": False, "error": str(e)}
@@ -1349,6 +1448,10 @@ class MarketDataFeeds:
             if symbol not in self.symbol_mappings["coincap"]:
                 return {"success": False, "error": f"Symbol {symbol} not supported"}
 
+            if not await self._check_coincap_connectivity():
+                logger.warning("CoinCap connectivity check failed, using fallback", symbol=symbol)
+                return await self._fetch_coingecko_price(symbol)
+
             asset_id = self.symbol_mappings["coincap"][symbol]
             url = f"{self.apis['coincap']['base_url']}/assets/{asset_id}"
 
@@ -1427,10 +1530,55 @@ class MarketDataFeeds:
                 }
 
             error_message = str(last_error) if last_error else "CoinCap request failed"
+            if "Cannot connect" in error_message or "Name or service not known" in error_message:
+                logger.warning(
+                    "CoinCap unavailable, falling back to CoinGecko",
+                    error=error_message,
+                )
+                try:
+                    return await self._fetch_coingecko_price(symbol)
+                except Exception as fallback_error:
+                    logger.error(
+                        "All market data sources failed",
+                        coincap_error=error_message,
+                        coingecko_error=str(fallback_error),
+                    )
+                    cached_backup = await self._load_cached_price_entry(symbol)
+                    if cached_backup:
+                        return {
+                            "success": True,
+                            "data": cached_backup,
+                            "metadata": {
+                                "source": "cache",
+                                "error": str(fallback_error),
+                                "fallback": "coingecko",
+                            },
+                        }
+                    return {
+                        "success": False,
+                        "error": str(fallback_error),
+                        "coincap_error": error_message,
+                    }
+
             return {"success": False, "error": error_message}
 
         except Exception as e:
             return {"success": False, "error": str(e)}
+
+    async def _check_coincap_connectivity(self) -> bool:
+        """Check if CoinCap API endpoint is reachable before making requests."""
+        try:
+            socket.getaddrinfo("api.coincap.io", 443, type=socket.SOCK_STREAM)
+            timeout = aiohttp.ClientTimeout(total=5)
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get("https://api.coincap.io/v2/assets?limit=1") as response:
+                    return response.status == 200
+        except Exception as connectivity_error:
+            logger.warning(
+                "CoinCap connectivity check failed",
+                error=str(connectivity_error),
+            )
+            return False
     
     async def _fetch_coingecko_detailed(self, symbol: str) -> Dict[str, Any]:
         """Fetch detailed data from CoinGecko."""

@@ -26,6 +26,7 @@ import numpy as np
 import pandas as pd
 import structlog
 from sqlalchemy import select, and_
+from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import AsyncSessionLocal
@@ -2715,9 +2716,13 @@ class PortfolioRiskServiceExtended(PortfolioRiskService):
             
             async with AsyncSessionLocal() as db:
                 # Get the oldest exchange account to estimate how long user has been trading
-                stmt = select(ExchangeAccount).where(
-                    ExchangeAccount.user_id == user_id
-                ).order_by(ExchangeAccount.created_at.asc()).limit(1)
+                stmt = (
+                    select(ExchangeAccount)
+                    .where(ExchangeAccount.user_id == user_id)
+                    .options(selectinload(ExchangeAccount.balances))
+                    .order_by(ExchangeAccount.created_at.asc())
+                    .limit(1)
+                )
                 
                 result = await db.execute(stmt)
                 oldest_account = result.scalar_one_or_none()
