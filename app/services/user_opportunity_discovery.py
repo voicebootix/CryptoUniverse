@@ -4735,15 +4735,24 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 if not isinstance(payload, dict):
                     continue
 
-                normalized = {
-                    "max_symbols": payload.get("max_symbols"),
-                    "chunk_size": payload.get("chunk_size"),
-                    "enabled": bool(payload.get("enabled", True)),
-                }
-                if payload.get("priority") is not None:
-                    normalized["priority"] = payload.get("priority")
+                baseline_entry = {}
+                existing_entry = combined.get(key)
+                if isinstance(existing_entry, dict):
+                    baseline_entry = copy.deepcopy(existing_entry)
 
-                combined[key] = normalized
+                if "max_symbols" in payload:
+                    baseline_entry["max_symbols"] = payload.get("max_symbols")
+                if "chunk_size" in payload:
+                    baseline_entry["chunk_size"] = payload.get("chunk_size")
+                if "priority" in payload:
+                    baseline_entry["priority"] = payload.get("priority")
+                if "enabled" in payload:
+                    enabled_value = payload.get("enabled")
+                    baseline_entry["enabled"] = (
+                        True if enabled_value is None else bool(enabled_value)
+                    )
+
+                combined[key] = baseline_entry
 
             self.strategy_symbol_policies = combined
             self._policy_cache_expiry = time.monotonic() + 60.0

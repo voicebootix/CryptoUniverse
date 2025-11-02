@@ -53,7 +53,43 @@ logger = structlog.get_logger()
 # Background service manager
 background_manager = BackgroundServiceManager()
 
-PRIMARY_WORKER_LOCK_PATH = "/tmp/crypto_primary_worker.lock"
+
+def _initialize_primary_lock_path() -> str:
+    """Determine a secure location for the primary worker lock file."""
+
+    runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
+    preferred_dirs = []
+    if runtime_dir:
+        preferred_dirs.append(os.path.join(runtime_dir, "cryptouniverse"))
+    preferred_dirs.append("/var/run/cryptouniverse")
+
+    for directory in preferred_dirs:
+        if not directory:
+            continue
+        try:
+            os.makedirs(directory, exist_ok=True)
+            os.chmod(directory, 0o750)
+        except OSError:
+            continue
+        else:
+            return os.path.join(directory, "primary_worker.lock")
+
+    fallback_dir = os.path.join("/tmp", "cryptouniverse")
+    if settings.ENVIRONMENT.lower() in {"development", "dev", "test", "testing"}:
+        try:
+            os.makedirs(fallback_dir, exist_ok=True)
+            os.chmod(fallback_dir, 0o700)
+        except OSError:
+            pass
+        logger.warning(
+            "Using fallback directory for primary worker lock", directory=fallback_dir
+        )
+        return os.path.join(fallback_dir, "primary_worker.lock")
+
+    raise RuntimeError("Unable to initialize secure primary worker lock directory")
+
+
+PRIMARY_WORKER_LOCK_PATH = _initialize_primary_lock_path()
 _primary_lock_acquired = False
 
 
