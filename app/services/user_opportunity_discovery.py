@@ -2381,7 +2381,6 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         risk_amount_usd = self._to_float(risk_mgmt.get("risk_amount_usd"))
                         risk_reward_ratio = self._to_float(risk_mgmt.get("risk_reward_ratio"))
 
-<<<<<<< HEAD
                         breakout_probability = breakout_probability or 0.0
                         breakout_probability = max(0.0, min(breakout_probability, 1.0))
 
@@ -2404,21 +2403,21 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                             )
                             signal_strength = breakout_probability * 10.0
 
-                            entry_price = self._safe_float(
+                            entry_price = self._to_float(
                                 risk_mgmt.get("entry_price")
                                 or breakout_result.get("current_price")
                             )
-                            take_profit_price = self._safe_float(
+                            take_profit_price = self._to_float(
                                 risk_mgmt.get("take_profit_price")
                                 or breakout_analysis.get("take_profit")
                             )
-                            stop_loss_price = self._safe_float(
+                            stop_loss_price = self._to_float(
                                 risk_mgmt.get("stop_loss_price")
                                 or breakout_analysis.get("stop_loss")
                             )
 
-                            position_size_units = self._safe_float(risk_mgmt.get("position_size"))
-                            position_notional = self._safe_float(risk_mgmt.get("position_notional"))
+                            position_size_units = self._to_float(risk_mgmt.get("position_size"))
+                            position_notional = self._to_float(risk_mgmt.get("position_notional"))
 
                             if (
                                 entry_price
@@ -2433,9 +2432,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                             ):
                                 position_notional = round(position_size_units * entry_price, 2)
 
-                            risk_amount = self._safe_float(risk_mgmt.get("risk_amount"))
-                            potential_profit = self._safe_float(risk_mgmt.get("potential_profit"))
-                            risk_reward_ratio = self._safe_float(risk_mgmt.get("risk_reward_ratio"))
+                            risk_amount = self._to_float(risk_mgmt.get("risk_amount"))
+                            potential_profit = self._to_float(risk_mgmt.get("potential_profit"))
+                            risk_reward_ratio = self._to_float(risk_mgmt.get("risk_reward_ratio"))
 
                             if (
                                 entry_price
@@ -2467,7 +2466,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                             ):
                                 risk_reward_ratio = round(potential_profit / risk_amount, 2)
 
-                            confidence_score = self._safe_float(signal_block.get("confidence"))
+                            confidence_score = self._to_float(signal_block.get("confidence"))
                             if confidence_score is None:
                                 confidence_score = breakout_probability * 100.0
 
@@ -2482,7 +2481,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                 opportunity_type="breakout",
                                 symbol=symbol,
                                 exchange="binance",
-                                profit_potential_usd=float(potential_profit),
+                                profit_potential_usd=float(potential_profit or 0.0),
                                 confidence_score=float(confidence_score),
                                 risk_level=self._signal_to_risk_level(signal_strength),
                                 required_capital_usd=float(position_notional) if position_notional else float(required_capital_usd),
@@ -2505,7 +2504,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                     "risk_amount": risk_amount,
                                     "risk_reward_ratio": risk_reward_ratio,
                                 },
-                                discovered_at=datetime.now(timezone.utc),
+                                discovered_at=self._current_timestamp(),
                             )
                             all_opportunities.append(opportunity)
                         
@@ -4621,27 +4620,18 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 if not isinstance(payload, dict):
                     continue
 
-<<<<<<< HEAD
-                baseline_entry = {}
-                existing_entry = combined.get(key)
-                if isinstance(existing_entry, dict):
-                    baseline_entry = copy.deepcopy(existing_entry)
-
+                baseline_entry = copy.deepcopy(combined.get(key, {})) if isinstance(combined.get(key), dict) else {}
                 if "max_symbols" in payload:
                     baseline_entry["max_symbols"] = payload.get("max_symbols")
                 if "chunk_size" in payload:
                     baseline_entry["chunk_size"] = payload.get("chunk_size")
-                if "priority" in payload:
-                    priority_value = payload.get("priority")
-                    if priority_value is not None:
-                        try:
-                            baseline_entry["priority"] = int(priority_value)
-                        except (TypeError, ValueError):
-                            pass
-                if "enabled" in payload:
-                    enabled_value = payload.get("enabled")
-                    if enabled_value is not None:
-                        baseline_entry["enabled"] = bool(enabled_value)
+                if "priority" in payload and payload.get("priority") is not None:
+                    try:
+                        baseline_entry["priority"] = int(payload.get("priority"))
+                    except (TypeError, ValueError):
+                        pass
+                if "enabled" in payload and payload.get("enabled") is not None:
+                    baseline_entry["enabled"] = bool(payload.get("enabled"))
 
                 combined[key] = baseline_entry
 
@@ -4915,7 +4905,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
         # Check for percent markers (including fullwidth percent sign U+FF05)
         if original:
-            normalized = original.strip().replace('?', '%')  # Replace fullwidth percent
+            normalized = original.strip().replace('\uFF05', '%')  # Replace fullwidth percent sign (U+FF05)
             if "%" in normalized:
                 return numeric / 100.0
 
