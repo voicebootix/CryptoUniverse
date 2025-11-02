@@ -5557,5 +5557,3 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
         except Exception as track_error:
             self.logger.debug("Scan metrics tracking failed", error=str(track_error))
-    
-    async def _provide_f
