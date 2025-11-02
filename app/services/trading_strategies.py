@@ -2024,7 +2024,7 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
                 "summary": (
                     "Daily double-digit moves are common. Position sizing, stop-losses and disciplined risk budgets are critical safeguards."
                 ),
-                "actionable_tip": "Stress test positions assuming 30–80% annualised volatility and plan for gap risk.",
+                "actionable_tip": "Stress test positions assuming 30?80% annualised volatility and plan for gap risk.",
             },
             {
                 "topic": "Stablecoins vs. alt-coins",
@@ -2394,7 +2394,9 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
     ) -> Dict[str, Any]:
         """Main strategy execution router - handles all 25+ functions."""
 
-        execution_start_time = start_time or time.time()
+        # Use monotonic time for timeout calculations to avoid issues with system clock changes
+        # If start_time is provided, ensure it's already a monotonic timestamp
+        execution_start_time = start_time if start_time is not None else time.monotonic()
         effective_timeout = timeout_seconds or 30.0
 
         self.logger.info(
@@ -2406,7 +2408,7 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
         )
 
         def _abort_if_timeout(reason: str, threshold: float = 0.9) -> Optional[Dict[str, Any]]:
-            elapsed = time.time() - execution_start_time
+            elapsed = time.monotonic() - execution_start_time
             if elapsed >= effective_timeout * threshold:
                 self.logger.warning(
                     "Strategy execution approaching timeout",
@@ -2701,7 +2703,7 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
                 "timestamp": datetime.utcnow().isoformat()
             }
 
-        execution_latency = round(time.time() - execution_start_time, 4)
+        execution_latency = round(time.monotonic() - execution_start_time, 4)
         if isinstance(strategy_result, dict):
             strategy_result.setdefault("execution_time_seconds", execution_latency)
 
@@ -8069,7 +8071,7 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
         """
         try:
             self.logger.info(
-                f"🎯 Generating trading signal",
+                f"?? Generating trading signal",
                 strategy=strategy_type,
                 risk_mode=risk_mode,
                 user_id=user_id
@@ -8303,7 +8305,7 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
             volatility_adjustment = (volatility - 0.03) * 0.002  # Higher vol = higher funding
             
             funding_rate = base_rate + volatility_adjustment
-            funding_rate = max(-0.005, min(funding_rate, 0.005))  # Cap at ±0.5%
+            funding_rate = max(-0.005, min(funding_rate, 0.005))  # Cap at ?0.5%
 
             # Calculate next funding time as proper ISO timestamp
             now = datetime.utcnow()
@@ -8688,7 +8690,7 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
             position_value = position.get('position_size', 0) * position.get('entry_price', 1)
             trading_cost = position_value * 0.001  # 0.1% fee
             # Funding is applied to notional value only, not multiplied by leverage
-            daily_funding = position_value * 0.0001 * 3  # Daily funding rate × notional × 3 periods
+            daily_funding = position_value * 0.0001 * 3  # Daily funding rate ? notional ? 3 periods
             return {"total_immediate_cost": trading_cost, "estimated_daily_cost": daily_funding}
         except Exception:
             return {"total_immediate_cost": 0, "estimated_daily_cost": 0}

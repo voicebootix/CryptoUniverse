@@ -1126,7 +1126,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             strategy_semaphore = asyncio.Semaphore(concurrency_limit)
 
             # Calculate remaining budget for strategy scans; do not overshoot SLA
-            elapsed_since_start = time.time() - discovery_start_time
+            # Use monotonic time for consistent timeout calculations
+            elapsed_since_start = time.monotonic() - discovery_start_time
             remaining_budget = max(0.0, self._scan_response_budget - elapsed_since_start)
 
             # Calculate per-strategy timeout from remaining budget, accounting for concurrency
@@ -1154,18 +1155,15 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     )
 
                     try:
-                        # Bound per-strategy runtime to avoid indefinite hangs
-                        result = await asyncio.wait_for(
-                            self._scan_strategy_opportunities(
-                                strategy_info,
-                                discovered_assets,
-                                user_profile,
-                                scan_id,
-                                portfolio_result,
-                                timeout_seconds=per_strategy_timeout_s,
-                                start_time=strategy_start_time,
-                            ),
-                            timeout=per_strategy_timeout_s
+                        # Call _scan_strategy_opportunities directly - it handles its own timeout/partial-result logic
+                        result = await self._scan_strategy_opportunities(
+                            strategy_info,
+                            discovered_assets,
+                            user_profile,
+                            scan_id,
+                            portfolio_result,
+                            timeout_seconds=per_strategy_timeout_s,
+                            start_time=strategy_start_time,
                         )
                     except asyncio.CancelledError as e:
                         # Track strategy cancellation (parent task cancelled)

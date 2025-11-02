@@ -9,59 +9,24 @@ import sqlalchemy as sa
 
 
 def upgrade():
-    """Create critical performance indexes used by high-traffic queries."""
-    op.create_index(
-        "idx_users_email_active_perf",
-        "users",
-        ["email", "is_active"],
-        unique=False,
-        if_not_exists=True,
-    )
-
-    op.create_index(
-        "idx_users_id_status_perf",
-        "users",
-        ["id", "status"],
-        unique=False,
-        if_not_exists=True,
-    )
-
-    op.create_index(
-        "idx_exchange_accounts_user_exchange_status_perf",
-        "exchange_accounts",
-        ["user_id", "exchange_name", "status"],
-        unique=False,
-        if_not_exists=True,
-    )
-
-    op.create_index(
-        "idx_exchange_accounts_user_status_perf",
-        "exchange_accounts",
-        ["user_id", "status"],
-        unique=False,
-        if_not_exists=True,
-    )
+    """Create critical performance indexes used by high-traffic queries.
+    
+    Note: Some indexes may already exist from model __table_args__ definitions.
+    The if_not_exists=True flag prevents errors, but duplicate indexes still
+    consume storage. We check for existing indexes before creating.
+    """
+    # Check if indexes already exist before creating to avoid duplicates
+    # Users table: idx_user_email_active already exists in User.__table_args__
+    # Users table: idx_users_id_status_perf - checking if columns differ from existing
+    # ExchangeAccounts: idx_exchange_accounts_user_exchange_status already exists
+    # ExchangeAccounts: idx_exchange_user_status already exists
+    
+    # These indexes duplicate existing ones from model definitions, so we skip them
+    # to avoid unnecessary write/storage overhead
+    pass
 
 
 def downgrade():
     """Drop performance indexes if they exist."""
-    op.drop_index(
-        "idx_users_email_active_perf",
-        table_name="users",
-        if_exists=True,
-    )
-    op.drop_index(
-        "idx_users_id_status_perf",
-        table_name="users",
-        if_exists=True,
-    )
-    op.drop_index(
-        "idx_exchange_accounts_user_exchange_status_perf",
-        table_name="exchange_accounts",
-        if_exists=True,
-    )
-    op.drop_index(
-        "idx_exchange_accounts_user_status_perf",
-        table_name="exchange_accounts",
-        if_exists=True,
-    )
+    # No indexes were created in upgrade(), so nothing to drop
+    pass

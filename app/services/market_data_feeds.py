@@ -1070,12 +1070,20 @@ class MarketDataFeeds:
 
             is_critical = symbol.upper() in CRITICAL_SYMBOLS
 
+            # Schedule retry as background task for critical symbols to avoid blocking timeout
             if is_critical and rate_error.retry_after:
-                await asyncio.sleep(rate_error.retry_after)
-                try:
-                    return await self.get_real_time_price(symbol)
-                except MarketDataRateLimitError:
-                    pass
+                async def _retry_critical_symbol() -> None:
+                    """Background task to retry fetching critical symbol after rate limit."""
+                    try:
+                        await asyncio.sleep(rate_error.retry_after)
+                        await self.get_real_time_price(symbol)
+                    except (MarketDataRateLimitError, asyncio.CancelledError) as e:
+                        logger.debug("Background retry cancelled or rate limited", symbol=symbol, error=str(e))
+                    except Exception as e:
+                        logger.warning("Background retry failed", symbol=symbol, error=str(e))
+                
+                # Don't await - let it run in background
+                asyncio.create_task(_retry_critical_symbol())
 
             cached_price = await self._load_cached_price_entry(symbol)
             if cached_price:
@@ -1568,7 +1576,9 @@ class MarketDataFeeds:
     async def _check_coincap_connectivity(self) -> bool:
         """Check if CoinCap API endpoint is reachable before making requests."""
         try:
-            socket.getaddrinfo("api.coincap.io", 443, type=socket.SOCK_STREAM)
+            # Use async DNS resolution to avoid blocking the event loop
+            loop = asyncio.get_event_loop()
+            await loop.getaddrinfo("api.coincap.io", 443, type=socket.SOCK_STREAM)
             timeout = aiohttp.ClientTimeout(total=5)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.get("https://api.coincap.io/v2/assets?limit=1") as response:
