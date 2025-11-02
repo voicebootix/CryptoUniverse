@@ -1145,7 +1145,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             strategy_semaphore = asyncio.Semaphore(concurrency_limit)
 
             # Calculate remaining budget for strategy scans; do not overshoot SLA
-            elapsed_since_start = time.time() - discovery_start_time
+            # Use monotonic time for consistent timeout calculations
+            elapsed_since_start = time.monotonic() - discovery_start_time
             remaining_budget = max(0.0, self._scan_response_budget - elapsed_since_start)
 
             # Calculate per-strategy timeout from remaining budget, accounting for concurrency
@@ -2208,6 +2209,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     z_score = self._to_float(indicators.get("z_score")) or self._to_float(signal_block.get("z_score")) or 0.0
                     deviation_score = abs(z_score)
 
+                    # Track ALL signals for transparency
                     self.logger.info(
                         "?? MEAN REVERSION SIGNAL ANALYSIS",
                         scan_id=scan_id,
@@ -2215,47 +2217,38 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         deviation_score=deviation_score,
                         qualifies_threshold=deviation_score > 2.0,
                     )
+                    
+                    if deviation_score > 1.0:
+                        quality_tier = "high" if deviation_score > 2.0 else "medium" if deviation_score > 1.5 else "low"
+                        signal_strength = min(deviation_score * 2, 10)
 
-                        # Track ALL signals for transparency
-                        self.logger.info(
-                            "?? MEAN REVERSION SIGNAL ANALYSIS",
-                            scan_id=scan_id,
-                            symbol=symbol,
-                            deviation_score=deviation_score,
-                            qualifies_threshold=deviation_score > 2.0,
+                        signal_action = signal_block.get("action") or ("SELL" if z_score > 0 else "BUY" if z_score < 0 else "HOLD")
+                        if signal_action not in {"BUY", "SELL"}:
+                            continue
+
+                        price_snapshot = (
+                            indicators.get("price_snapshot")
+                            or risk_mgmt.get("price_snapshot")
+                            or indicators.get("price")
+                            or risk_mgmt.get("price")
+                            or {}
                         )
-                        
-                        if deviation_score > 1.0:
-                            quality_tier = "high" if deviation_score > 2.0 else "medium" if deviation_score > 1.5 else "low"
-                            signal_strength = min(deviation_score * 2, 10)
 
-                            signal_action = signal_block.get("action") or ("SELL" if z_score > 0 else "BUY" if z_score < 0 else "HOLD")
-                            if signal_action not in {"BUY", "SELL"}:
-                                continue
+                        entry_price = self._to_float(risk_mgmt.get("entry_price") or indicators.get("entry_price"))
+                        if entry_price is None:
+                            entry_price = self._to_float(price_snapshot.get("current"))
 
-                            price_snapshot = (
-                                indicators.get("price_snapshot")
-                                or risk_mgmt.get("price_snapshot")
-                                or indicators.get("price")
-                                or risk_mgmt.get("price")
-                                or {}
-                            )
+                        take_profit_price = self._to_float(risk_mgmt.get("take_profit_price") or indicators.get("mean_price"))
+                        stop_loss_price = self._to_float(risk_mgmt.get("stop_loss_price"))
 
-                            entry_price = self._to_float(risk_mgmt.get("entry_price") or indicators.get("entry_price"))
-                            if entry_price is None:
-                                entry_price = self._to_float(price_snapshot.get("current"))
+                        potential_profit_usd = self._to_float(risk_mgmt.get("potential_profit_usd")) or 0.0
+                        required_capital_usd = self._to_float(risk_mgmt.get("notional_usd")) or 0.0
+                        risk_amount_usd = self._to_float(risk_mgmt.get("risk_amount_usd"))
+                        risk_reward_ratio = self._to_float(risk_mgmt.get("risk_reward_ratio"))
 
-                            take_profit_price = self._to_float(risk_mgmt.get("take_profit_price") or indicators.get("mean_price"))
-                            stop_loss_price = self._to_float(risk_mgmt.get("stop_loss_price"))
-
-                            potential_profit_usd = self._to_float(risk_mgmt.get("potential_profit_usd")) or 0.0
-                            required_capital_usd = self._to_float(risk_mgmt.get("notional_usd")) or 0.0
-                            risk_amount_usd = self._to_float(risk_mgmt.get("risk_amount_usd"))
-                            risk_reward_ratio = self._to_float(risk_mgmt.get("risk_reward_ratio"))
-
-                            if not entry_price or not take_profit_price or not stop_loss_price:
-                                self.logger.warning(
-                                    "Mean reversion signal missing risk levels",
+                        if not entry_price or not take_profit_price or not stop_loss_price:
+                            self.logger.warning(
+                                "Mean reversion signal missing risk levels",
                                 scan_id=scan_id,
                                 symbol=symbol,
                                 has_entry=entry_price is not None,
