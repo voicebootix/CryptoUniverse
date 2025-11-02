@@ -2466,7 +2466,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                             ):
                                 risk_reward_ratio = round(potential_profit / risk_amount, 2)
 
-                            confidence_score = self._to_float(signal_block.get("confidence"))
+                            confidence_score = self._to_float(breakout_analysis.get("confidence") or risk_mgmt.get("confidence"))
                             if confidence_score is None:
                                 confidence_score = breakout_probability * 100.0
 
@@ -2506,7 +2506,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                 },
                                 discovered_at=self._current_timestamp(),
                             )
-                            all_opportunities.append(opportunity)
+                            opportunities.append(opportunity)
                         
         except Exception as e:
             self.logger.error("Spot breakout scan failed",
