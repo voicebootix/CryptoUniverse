@@ -283,15 +283,31 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             self._user_latest_scan_key[user_id] = cache_key
 
     async def _unregister_scan_lookup(self, scan_id: str) -> None:
+        """Unregister scan lookup only if cache entry has expired.
+        
+        We keep the scan_id ? cache_key mapping alive while the cached result
+        is still available, so follow-up polls using the scan_id can retrieve
+        the correct payload even after the scan task completes.
+        """
         async with self._scan_lookup_lock:
-            cache_key = self._scan_lookup.pop(scan_id, None)
+            cache_key = self._scan_lookup.get(scan_id)
             if not cache_key:
                 return
+            
+            # Check if cache entry still exists and hasn't expired
+            async with self._scan_cache_lock:
+                cached_result = self.opportunity_cache.get(cache_key)
+                if cached_result and cached_result.expires_at > time.monotonic():
+                    # Cache entry still valid - keep the mapping alive
+                    return
+            
+            # Cache entry expired or doesn't exist - safe to remove mapping
+            self._scan_lookup.pop(scan_id, None)
             user_id, *_ = cache_key.split(":", 1)
             latest_key = self._user_latest_scan_key.get(user_id)
-            if latest_key == cache_key and scan_id not in self._scan_lookup:
+            if latest_key == cache_key:
                 # Keep latest mapping so subsequent lookups fall back gracefully.
-                return
+                pass
 
     async def _resolve_scan_cache_key(
         self,

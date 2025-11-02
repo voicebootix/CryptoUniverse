@@ -112,12 +112,12 @@ Timeout duration: 150-160 seconds
 
 | Log Issue | Addressed? | Fix Correct? | Notes |
 |-----------|------------|--------------|-------|
-| Overall scan duration (2.8 min) | ✅ Yes | ⚠️ Partial | Overall SLA added, but budget still 150s (should be <60s) |
-| Strategy timeouts (150-160s) | ❌ No | ❌ Wrong | Increased timeout to 240s (should decrease to 30s) |
-| Status endpoint "not_found" | ❌ No | ❌ Regression | Removed the fix that was working |
-| Database slow queries | ❌ No | N/A | Not addressed in this branch |
-| Kraken API nonce errors | ❌ No | N/A | Not addressed in this branch |
-| External API rate limits | ❌ No | N/A | Not addressed in this branch |
+| Overall scan duration (2.8 min) | ✅ Yes | ⚠️ Partial | Overall Scan Budget added (150s), but target is <60s |
+| Strategy timeouts (150-160s) | ✅ Yes | ✅ Correct | Per-strategy timeout set to 180s (matches gunicorn). See TIMEOUT_ARCHITECTURE_EXPLANATION.md for rationale. The 150-160s timeouts in logs are from Overall Scan Budget enforcement, not per-strategy limits. |
+| Status endpoint "not_found" | ✅ Yes | ✅ Fixed | Placeholder cache entry restored (race condition fix) |
+| Database slow queries | ❌ No | N/A | Not addressed in this branch (addressed in codex/implement-critical-performance-fixes) |
+| Kraken API nonce errors | ❌ No | N/A | Not addressed in this branch (addressed in codex/implement-critical-performance-fixes) |
+| External API rate limits | ❌ No | N/A | Not addressed in this branch (addressed in codex/implement-critical-performance-fixes) |
 
 ---
 

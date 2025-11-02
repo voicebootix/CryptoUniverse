@@ -21,17 +21,17 @@ You're absolutely right! Let me explain the timeout hierarchy and why reducing s
 - **Behavior:** Task continues after HTTP response, but still bound by gunicorn timeout
 
 ### 3. **Overall Scan Budget** (150 seconds)
-- **What it is:** Total time allocated for the entire opportunity scan
+- **What it is:** Total time allocated for the entire opportunity scan (also referred to as "Overall SLA")
 - **Purpose:** Prevent scans from running too long
 - **Location:** `app/services/user_opportunity_discovery.py` line 133
 - **Current value:** `self._scan_response_budget = 150.0`
-- **Enforcement:** Overall SLA wrapper (lines 1232-1258)
+- **Enforcement:** Overall Scan Budget wrapper (lines 1232-1258)
 
-### 4. **Per-Strategy Timeout** (10-240 seconds)
+### 4. **Per-Strategy Timeout** (10-180 seconds)
 - **What it is:** Maximum time allowed for a single strategy to complete
 - **Purpose:** Prevent individual strategies from hanging indefinitely
-- **Location:** `app/services/user_opportunity_discovery.py` line 1143
-- **Current value:** `max(10.0, min(240.0, remaining_budget / batches))`
+- **Location:** `app/services/user_opportunity_discovery.py` line 1144
+- **Current value:** `max(10.0, min(180.0, remaining_budget / batches))`
 - **Enforcement:** `asyncio.wait_for()` around each strategy (line 1164)
 
 ---
@@ -53,17 +53,17 @@ You're absolutely right! Let me explain the timeout hierarchy and why reducing s
    - But if strategy takes >180s → **Gunicorn kills everything**
    - Result: **Better completion rate**, but still risk of gunicorn timeout
 
-3. **If per-strategy timeout = 240s (current branch):**
-   - Strategies can use up to 240s IF budget allows
-   - But overall budget (150s) will cancel before per-strategy timeout
-   - Result: **Flexibility**, but creates timeout conflict
+3. **If per-strategy timeout = 180s (current branch, matches gunicorn):**
+   - Strategies can use up to 180s IF budget allows
+   - But Overall Scan Budget (150s) will cancel before per-strategy timeout
+   - Result: **Proper alignment** with gunicorn timeout, budget enforces SLA
 
 ---
 
 ## The Real Issue from Logs
 
 ### What Logs Show:
-```
+```text
 ❌ STEP X: Strategy: AI Breakout Trading error_type=TimeoutError
 Timeout duration: 150-160 seconds
 ```
@@ -76,10 +76,10 @@ Timeout duration: 150-160 seconds
 
 ### What's Actually Happening:
 
-1. **Overall budget = 150s** (line 133)
-2. **Per-strategy timeout = 240s** (line 1143) - but this doesn't matter!
-3. **Overall SLA enforcement** (line 1237) cancels ALL strategies when budget expires
-4. **Result:** Strategies timeout at ~150s because overall budget expires, not per-strategy timeout
+1. **Overall Scan Budget = 150s** (line 133)
+2. **Per-strategy timeout = 180s** (line 1144) - but this doesn't matter when budget expires first!
+3. **Overall Scan Budget enforcement** (line 1237) cancels ALL strategies when budget expires
+4. **Result:** Strategies timeout at ~150s because the Overall Scan Budget expires, not because per-strategy timeout limits are reached
 
 ---
 
@@ -102,15 +102,15 @@ Timeout duration: 150-160 seconds
 
 ### The Correct Approach:
 
-**Per-strategy timeout should be HIGHER than overall budget** to allow:
+**Per-strategy timeout should be HIGHER than Overall Scan Budget** to allow:
 - Strategies to use full budget if needed
-- Overall SLA to control total scan time
+- Overall Scan Budget to control total scan time
 - Individual strategies won't timeout prematurely
 
 **Current branch gets this right:**
-- Per-strategy timeout: **240s max** (can use up to budget)
-- Overall budget: **150s** (hard limit)
-- **But:** There's a conflict - if overall budget expires, strategies are cancelled even if per-strategy timeout hasn't hit
+- Per-strategy timeout: **180s max** (matches gunicorn, can use up to budget)
+- Overall Scan Budget: **150s** (hard limit)
+- **Behavior:** If Overall Scan Budget expires, strategies are cancelled even if per-strategy timeout hasn't hit - this is correct!
 
 ---
 
@@ -138,7 +138,7 @@ total_time_ms=168280.2951335907  (≈ 2.8 minutes)
 
 ## What the Branch Fix Does (Correctly)
 
-### ✅ **Overall SLA Enforcement:**
+### ✅ **Overall Scan Budget Enforcement:**
 - Wraps entire strategy scan in `asyncio.wait_for()` with 150s budget
 - **Prevents scans from exceeding budget**
 - **This is correct!**
@@ -148,24 +148,25 @@ total_time_ms=168280.2951335907  (≈ 2.8 minutes)
 - **Prevents losing all work**
 - **This is correct!**
 
-### ✅ **Per-Strategy Timeout = 240s:**
+### ✅ **Per-Strategy Timeout = 180s:**
+- Matches gunicorn timeout (180s)
 - Allows strategies to use full budget if needed
 - **Prevents premature timeouts**
 - **This is correct!**
 
 ### ⚠️ **Potential Issue:**
-- Per-strategy timeout (240s) > Overall budget (150s)
-- **But this is OK** because overall SLA will cancel strategies before per-strategy timeout hits
+- Per-strategy timeout (180s) > Overall Scan Budget (150s)
+- **But this is OK** because Overall Scan Budget enforcement will cancel strategies before per-strategy timeout hits
 - The per-strategy timeout is just a safety net for runaway strategies
 
 ---
 
 ## Recommendation
 
-### ✅ **Keep Per-Strategy Timeout High (240s):**
-- Matches gunicorn timeout philosophy
+### ✅ **Keep Per-Strategy Timeout at 180s:**
+- Matches gunicorn timeout exactly (180s)
 - Prevents premature failures
-- Overall budget controls actual scan duration
+- Overall Scan Budget controls actual scan duration
 
 ### ✅ **Keep Overall Budget = 150s:**
 - Enforces SLA
@@ -191,8 +192,8 @@ Reducing per-strategy timeout would cause MORE problems:
 - Result: Higher failure rate, incomplete scans
 
 **The branch's approach is correct:**
-- High per-strategy timeout (240s) = safety net
-- Lower overall budget (150s) = SLA enforcement
-- Overall SLA cancels before per-strategy timeout = correct behavior
+- High per-strategy timeout (180s) = safety net
+- Lower Overall Scan Budget (150s) = budget enforcement
+- Overall Scan Budget cancels before per-strategy timeout = correct behavior
 
 **The real issue:** Strategies are too slow, not timeout too short. Focus on optimization, not timeout reduction.
