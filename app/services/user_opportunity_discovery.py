@@ -4745,12 +4745,16 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 if "chunk_size" in payload:
                     baseline_entry["chunk_size"] = payload.get("chunk_size")
                 if "priority" in payload:
-                    baseline_entry["priority"] = payload.get("priority")
+                    priority_value = payload.get("priority")
+                    if priority_value is not None:
+                        try:
+                            baseline_entry["priority"] = int(priority_value)
+                        except (TypeError, ValueError):
+                            pass
                 if "enabled" in payload:
                     enabled_value = payload.get("enabled")
-                    baseline_entry["enabled"] = (
-                        True if enabled_value is None else bool(enabled_value)
-                    )
+                    if enabled_value is not None:
+                        baseline_entry["enabled"] = bool(enabled_value)
 
                 combined[key] = baseline_entry
 
