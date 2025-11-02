@@ -28,6 +28,47 @@ from app.core.logging import LoggerMixin
 logger = structlog.get_logger(__name__)
 
 
+class KrakenNonceGenerator:
+    """Thread-safe Kraken nonce generator with Redis coordination."""
+
+    def __init__(self) -> None:
+        self._lock: Optional[asyncio.Lock] = None
+        self._local_counter: int = 0
+        self._last_redis_nonce: int = 0
+
+    async def get_nonce(self) -> int:
+        """Return a strictly increasing nonce for Kraken API calls."""
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+
+        async with self._lock:
+            try:
+                redis = await redis_manager.get_client()
+                if redis:
+                    nonce_value = await redis.incr("kraken_nonce")
+                    if nonce_value:
+                        self._last_redis_nonce = int(nonce_value)
+                        return self._last_redis_nonce
+            except Exception as redis_error:  # pragma: no cover - defensive logging
+                logger.warning(
+                    "Redis unavailable for Kraken nonce, using local counter",
+                    error=str(redis_error),
+                )
+
+            timestamp_ms = int(time.time() * 1000)
+            self._local_counter = (self._local_counter + 1) % 10000
+            fallback_nonce = timestamp_ms * 10000 + self._local_counter
+
+            if fallback_nonce <= self._last_redis_nonce:
+                fallback_nonce = self._last_redis_nonce + 1
+
+            self._last_redis_nonce = fallback_nonce
+            return fallback_nonce
+
+
+KRAKEN_NONCE_GENERATOR = KrakenNonceGenerator()
+
+
 class RealMarketDataService(LoggerMixin):
     """
     Enterprise-grade market data service with real exchange connectivity.
@@ -724,21 +765,9 @@ class RealMarketDataService(LoggerMixin):
             self.logger.debug(f"Failed to cache {key}: {str(e)}")
 
     async def _get_kraken_nonce(self) -> int:
-        """Generate a Kraken API nonce with Redis coordination and time-based fallback."""
+        """Generate a Kraken API nonce with Redis coordination."""
 
-        try:
-            redis = await redis_manager.get_client()
-            if redis:
-                nonce_value = await redis.incr("kraken_nonce")
-                if nonce_value:
-                    return int(nonce_value)
-        except Exception as redis_error:
-            self.logger.warning(
-                "Redis unavailable for Kraken nonce",
-                error=str(redis_error)
-            )
-
-        return int(time.time() * 1000)
+        return await KRAKEN_NONCE_GENERATOR.get_nonce()
 
     async def close(self):
         """Clean up exchange connections."""
