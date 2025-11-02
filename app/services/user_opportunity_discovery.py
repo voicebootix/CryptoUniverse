@@ -916,7 +916,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         This is the method that replaces the fake market_inefficiency_scanner.
         """
         
-        discovery_start_time = time.time()
+        discovery_start_time = time.monotonic()
         scan_id = existing_scan_id or f"user_discovery_{user_id}_{int(time.time())}"
         cache_key = cache_key or self._build_scan_cache_key(
             user_id,
@@ -1132,7 +1132,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 discovered_assets=discovered_assets,
                 strategy_recommendations=[],
                 metrics=metrics,
-                execution_time_ms=(time.time() - discovery_start_time) * 1000,
+                execution_time_ms=(time.monotonic() - discovery_start_time) * 1000,
                 partial=True,
                 strategies_completed=0,
                 total_strategies=total_strategies,
@@ -1162,7 +1162,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
                 async with strategy_semaphore:
                     # Start time and debug tracking inside semaphore to measure pure execution time (not queue wait)
-                    start_time = time.time()
+                    strategy_start_time = time.monotonic()
                     step_number = 100 + strategy_index  # 100-series reserved for per-strategy steps
                     await self._track_debug_step(
                         user_id, scan_id, step_number,
@@ -1170,20 +1170,23 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         "starting",
                         strategy_id=strategy_identifier,
                         strategy_index=strategy_index,
-                        started_at=datetime.fromtimestamp(start_time, tz=timezone.utc).isoformat()
+                        started_at=datetime.fromtimestamp(strategy_start_time, tz=timezone.utc).isoformat()
                     )
 
                     try:
-                        # Bound per-strategy runtime to avoid indefinite hangs
-                        result = await asyncio.wait_for(
-                            self._scan_strategy_opportunities(
-                                strategy_info, discovered_assets, user_profile, scan_id, portfolio_result
-                            ),
-                            timeout=per_strategy_timeout_s
+                        # Call _scan_strategy_opportunities directly - it handles its own timeout/partial-result logic
+                        result = await self._scan_strategy_opportunities(
+                            strategy_info,
+                            discovered_assets,
+                            user_profile,
+                            scan_id,
+                            portfolio_result,
+                            timeout_seconds=per_strategy_timeout_s,
+                            start_time=strategy_start_time,
                         )
                     except asyncio.CancelledError as e:
                         # Track strategy cancellation (parent task cancelled)
-                        execution_time = (time.time() - start_time) * 1000
+                        execution_time = (time.monotonic() - strategy_start_time) * 1000
                         await self._track_debug_step(
                             user_id, scan_id, step_number,
                             f"Strategy: {strategy_name}",
@@ -1198,7 +1201,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         raise
                     except Exception as e:
                         # Track strategy failure (timeout or other)
-                        execution_time = (time.time() - start_time) * 1000
+                        execution_time = (time.monotonic() - strategy_start_time) * 1000
                         error_type = type(e).__name__
                         is_timeout = isinstance(e, asyncio.TimeoutError)
 
@@ -1319,7 +1322,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     discovered_assets=discovered_assets,
                     strategy_recommendations=[],
                     metrics=metrics,
-                    execution_time_ms=(time.time() - discovery_start_time) * 1000,
+                    execution_time_ms=(time.monotonic() - discovery_start_time) * 1000,
                     partial=True,
                     strategies_completed=strategies_completed,
                     total_strategies=total_strategies,
@@ -1377,7 +1380,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             try:
                 await self._track_debug_step(user_id, scan_id, 8, "Assemble response", "starting")
 
-                execution_time = (time.time() - discovery_start_time) * 1000
+                execution_time = (time.monotonic() - discovery_start_time) * 1000
                 metrics['total_time'] = execution_time
                 metrics['total_opportunities'] = len(ranked_opportunities)
 
@@ -1645,10 +1648,41 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         discovered_assets: Dict[str, List[Any]],
         user_profile: UserOpportunityProfile,
         scan_id: str,
-        portfolio_result: Dict[str, Any]  # NEW PARAMETER - eliminates N+1 query
+        portfolio_result: Dict[str, Any],  # NEW PARAMETER - eliminates N+1 query
+        timeout_seconds: float = 30.0,
+        start_time: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Scan opportunities for a specific strategy."""
-        
+
+        if start_time is None:
+            start_time = time.time()
+
+        def _timeout_exceeded(threshold: float = 1.0) -> bool:
+            return (time.time() - start_time) >= (timeout_seconds * threshold)
+
+        def _timeout_response(reason: str) -> Dict[str, Any]:
+            elapsed = time.time() - start_time
+            self.logger.warning(
+                "Strategy approaching timeout, returning partial results",
+                scan_id=scan_id,
+                strategy=strategy_info.get("name", "Unknown"),
+                strategy_id=strategy_info.get("strategy_id", ""),
+                elapsed_seconds=elapsed,
+                timeout_seconds=timeout_seconds,
+                reason=reason,
+            )
+            return {
+                "strategy_id": strategy_info.get("strategy_id", ""),
+                "strategy_name": strategy_info.get("name", "Unknown"),
+                "opportunities": [],
+                "success": False,
+                "error": reason,
+                "partial": True,
+            }
+
+        if _timeout_exceeded(0.8):
+            return _timeout_response("timeout_pre_execution")
+
         strategy_id = strategy_info.get("strategy_id", "")
         strategy_name = strategy_info.get("name", "Unknown")
         
@@ -1687,6 +1721,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         # Find matching scanner
         strategy_func = None
         for candidate in strategy_func_candidates:
+            if _timeout_exceeded(0.85):
+                return _timeout_response("timeout_scanner_resolution")
             if candidate in self.strategy_scanners:
                 strategy_func = candidate
                 break
@@ -1709,6 +1745,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         strategy_id=strategy_id,
                         strategy_name=strategy_name,
                     )
+                    if _timeout_exceeded(0.9):
+                        return _timeout_response("timeout_before_community_scan")
                     community_opportunities = await self._scan_community_strategy_opportunities(
                         strategy_info,
                         discovered_assets,
@@ -1733,6 +1771,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             
             # Run the strategy-specific scanner with portfolio data
             scanner_method = self.strategy_scanners[strategy_func]
+            if _timeout_exceeded(0.95):
+                return _timeout_response("timeout_before_execution")
             opportunities = await scanner_method(
                 discovered_assets, user_profile, scan_id, portfolio_result
             )

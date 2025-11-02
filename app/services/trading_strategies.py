@@ -2024,7 +2024,7 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
                 "summary": (
                     "Daily double-digit moves are common. Position sizing, stop-losses and disciplined risk budgets are critical safeguards."
                 ),
-                "actionable_tip": "Stress test positions assuming 30–80% annualised volatility and plan for gap risk.",
+                "actionable_tip": "Stress test positions assuming 30?80% annualised volatility and plan for gap risk.",
             },
             {
                 "topic": "Stablecoins vs. alt-coins",
@@ -2388,14 +2388,52 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
         risk_mode: str = "balanced",
         exchange: str = "binance",
         user_id: Optional[str] = None,
-        simulation_mode: bool = True
+        simulation_mode: bool = True,
+        timeout_seconds: Optional[float] = None,
+        start_time: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Main strategy execution router - handles all 25+ functions."""
 
-        start_time = time.time()
-        self.logger.info("Executing strategy", function=function, strategy_type=strategy_type, symbol=symbol)
+        # Use monotonic time for timeout calculations to avoid issues with system clock changes
+        # If start_time is provided, ensure it's already a monotonic timestamp
+        execution_start_time = start_time if start_time is not None else time.monotonic()
+        effective_timeout = timeout_seconds or 30.0
+
+        self.logger.info(
+            "Executing strategy",
+            function=function,
+            strategy_type=strategy_type,
+            symbol=symbol,
+            timeout_seconds=effective_timeout,
+        )
+
+        def _abort_if_timeout(reason: str, threshold: float = 0.9) -> Optional[Dict[str, Any]]:
+            elapsed = time.monotonic() - execution_start_time
+            if elapsed >= effective_timeout * threshold:
+                self.logger.warning(
+                    "Strategy execution approaching timeout",
+                    function=function,
+                    reason=reason,
+                    elapsed_seconds=elapsed,
+                    timeout_seconds=effective_timeout,
+                )
+                return {
+                    "success": False,
+                    "error": "timeout_approaching",
+                    "partial": True,
+                    "reason": reason,
+                    "elapsed_seconds": elapsed,
+                }
+            return None
 
         parameter_dict = dict(parameters or {})
+
+        async def _await_with_guard(awaitable, reason: str, threshold: float = 0.95):
+            timeout_payload = _abort_if_timeout(reason, threshold)
+            if timeout_payload:
+                return timeout_payload, True
+            result = await awaitable
+            return result, False
         symbol_override = parameter_dict.get("symbol")
         if symbol_override:
             symbol = str(symbol_override)
@@ -2421,14 +2459,24 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
 
         try:
             if function in ["futures_trade", "options_trade", "perpetual_trade", "complex_strategy"]:
-                strategy_result = await self._execute_derivatives_strategy(
-                    function, strategy_type, symbol, strategy_params, exchange, user_id
+                strategy_result, aborted = await _await_with_guard(
+                    self._execute_derivatives_strategy(
+                        function, strategy_type, symbol, strategy_params, exchange, user_id
+                    ),
+                    "derivatives_dispatch",
                 )
+                if aborted:
+                    return strategy_result
 
             elif function in ["spot_momentum_strategy", "spot_mean_reversion", "spot_breakout_strategy"]:
-                strategy_result = await self._execute_spot_strategy(
-                    function, symbol, strategy_params, user_id
+                strategy_result, aborted = await _await_with_guard(
+                    self._execute_spot_strategy(
+                        function, symbol, strategy_params, user_id
+                    ),
+                    "spot_dispatch",
                 )
+                if aborted:
+                    return strategy_result
 
             elif function in ["algorithmic_trading", "pairs_trading", "statistical_arbitrage", "market_making", "scalping_strategy"]:
                 strategy_symbol = symbol
@@ -2441,93 +2489,148 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
 
                 strategy_params.symbol = strategy_symbol
 
-                strategy_result = await self._execute_algorithmic_strategy(
-                    function, strategy_type, strategy_symbol, strategy_params, user_id, parameter_dict
+                strategy_result, aborted = await _await_with_guard(
+                    self._execute_algorithmic_strategy(
+                        function, strategy_type, strategy_symbol, strategy_params, user_id, parameter_dict
+                    ),
+                    "algorithmic_dispatch",
                 )
+                if aborted:
+                    return strategy_result
 
             elif function == "risk_management":
-                strategy_result = await self.risk_management(
-                    analysis_type=analysis_type_param or "comprehensive",
-                    symbols=symbols_param or symbol,
-                    parameters=parameter_dict,
-                    user_id=user_id
+                strategy_result, aborted = await _await_with_guard(
+                    self.risk_management(
+                        analysis_type=analysis_type_param or "comprehensive",
+                        symbols=symbols_param or symbol,
+                        parameters=parameter_dict,
+                        user_id=user_id
+                    ),
+                    "risk_management",
                 )
+                if aborted:
+                    return strategy_result
 
             elif function in ["position_management", "portfolio_optimization"]:
-                strategy_result = await self._execute_management_function(
-                    function, symbol, strategy_params, user_id, parameter_dict
+                strategy_result, aborted = await _await_with_guard(
+                    self._execute_management_function(
+                        function, symbol, strategy_params, user_id, parameter_dict
+                    ),
+                    "management_dispatch",
                 )
+                if aborted:
+                    return strategy_result
 
             elif function == "funding_arbitrage":
-                strategy_result = await self.funding_arbitrage(
-                    symbols=symbols_param or symbol,
-                    exchanges=exchanges_param or "all",
-                    min_funding_rate=parameter_dict.get("min_funding_rate", 0.005),
-                    user_id=user_id
+                strategy_result, aborted = await _await_with_guard(
+                    self.funding_arbitrage(
+                        symbols=symbols_param or symbol,
+                        exchanges=exchanges_param or "all",
+                        min_funding_rate=parameter_dict.get("min_funding_rate", 0.005),
+                        user_id=user_id
+                    ),
+                    "funding_arbitrage",
                 )
+                if aborted:
+                    return strategy_result
 
             elif function == "calculate_greeks":
                 strike_price = parameter_dict.get("strike_price")
                 if strike_price is None and strategy_params.price:
                     strike_price = strategy_params.price * 1.1
-                strategy_result = await self.calculate_greeks(
-                    option_symbol=symbol,
-                    underlying_price=strategy_params.price or 0,
-                    strike_price=strike_price,
-                    time_to_expiry=parameter_dict.get("time_to_expiry", 30 / 365),
-                    volatility=parameter_dict.get("volatility", 0),
-                    user_id=user_id
+                strategy_result, aborted = await _await_with_guard(
+                    self.calculate_greeks(
+                        option_symbol=symbol,
+                        underlying_price=strategy_params.price or 0,
+                        strike_price=strike_price,
+                        time_to_expiry=parameter_dict.get("time_to_expiry", 30 / 365),
+                        volatility=parameter_dict.get("volatility", 0),
+                        user_id=user_id
+                    ),
+                    "calculate_greeks",
                 )
+                if aborted:
+                    return strategy_result
 
             elif function == "swing_trading":
-                strategy_result = await self.swing_trading(
-                    symbol=symbol,
-                    timeframe=strategy_params.timeframe,
-                    holding_period=parameter_dict.get("holding_period", 7),
-                    user_id=user_id
+                strategy_result, aborted = await _await_with_guard(
+                    self.swing_trading(
+                        symbol=symbol,
+                        timeframe=strategy_params.timeframe,
+                        holding_period=parameter_dict.get("holding_period", 7),
+                        user_id=user_id
+                    ),
+                    "swing_trading",
                 )
+                if aborted:
+                    return strategy_result
 
             elif function == "leverage_position":
                 leverage_params = dict(parameter_dict)
                 leverage_params.setdefault("position_size", strategy_params.quantity)
                 action = leverage_params.pop("action", "increase_leverage")
-                strategy_result = await self.leverage_position(
-                    symbol=symbol,
-                    action=action,
-                    target_leverage=strategy_params.leverage,
-                    parameters=leverage_params,
-                    user_id=user_id
+                strategy_result, aborted = await _await_with_guard(
+                    self.leverage_position(
+                        symbol=symbol,
+                        action=action,
+                        target_leverage=strategy_params.leverage,
+                        parameters=leverage_params,
+                        user_id=user_id
+                    ),
+                    "leverage_position",
                 )
+                if aborted:
+                    return strategy_result
 
             elif function == "margin_status":
-                strategy_result = await self.margin_status(
-                    user_id=user_id,
-                    exchange=exchange
+                strategy_result, aborted = await _await_with_guard(
+                    self.margin_status(
+                        user_id=user_id,
+                        exchange=exchange
+                    ),
+                    "margin_status",
                 )
+                if aborted:
+                    return strategy_result
 
             elif function == "options_chain":
-                strategy_result = await self.options_chain(
-                    underlying_symbol=symbol,
-                    expiry_date=parameter_dict.get("expiry_date"),
-                    user_id=user_id
+                strategy_result, aborted = await _await_with_guard(
+                    self.options_chain(
+                        underlying_symbol=symbol,
+                        expiry_date=parameter_dict.get("expiry_date"),
+                        user_id=user_id
+                    ),
+                    "options_chain",
                 )
+                if aborted:
+                    return strategy_result
 
             elif function == "basis_trade":
-                strategy_result = await self.basis_trade(
-                    symbol=symbol,
-                    user_id=user_id
+                strategy_result, aborted = await _await_with_guard(
+                    self.basis_trade(
+                        symbol=symbol,
+                        user_id=user_id
+                    ),
+                    "basis_trade",
                 )
+                if aborted:
+                    return strategy_result
 
             elif function == "liquidation_price":
-                strategy_result = await self.liquidation_price(
-                    symbol=symbol,
-                    entry_price=strategy_params.price or 0,
-                    leverage=strategy_params.leverage,
-                    position_side=parameter_dict.get("position_side")
-                    or parameter_dict.get("position_type", "long"),
-                    position_size=parameter_dict.get("position_size", strategy_params.quantity),
-                    user_id=user_id
+                strategy_result, aborted = await _await_with_guard(
+                    self.liquidation_price(
+                        symbol=symbol,
+                        entry_price=strategy_params.price or 0,
+                        leverage=strategy_params.leverage,
+                        position_side=parameter_dict.get("position_side")
+                        or parameter_dict.get("position_type", "long"),
+                        position_size=parameter_dict.get("position_size", strategy_params.quantity),
+                        user_id=user_id
+                    ),
+                    "liquidation_price",
                 )
+                if aborted:
+                    return strategy_result
 
             elif function == "hedge_position":
                 hedge_params = dict(parameter_dict)
@@ -2535,21 +2638,31 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
                 primary_position_size = hedge_params.get("primary_position_size", strategy_params.quantity)
                 primary_side = hedge_params.get("primary_side", "long")
                 hedge_type = hedge_params.get("hedge_type", "direct_hedge")
-                strategy_result = await self.hedge_position(
-                    symbol,
-                    primary_position_size,
-                    primary_side=primary_side,
-                    hedge_type=hedge_type,
-                    parameters=hedge_params,
-                    user_id=user_id
+                strategy_result, aborted = await _await_with_guard(
+                    self.hedge_position(
+                        symbol,
+                        primary_position_size,
+                        primary_side=primary_side,
+                        hedge_type=hedge_type,
+                        parameters=hedge_params,
+                        user_id=user_id
+                    ),
+                    "hedge_position",
                 )
+                if aborted:
+                    return strategy_result
 
             elif function == "strategy_performance":
-                strategy_result = await self.strategy_performance(
-                    strategy_name=parameter_dict.get("strategy_name"),
-                    analysis_period=parameter_dict.get("analysis_period", "30d"),
-                    user_id=user_id
+                strategy_result, aborted = await _await_with_guard(
+                    self.strategy_performance(
+                        strategy_name=parameter_dict.get("strategy_name"),
+                        analysis_period=parameter_dict.get("analysis_period", "30d"),
+                        user_id=user_id
+                    ),
+                    "strategy_performance",
                 )
+                if aborted:
+                    return strategy_result
 
             else:
                 strategy_result = {
@@ -2590,7 +2703,7 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
                 "timestamp": datetime.utcnow().isoformat()
             }
 
-        execution_latency = round(time.time() - start_time, 4)
+        execution_latency = round(time.monotonic() - execution_start_time, 4)
         if isinstance(strategy_result, dict):
             strategy_result.setdefault("execution_time_seconds", execution_latency)
 
@@ -7958,7 +8071,7 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
         """
         try:
             self.logger.info(
-                f"🎯 Generating trading signal",
+                f"?? Generating trading signal",
                 strategy=strategy_type,
                 risk_mode=risk_mode,
                 user_id=user_id
@@ -8192,7 +8305,7 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
             volatility_adjustment = (volatility - 0.03) * 0.002  # Higher vol = higher funding
             
             funding_rate = base_rate + volatility_adjustment
-            funding_rate = max(-0.005, min(funding_rate, 0.005))  # Cap at ±0.5%
+            funding_rate = max(-0.005, min(funding_rate, 0.005))  # Cap at ?0.5%
 
             # Calculate next funding time as proper ISO timestamp
             now = datetime.utcnow()
@@ -8577,7 +8690,7 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
             position_value = position.get('position_size', 0) * position.get('entry_price', 1)
             trading_cost = position_value * 0.001  # 0.1% fee
             # Funding is applied to notional value only, not multiplied by leverage
-            daily_funding = position_value * 0.0001 * 3  # Daily funding rate × notional × 3 periods
+            daily_funding = position_value * 0.0001 * 3  # Daily funding rate ? notional ? 3 periods
             return {"total_immediate_cost": trading_cost, "estimated_daily_cost": daily_funding}
         except Exception:
             return {"total_immediate_cost": 0, "estimated_daily_cost": 0}
