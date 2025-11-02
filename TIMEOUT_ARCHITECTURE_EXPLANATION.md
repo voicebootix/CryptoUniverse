@@ -97,7 +97,7 @@ Timeout duration: 150-160 seconds
 - Strategy 1: Needs 120s → Timeout at 30s ❌
 - Strategy 2: Needs 45s → Completes ✅
 - Strategy 3: Needs 200s → Timeout at 30s ❌
-- Overall budget (150s) → Not reached
+- Overall Scan Budget (150s) → Not reached
 - **Result:** Many strategies fail prematurely
 
 ### The Correct Approach:
@@ -168,7 +168,7 @@ total_time_ms=168280.2951335907  (≈ 2.8 minutes)
 - Prevents premature failures
 - Overall Scan Budget controls actual scan duration
 
-### ✅ **Keep Overall Budget = 150s:**
+### ✅ **Keep Overall Scan Budget = 150s:**
 - Enforces SLA
 - Prevents long-running scans
 - Works with partial result preservation
@@ -188,7 +188,7 @@ total_time_ms=168280.2951335907  (≈ 2.8 minutes)
 Reducing per-strategy timeout would cause MORE problems:
 - Strategies would timeout prematurely
 - Even though gunicorn allows 180s
-- Even though overall budget allows 150s
+- Even though Overall Scan Budget allows 150s
 - Result: Higher failure rate, incomplete scans
 
 **The branch's approach is correct:**
