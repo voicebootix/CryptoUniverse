@@ -211,6 +211,7 @@ class StrategyScanningPolicyService(LoggerMixin):
                 policy.enabled = enabled_value
             else:
                 enabled_value = True if enabled is None else bool(enabled)
+<<<<<<< HEAD
                 max_symbols_seed = (
                     max_symbols_value if max_symbols_provided else baseline_max_symbols
                 )

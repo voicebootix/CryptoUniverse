@@ -1391,11 +1391,15 @@ const ManualTradingPage: React.FC = () => {
     const normalized = normalizeFiltersForSubmission(scanFilters);
     setScanDialogOpen(false);
     void handleConsensusAction('opportunity', { filters: normalized });
+<<<<<<< HEAD
   }, [
     handleConsensusAction,
     normalizeFiltersForSubmission,
     scanFilters,
   ]);
+=======
+  }, [handleConsensusAction, normalizeFiltersForSubmission, scanFilters]);
+>>>>>>> origin/main
 
   const applyAiRecommendationToTrade = useCallback(() => {
     if (!aiSummary?.actionData) {
