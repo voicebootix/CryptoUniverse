@@ -2371,119 +2371,119 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     )
 
                     if breakout_probability > 0.5 and breakout_analysis.get("breakout_detected"):
-                            quality_tier = (
-                                "high"
-                                if breakout_probability > 0.75
-                                else "medium"
-                                if breakout_probability > 0.65
-                                else "low"
+                        quality_tier = (
+                            "high"
+                            if breakout_probability > 0.75
+                            else "medium"
+                            if breakout_probability > 0.65
+                            else "low"
+                        )
+                        signal_strength = breakout_probability * 10.0
+
+                        entry_price = self._to_float(
+                            risk_mgmt.get("entry_price")
+                            or breakout_result.get("current_price")
+                        )
+                        take_profit_price = self._to_float(
+                            risk_mgmt.get("take_profit_price")
+                            or breakout_analysis.get("take_profit")
+                        )
+                        stop_loss_price = self._to_float(
+                            risk_mgmt.get("stop_loss_price")
+                            or breakout_analysis.get("stop_loss")
+                        )
+
+                        position_size_units = self._to_float(risk_mgmt.get("position_size"))
+                        position_notional = self._to_float(risk_mgmt.get("position_notional"))
+
+                        if (
+                            entry_price
+                            and (position_size_units is None or position_size_units <= 0)
+                        ):
+                            position_size_units = round(1000.0 / entry_price, 6)
+
+                        if (
+                            entry_price
+                            and position_size_units
+                            and (position_notional is None or position_notional <= 0)
+                        ):
+                            position_notional = round(position_size_units * entry_price, 2)
+
+                        risk_amount = self._to_float(risk_mgmt.get("risk_amount"))
+                        potential_profit = self._to_float(risk_mgmt.get("potential_profit"))
+                        risk_reward_ratio = self._to_float(risk_mgmt.get("risk_reward_ratio"))
+
+                        if (
+                            entry_price
+                            and stop_loss_price
+                            and (risk_amount is None or risk_amount <= 0)
+                            and position_size_units
+                        ):
+                            risk_amount = round(
+                                abs(entry_price - stop_loss_price) * position_size_units,
+                                2,
                             )
-                            signal_strength = breakout_probability * 10.0
 
-                            entry_price = self._to_float(
-                                risk_mgmt.get("entry_price")
-                                or breakout_result.get("current_price")
-                            )
-                            take_profit_price = self._to_float(
-                                risk_mgmt.get("take_profit_price")
-                                or breakout_analysis.get("take_profit")
-                            )
-                            stop_loss_price = self._to_float(
-                                risk_mgmt.get("stop_loss_price")
-                                or breakout_analysis.get("stop_loss")
+                        if (
+                            entry_price
+                            and take_profit_price
+                            and (potential_profit is None or potential_profit <= 0)
+                            and position_size_units
+                        ):
+                            potential_profit = round(
+                                abs(take_profit_price - entry_price) * position_size_units,
+                                2,
                             )
 
-                            position_size_units = self._to_float(risk_mgmt.get("position_size"))
-                            position_notional = self._to_float(risk_mgmt.get("position_notional"))
+                        if (
+                            risk_amount
+                            and risk_amount > 0
+                            and potential_profit is not None
+                            and (risk_reward_ratio is None or risk_reward_ratio <= 0)
+                        ):
+                            risk_reward_ratio = round(potential_profit / risk_amount, 2)
 
-                            if (
-                                entry_price
-                                and (position_size_units is None or position_size_units <= 0)
-                            ):
-                                position_size_units = round(1000.0 / entry_price, 6)
+                        confidence_score = self._to_float(breakout_analysis.get("confidence") or risk_mgmt.get("confidence"))
+                        if confidence_score is None:
+                            confidence_score = breakout_probability * 100.0
 
-                            if (
-                                entry_price
-                                and position_size_units
-                                and (position_notional is None or position_notional <= 0)
-                            ):
-                                position_notional = round(position_size_units * entry_price, 2)
+                        indicators = breakout_result.get("indicators") or {}
+                        price_snapshot = indicators.get("price_snapshot") if isinstance(indicators, dict) else {}
+                        if not isinstance(price_snapshot, dict):
+                            price_snapshot = {}
 
-                            risk_amount = self._to_float(risk_mgmt.get("risk_amount"))
-                            potential_profit = self._to_float(risk_mgmt.get("potential_profit"))
-                            risk_reward_ratio = self._to_float(risk_mgmt.get("risk_reward_ratio"))
-
-                            if (
-                                entry_price
-                                and stop_loss_price
-                                and (risk_amount is None or risk_amount <= 0)
-                                and position_size_units
-                            ):
-                                risk_amount = round(
-                                    abs(entry_price - stop_loss_price) * position_size_units,
-                                    2,
-                                )
-
-                            if (
-                                entry_price
-                                and take_profit_price
-                                and (potential_profit is None or potential_profit <= 0)
-                                and position_size_units
-                            ):
-                                potential_profit = round(
-                                    abs(take_profit_price - entry_price) * position_size_units,
-                                    2,
-                                )
-
-                            if (
-                                risk_amount
-                                and risk_amount > 0
-                                and potential_profit is not None
-                                and (risk_reward_ratio is None or risk_reward_ratio <= 0)
-                            ):
-                                risk_reward_ratio = round(potential_profit / risk_amount, 2)
-
-                            confidence_score = self._to_float(breakout_analysis.get("confidence") or risk_mgmt.get("confidence"))
-                            if confidence_score is None:
-                                confidence_score = breakout_probability * 100.0
-
-                            indicators = breakout_result.get("indicators") or {}
-                            price_snapshot = indicators.get("price_snapshot") if isinstance(indicators, dict) else {}
-                            if not isinstance(price_snapshot, dict):
-                                price_snapshot = {}
-
-                            opportunity = OpportunityResult(
-                                strategy_id="ai_spot_breakout_strategy",
-                                strategy_name=f"AI Breakout Trading ({quality_tier.upper()} confidence)",
-                                opportunity_type="breakout",
-                                symbol=symbol,
-                                exchange="binance",
-                                profit_potential_usd=float(potential_profit or 0.0),
-                                confidence_score=float(confidence_score),
-                                risk_level=self._signal_to_risk_level(signal_strength),
-                                required_capital_usd=float(position_notional) if position_notional else float(required_capital_usd),
-                                estimated_timeframe="2-8h",
-                                entry_price=float(entry_price) if entry_price else None,
-                                exit_price=float(take_profit_price) if take_profit_price else None,
-                                metadata={
-                                    "signal_strength": signal_strength,
-                                    "breakout_probability": breakout_probability,
-                                    "quality_tier": quality_tier,
-                                    "meets_original_threshold": breakout_probability > 0.75,
-                                    "recommendation": "STRONG BUY" if breakout_probability > 0.75 else "CONSIDER" if breakout_probability > 0.65 else "MONITOR",
-                                    "support_level": breakout_analysis.get("support_levels"),
-                                    "resistance_level": breakout_analysis.get("resistance_levels"),
-                                    "volume_surge": breakout_analysis.get("volume_surge"),
-                                    "breakout_direction": breakout_analysis.get("direction"),
-                                    "price_snapshot": breakout_analysis.get("price_snapshot") or risk_mgmt.get("price_snapshot"),
-                                    "stop_loss_price": stop_loss_price,
-                                    "take_profit_price": take_profit_price,
-                                    "risk_amount": risk_amount,
-                                    "risk_reward_ratio": risk_reward_ratio,
-                                },
-                                discovered_at=self._current_timestamp(),
-                            )
-                            opportunities.append(opportunity)
+                        opportunity = OpportunityResult(
+                            strategy_id="ai_spot_breakout_strategy",
+                            strategy_name=f"AI Breakout Trading ({quality_tier.upper()} confidence)",
+                            opportunity_type="breakout",
+                            symbol=symbol,
+                            exchange="binance",
+                            profit_potential_usd=float(potential_profit or 0.0),
+                            confidence_score=float(confidence_score),
+                            risk_level=self._signal_to_risk_level(signal_strength),
+                            required_capital_usd=float(position_notional) if position_notional else float(required_capital_usd),
+                            estimated_timeframe="2-8h",
+                            entry_price=float(entry_price) if entry_price else None,
+                            exit_price=float(take_profit_price) if take_profit_price else None,
+                            metadata={
+                                "signal_strength": signal_strength,
+                                "breakout_probability": breakout_probability,
+                                "quality_tier": quality_tier,
+                                "meets_original_threshold": breakout_probability > 0.75,
+                                "recommendation": "STRONG BUY" if breakout_probability > 0.75 else "CONSIDER" if breakout_probability > 0.65 else "MONITOR",
+                                "support_level": breakout_analysis.get("support_levels"),
+                                "resistance_level": breakout_analysis.get("resistance_levels"),
+                                "volume_surge": breakout_analysis.get("volume_surge"),
+                                "breakout_direction": breakout_analysis.get("direction"),
+                                "price_snapshot": breakout_analysis.get("price_snapshot") or risk_mgmt.get("price_snapshot"),
+                                "stop_loss_price": stop_loss_price,
+                                "take_profit_price": take_profit_price,
+                                "risk_amount": risk_amount,
+                                "risk_reward_ratio": risk_reward_ratio,
+                            },
+                            discovered_at=self._current_timestamp(),
+                        )
+                        opportunities.append(opportunity)
                         
         except Exception as e:
             self.logger.error("Spot breakout scan failed",
