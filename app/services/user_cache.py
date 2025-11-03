@@ -144,7 +144,15 @@ async def _hydrate_user_from_cache(raw: str) -> Optional[User]:
 
 
 async def get_cached_user(user_id: str, db: AsyncSession) -> Optional[User]:
-    """Fetch a user with Redis caching to reduce database load."""
+    """Fetch a user with Redis caching to reduce database load.
+
+    NOTE: Cached users are returned as detached (read-only) instances to prevent
+    stale cached data from overwriting fresh database values. If you need to mutate
+    the user, fetch the authoritative row from the database first:
+        fresh_user = await db.get(User, user_id)
+        fresh_user.some_field = new_value
+        await db.commit()
+    """
     redis = await get_redis_client()
     cache_key = f"user:{user_id}"
 
@@ -154,8 +162,10 @@ async def get_cached_user(user_id: str, db: AsyncSession) -> Optional[User]:
             user = await _hydrate_user_from_cache(cached)
             if user:
                 logger.debug("User cache hit", user_id=user_id)
-                # Merge cached user into session to make it persistent and allow mutations
-                user = await db.merge(user)
+                # NOTE: Cached user is returned as detached (read-only) to avoid overwriting
+                # fresh DB values with stale cached data. If mutations are needed, callers
+                # should fetch the authoritative row from the database (e.g., await db.get(User, user.id))
+                # before making changes and committing.
                 return user
             await redis.delete(cache_key)
 
