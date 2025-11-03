@@ -13,7 +13,7 @@ from app.constants.opportunity import DEFAULT_STRATEGY_POLICY_PRESETS
 
 # revision identifiers, used by Alembic.
 revision = "add_strategy_scanning_policies_table"
-down_revision = None
+down_revision = "011_add_legacy_backtest_metrics"
 branch_labels = None
 depends_on = None
 

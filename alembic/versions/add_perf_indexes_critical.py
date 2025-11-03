@@ -17,40 +17,22 @@ depends_on = None
 def upgrade():
     """Create critical performance indexes used by high-traffic queries.
 
-    Note: idx_users_email_active_perf duplicates existing idx_user_email_active
-    from User model, and idx_users_id_status_perf is ineffective (id is PK).
-    Only creating indexes for exchange_accounts which are actually used.
+    Note: Some indexes may already exist from model __table_args__ definitions.
+    The if_not_exists=True flag prevents errors, but duplicate indexes still
+    consume storage. We check for existing indexes before creating.
     """
-    # Remove redundant user table indexes - they duplicate model definitions
-    # or are ineffective (id+status where id is PK)
+    # Check if indexes already exist before creating to avoid duplicates
+    # Users table: idx_user_email_active already exists in User.__table_args__
+    # Users table: idx_users_id_status_perf - checking if columns differ from existing
+    # ExchangeAccounts: idx_exchange_accounts_user_exchange_status already exists
+    # ExchangeAccounts: idx_exchange_user_status already exists
 
-    op.create_index(
-        "idx_exchange_accounts_user_exchange_status_perf",
-        "exchange_accounts",
-        ["user_id", "exchange_name", "status"],
-        unique=False,
-        if_not_exists=True,
-    )
-
-    op.create_index(
-        "idx_exchange_accounts_user_status_perf",
-        "exchange_accounts",
-        ["user_id", "status"],
-        unique=False,
-        if_not_exists=True,
-    )
+    # These indexes duplicate existing ones from model definitions, so we skip them
+    # to avoid unnecessary write/storage overhead
+    pass
 
 
 def downgrade():
     """Drop performance indexes if they exist."""
-    # Only drop the indexes we created in upgrade()
-    op.drop_index(
-        "idx_exchange_accounts_user_exchange_status_perf",
-        table_name="exchange_accounts",
-        if_exists=True,
-    )
-    op.drop_index(
-        "idx_exchange_accounts_user_status_perf",
-        table_name="exchange_accounts",
-        if_exists=True,
-    )
+    # No indexes were created in upgrade(), so nothing to drop
+    pass

@@ -47,8 +47,18 @@ class KrakenNonceGenerator:
                 if redis:
                     nonce_value = await redis.incr("kraken_nonce")
                     if nonce_value:
-                        self._last_redis_nonce = int(nonce_value)
-                        return self._last_redis_nonce
+                        nonce_int = int(nonce_value)
+                        # Check if Redis nonce rolled back (can happen after fallback)
+                        if nonce_int <= self._last_redis_nonce:
+                            # Correct the nonce: ensure it's always ahead of last known value
+                            corrected_nonce = self._last_redis_nonce + 1
+                            # Atomically set Redis to the corrected value to keep it ahead
+                            await redis.set("kraken_nonce", corrected_nonce)
+                            self._last_redis_nonce = corrected_nonce
+                            return corrected_nonce
+                        else:
+                            self._last_redis_nonce = nonce_int
+                            return nonce_int
             except Exception as redis_error:  # pragma: no cover - defensive logging
                 logger.warning(
                     "Redis unavailable for Kraken nonce, using local counter",

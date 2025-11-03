@@ -188,6 +188,10 @@ class StrategyScanningPolicyService(LoggerMixin):
                     )
 
         await self._load_policies()
+        baseline = self._baseline()
+        baseline_entry = baseline.get(key, {})
+        baseline_max_symbols = baseline_entry.get("max_symbols")
+        baseline_chunk_size = baseline_entry.get("chunk_size")
         async with get_database_session() as session:
             result = await session.execute(
                 select(StrategyScanningPolicy).where(
@@ -207,10 +211,16 @@ class StrategyScanningPolicyService(LoggerMixin):
                 policy.enabled = enabled_value
             else:
                 enabled_value = True if enabled is None else bool(enabled)
+                max_symbols_seed = (
+                    max_symbols_value if max_symbols_provided else baseline_max_symbols
+                )
+                chunk_size_seed = (
+                    chunk_size_value if chunk_size_provided else baseline_chunk_size
+                )
                 policy = StrategyScanningPolicy(
                     strategy_key=key,
-                    max_symbols=max_symbols_value if max_symbols_provided else None,
-                    chunk_size=chunk_size_value if chunk_size_provided else None,
+                    max_symbols=max_symbols_seed,
+                    chunk_size=chunk_size_seed,
                     priority=(priority_value if priority_provided else 100),
                     enabled=enabled_value,
                 )

@@ -246,6 +246,12 @@ async def get_current_user(
             detail="User not found"
         )
     
+    # If user came from cache, merge it into the session so it can be mutated/refreshed
+    # This is necessary because cached users are transient instances not bound to the session
+    if user not in db and hasattr(user, 'id'):
+        # User is detached (from cache) - merge into session
+        user = await db.merge(user)
+    
     if user.get_status_safe() != UserStatus.ACTIVE:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -535,7 +541,7 @@ async def register(
     
     logger.info("User registered", user_id=str(user.id), email=user.email)
     
-    # 🚀 ENTERPRISE USER ONBOARDING: FREE STRATEGIES + CREDITS + PORTFOLIO SETUP
+    # ?? ENTERPRISE USER ONBOARDING: FREE STRATEGIES + CREDITS + PORTFOLIO SETUP
     try:
         from app.services.user_onboarding_service import user_onboarding_service
         
@@ -548,7 +554,7 @@ async def register(
         
         if onboarding_result.get("success"):
             logger.info(
-                "🎯 ENTERPRISE User Onboarding completed for new registration",
+                "?? ENTERPRISE User Onboarding completed for new registration",
                 user_id=str(user.id),
                 onboarding_id=onboarding_result.get("onboarding_id"),
                 free_strategies=len(onboarding_result.get("results", {}).get("free_strategies", {}).get("provisioned_strategies", [])),
