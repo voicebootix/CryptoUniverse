@@ -180,10 +180,6 @@ class MarketDataFeeds:
             }
         }
 
-    async def _process_queue_after_delay(self, api_name: str, delay_seconds: int) -> None:
-        await asyncio.sleep(max(delay_seconds, 1))
-        await _rate_limit_queue.process_queue(api_name)
-        
         # Rate limiting tracking
         self.rate_limiters = {}
         for api_name, config in self.apis.items():
@@ -192,7 +188,7 @@ class MarketDataFeeds:
                 "window_start": time.time(),
                 "max_requests": config["rate_limit"]
             }
-        
+
         # ENTERPRISE CACHING AND FALLBACK CONFIGURATION
         # Redis retains entries long enough for degraded-mode operation while
         # the "freshness" window keeps live responses tight for end users.
@@ -321,6 +317,11 @@ class MarketDataFeeds:
         except Exception as e:
             logger.warning("Redis not available for MarketDataFeeds", error=str(e))
             self.redis = None
+
+    async def _process_queue_after_delay(self, api_name: str, delay_seconds: int) -> None:
+        """Process queued rate-limited requests after a delay."""
+        await asyncio.sleep(max(delay_seconds, 1))
+        await _rate_limit_queue.process_queue(api_name)
 
     def _monotonic(self) -> float:
         return time.monotonic()
