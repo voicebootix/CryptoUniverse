@@ -8,9 +8,10 @@ with native Python implementation and enterprise-grade features.
 
 import asyncio
 import json
+import os
 import time
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional, Tuple
 
 import structlog
 import uvicorn
@@ -53,6 +54,100 @@ logger = structlog.get_logger()
 background_manager = BackgroundServiceManager()
 
 
+def _initialize_primary_lock_path() -> str:
+    """Determine a secure location for the primary worker lock file."""
+
+    runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
+    preferred_dirs = []
+    if runtime_dir:
+        preferred_dirs.append(os.path.join(runtime_dir, "cryptouniverse"))
+    preferred_dirs.append("/var/run/cryptouniverse")
+
+    for directory in preferred_dirs:
+        if not directory:
+            continue
+        try:
+            os.makedirs(directory, exist_ok=True)
+            os.chmod(directory, 0o750)
+        except OSError:
+            continue
+        else:
+            return os.path.join(directory, "primary_worker.lock")
+
+    fallback_dir = os.path.join("/tmp", "cryptouniverse")
+    if settings.ENVIRONMENT.lower() in {"development", "dev", "test", "testing"}:
+        try:
+            os.makedirs(fallback_dir, exist_ok=True)
+            os.chmod(fallback_dir, 0o700)
+        except OSError:
+            pass
+        logger.warning(
+            "Using fallback directory for primary worker lock", directory=fallback_dir
+        )
+        return os.path.join(fallback_dir, "primary_worker.lock")
+
+    raise RuntimeError("Unable to initialize secure primary worker lock directory")
+
+
+PRIMARY_WORKER_LOCK_PATH = _initialize_primary_lock_path()
+_primary_lock_acquired = False
+
+
+def _determine_worker_identity() -> Tuple[str, bool]:
+    """Return a stable worker identifier and whether it should act as primary."""
+
+    # Respect explicit worker IDs when provided (Render, custom orchestrators, etc.).
+    raw_app_worker = os.environ.get("APP_WORKER_ID")
+    if raw_app_worker is not None:
+        normalized = raw_app_worker.strip().lower()
+        is_primary = normalized == "primary" or normalized == "0"
+        return raw_app_worker, is_primary
+
+    raw_gunicorn_worker = os.environ.get("GUNICORN_WORKER_ID")
+    if raw_gunicorn_worker is not None:
+        normalized = raw_gunicorn_worker.strip().lower()
+        return raw_gunicorn_worker, normalized == "0"
+
+    # Fall back to a simple file lock so only one worker claims the primary role.
+    worker_identifier = str(os.getpid())
+    global _primary_lock_acquired
+
+    for attempt in range(2):  # One retry in case we clear a stale lock.
+        try:
+            fd = os.open(
+                PRIMARY_WORKER_LOCK_PATH, os.O_CREAT | os.O_EXCL | os.O_WRONLY
+            )
+        except FileExistsError:
+            existing_pid: Optional[str] = None
+            try:
+                with open(PRIMARY_WORKER_LOCK_PATH, "r", encoding="utf-8") as lock_file:
+                    existing_pid = lock_file.read().strip()
+            except OSError:
+                existing_pid = None
+
+            if existing_pid and existing_pid.isdigit():
+                try:
+                    os.kill(int(existing_pid), 0)
+                except OSError:
+                    try:
+                        os.unlink(PRIMARY_WORKER_LOCK_PATH)
+                    except OSError:
+                        break
+                    else:
+                        continue  # Retry acquisition after clearing stale lock.
+
+            _primary_lock_acquired = False
+            return worker_identifier, False
+        else:
+            with os.fdopen(fd, "w", encoding="utf-8") as lock_file:
+                lock_file.write(worker_identifier)
+            _primary_lock_acquired = True
+            return worker_identifier, True
+
+    _primary_lock_acquired = False
+    return worker_identifier, False
+
+
 async def start_monitoring_delayed(delay: int):
     """Start system monitoring after a delay to reduce initial memory load."""
     await asyncio.sleep(delay)
@@ -68,9 +163,7 @@ async def start_monitoring_delayed(delay: int):
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan manager."""
     # Detect if we're running in Gunicorn with multiple workers
-    import os
-    worker_id = os.environ.get("APP_WORKER_ID", os.getpid())
-    is_primary_worker = worker_id == os.getpid() or str(worker_id) == "1"
+    worker_id, is_primary_worker = _determine_worker_identity()
     
     # Startup
     logger.info(
@@ -198,6 +291,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Shutdown - PHASE 5: Enhanced graceful shutdown
     logger.info("🔄 CryptoUniverse Enterprise shutting down...", worker_id=worker_id)
+
+    # Release primary worker lock so future restarts can elect a new primary.
+    global _primary_lock_acquired
+    if _primary_lock_acquired:
+        try:
+            os.unlink(PRIMARY_WORKER_LOCK_PATH)
+        except FileNotFoundError:  # pragma: no cover - best effort cleanup
+            pass
+        finally:
+            _primary_lock_acquired = False
     shutdown_start = time.time()
 
     try:
