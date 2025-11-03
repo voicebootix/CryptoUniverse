@@ -1022,7 +1022,6 @@ class MarketDataFeeds:
                             }
                     elif response.status == 429:
                         retry_after = int(response.headers.get("Retry-After", 60))
-                        error_msg = f"API error: 429 - Rate limited (retry after {retry_after}s)"
                         logger.warning(
                             "CoinGecko rate limited",
                             symbol=symbol,

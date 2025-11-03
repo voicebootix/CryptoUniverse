@@ -52,8 +52,16 @@ class CachedUserPayload:
                     "id": str(acc.id),
                     "user_id": str(acc.user_id),
                     "exchange_name": acc.exchange_name,
+                    "account_name": getattr(acc, "account_name", None),
                     "account_type": getattr(acc, "account_type", None),
+                    "exchange_type": acc.exchange_type.value if getattr(acc, "exchange_type", None) else None,
+                    "exchange_account_id": getattr(acc, "exchange_account_id", None),
                     "status": acc.status.value if getattr(acc, "status", None) else None,
+                    "is_default": getattr(acc, "is_default", False),
+                    "is_simulation": getattr(acc, "is_simulation", True),
+                    "trading_enabled": getattr(acc, "trading_enabled", True),
+                    "created_at": acc.created_at.isoformat() if getattr(acc, "created_at", None) else None,
+                    "updated_at": acc.updated_at.isoformat() if getattr(acc, "updated_at", None) else None,
                 }
                 for acc in (getattr(user, "exchange_accounts", None) or [])
             ],
@@ -81,7 +89,7 @@ class CachedUserPayload:
 
         # Reconstruct exchange accounts
         if self.exchange_accounts:
-            from app.models.exchange import ExchangeAccount, ExchangeStatus
+            from app.models.exchange import ExchangeAccount, ExchangeStatus, ExchangeType
             user.exchange_accounts = []
             for acc_data in self.exchange_accounts:
                 acc = ExchangeAccount()
@@ -94,12 +102,32 @@ class CachedUserPayload:
                 except Exception:
                     acc.user_id = acc_data.get("user_id")
                 acc.exchange_name = acc_data.get("exchange_name")
+                acc.account_name = acc_data.get("account_name")
                 acc.account_type = acc_data.get("account_type")
+                acc.exchange_account_id = acc_data.get("exchange_account_id")
+                if acc_data.get("exchange_type"):
+                    try:
+                        acc.exchange_type = ExchangeType(acc_data["exchange_type"])
+                    except Exception:
+                        acc.exchange_type = None
                 if acc_data.get("status"):
                     try:
                         acc.status = ExchangeStatus(acc_data["status"])
                     except Exception:
                         acc.status = None
+                acc.is_default = acc_data.get("is_default", False)
+                acc.is_simulation = acc_data.get("is_simulation", True)
+                acc.trading_enabled = acc_data.get("trading_enabled", True)
+                if acc_data.get("created_at"):
+                    try:
+                        acc.created_at = datetime.fromisoformat(acc_data["created_at"])
+                    except Exception:
+                        acc.created_at = None
+                if acc_data.get("updated_at"):
+                    try:
+                        acc.updated_at = datetime.fromisoformat(acc_data["updated_at"])
+                    except Exception:
+                        acc.updated_at = None
                 user.exchange_accounts.append(acc)
 
         return user
