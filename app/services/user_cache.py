@@ -91,6 +91,8 @@ async def get_cached_user(user_id: str, db: AsyncSession) -> Optional[User]:
             user = await _hydrate_user_from_cache(cached)
             if user:
                 logger.debug("User cache hit", user_id=user_id)
+                # Merge cached user into session to make it persistent and allow mutations
+                user = await db.merge(user)
                 return user
             await redis.delete(cache_key)
 

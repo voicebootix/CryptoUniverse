@@ -1568,7 +1568,9 @@ class MarketDataFeeds:
     async def _check_coincap_connectivity(self) -> bool:
         """Check if CoinCap API endpoint is reachable before making requests."""
         try:
-            socket.getaddrinfo("api.coincap.io", 443, type=socket.SOCK_STREAM)
+            # Use async DNS resolution to avoid blocking the event loop
+            loop = asyncio.get_running_loop()
+            await loop.getaddrinfo("api.coincap.io", 443, type=socket.SOCK_STREAM)
             timeout = aiohttp.ClientTimeout(total=5)
             async with aiohttp.ClientSession(timeout=timeout) as session:
                 async with session.get("https://api.coincap.io/v2/assets?limit=1") as response:
