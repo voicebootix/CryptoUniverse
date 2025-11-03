@@ -221,14 +221,50 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         if not cache_key:
             return None
 
+        # Check in-memory cache first
         async with self._scan_cache_lock:
             entry = self.opportunity_cache.get(cache_key)
-            if not isinstance(entry, _CachedOpportunityResult):
-                return None
-            if entry.expires_at <= time.monotonic():
-                self.opportunity_cache.pop(cache_key, None)
-                return None
-            return entry
+            if isinstance(entry, _CachedOpportunityResult):
+                if entry.expires_at > time.monotonic():
+                    return entry
+                else:
+                    self.opportunity_cache.pop(cache_key, None)
+
+        # CRITICAL FIX: Check Redis if not found in memory (cross-worker access)
+        if self.redis:
+            try:
+                redis_key = f"opportunity_scan_result:{cache_key}"
+                cached_data = await self.redis.get(redis_key)
+                if cached_data:
+                    if isinstance(cached_data, bytes):
+                        cached_data = cached_data.decode('utf-8')
+                    scan_data = json.loads(cached_data)
+
+                    # Get TTL from Redis to calculate expires_at
+                    ttl = await self.redis.ttl(redis_key)
+                    expires_at = time.monotonic() + max(0, ttl) if ttl > 0 else time.monotonic() + 60
+
+                    result = _CachedOpportunityResult(
+                        payload=scan_data["payload"],
+                        expires_at=expires_at,
+                        partial=scan_data.get("partial", False)
+                    )
+
+                    # Restore to in-memory cache for faster subsequent access
+                    async with self._scan_cache_lock:
+                        self.opportunity_cache[cache_key] = result
+
+                    self.logger.debug("Scan result retrieved from Redis",
+                                    cache_key=cache_key,
+                                    scan_id=scan_data["payload"].get("scan_id"),
+                                    partial=result.partial)
+                    return result
+            except Exception as redis_error:
+                self.logger.warning("Failed to retrieve scan result from Redis",
+                                  error=str(redis_error),
+                                  cache_key=cache_key)
+
+        return None
 
     async def _update_cached_scan_result(
         self,
@@ -240,12 +276,35 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         ttl = self._partial_cache_ttl if partial else self._scan_cache_ttl
         expires_at = time.monotonic() + ttl
         cached_payload = copy.deepcopy(payload)
+
+        # Store in in-memory cache
         async with self._scan_cache_lock:
             self.opportunity_cache[cache_key] = _CachedOpportunityResult(
                 payload=cached_payload,
                 expires_at=expires_at,
                 partial=partial,
             )
+
+        # CRITICAL FIX: Also persist to Redis for cross-worker access
+        if self.redis:
+            try:
+                redis_key = f"opportunity_scan_result:{cache_key}"
+                scan_data = {
+                    "payload": cached_payload,
+                    "partial": partial,
+                    "cached_at": time.time()
+                }
+                ttl_seconds = int(ttl)
+                await self.redis.setex(redis_key, ttl_seconds, json.dumps(scan_data))
+                self.logger.debug("Scan result persisted to Redis",
+                                cache_key=cache_key,
+                                scan_id=cached_payload.get("scan_id"),
+                                partial=partial,
+                                ttl=ttl_seconds)
+            except Exception as redis_error:
+                self.logger.warning("Failed to persist scan result to Redis",
+                                  error=str(redis_error),
+                                  cache_key=cache_key)
 
     def _schedule_scan_cleanup(self, cache_key: str, task: asyncio.Task) -> None:
         user_id_hint = cache_key.split(":", 1)[0] if cache_key else None
@@ -282,6 +341,25 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             self._scan_lookup[scan_id] = cache_key
             self._user_latest_scan_key[user_id] = cache_key
 
+        # CRITICAL FIX: Also persist scan_id → cache_key mapping to Redis for cross-worker access
+        if self.redis:
+            try:
+                redis_lookup_key = f"opportunity_scan_lookup:{scan_id}"
+                redis_user_key = f"opportunity_user_latest_scan:{user_id}"
+                ttl_seconds = max(self._partial_cache_ttl, self._scan_cache_ttl)
+
+                await self.redis.setex(redis_lookup_key, ttl_seconds, cache_key)
+                await self.redis.setex(redis_user_key, ttl_seconds, cache_key)
+
+                self.logger.debug("Scan lookup persisted to Redis",
+                                scan_id=scan_id,
+                                cache_key=cache_key,
+                                user_id=user_id)
+            except Exception as redis_error:
+                self.logger.warning("Failed to persist scan lookup to Redis",
+                                  error=str(redis_error),
+                                  scan_id=scan_id)
+
     async def _unregister_scan_lookup(self, scan_id: str) -> None:
         """Unregister scan lookup only if cache entry has expired.
         
@@ -315,12 +393,45 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         user_id: str,
         scan_id: Optional[str] = None,
     ) -> Optional[str]:
+        # Check in-memory lookup first
         async with self._scan_lookup_lock:
             if scan_id:
                 cache_key = self._scan_lookup.get(scan_id)
                 if cache_key:
                     return cache_key
-            return self._user_latest_scan_key.get(user_id)
+            else:
+                cache_key = self._user_latest_scan_key.get(user_id)
+                if cache_key:
+                    return cache_key
+
+        # CRITICAL FIX: Check Redis if not found in memory (cross-worker access)
+        if self.redis:
+            try:
+                if scan_id:
+                    redis_lookup_key = f"opportunity_scan_lookup:{scan_id}"
+                    cached_key = await self.redis.get(redis_lookup_key)
+                    if cached_key:
+                        cache_key = cached_key.decode('utf-8') if isinstance(cached_key, bytes) else cached_key
+                        # Restore to in-memory lookup for faster subsequent access
+                        async with self._scan_lookup_lock:
+                            self._scan_lookup[scan_id] = cache_key
+                        return cache_key
+                else:
+                    redis_user_key = f"opportunity_user_latest_scan:{user_id}"
+                    cached_key = await self.redis.get(redis_user_key)
+                    if cached_key:
+                        cache_key = cached_key.decode('utf-8') if isinstance(cached_key, bytes) else cached_key
+                        # Restore to in-memory lookup for faster subsequent access
+                        async with self._scan_lookup_lock:
+                            self._user_latest_scan_key[user_id] = cache_key
+                        return cache_key
+            except Exception as redis_error:
+                self.logger.warning("Failed to resolve scan cache key from Redis",
+                                  error=str(redis_error),
+                                  scan_id=scan_id,
+                                  user_id=user_id)
+
+        return None
 
     def _build_scan_cache_key(
         self,
@@ -362,14 +473,46 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         self,
         cache_key: str,
     ) -> Optional[_CachedOpportunityResult]:
+        # Check in-memory cache first
         async with self._scan_cache_lock:
             entry = self.opportunity_cache.get(cache_key)
-            if not isinstance(entry, _CachedOpportunityResult):
-                return None
-            if entry.expires_at <= time.monotonic():
-                self.opportunity_cache.pop(cache_key, None)
-                return None
-            return entry
+            if isinstance(entry, _CachedOpportunityResult):
+                if entry.expires_at > time.monotonic():
+                    return entry
+                else:
+                    self.opportunity_cache.pop(cache_key, None)
+
+        # CRITICAL FIX: Check Redis if not found in memory (cross-worker access)
+        if self.redis:
+            try:
+                redis_key = f"opportunity_scan_result:{cache_key}"
+                cached_data = await self.redis.get(redis_key)
+                if cached_data:
+                    if isinstance(cached_data, bytes):
+                        cached_data = cached_data.decode('utf-8')
+                    scan_data = json.loads(cached_data)
+
+                    # Get TTL from Redis to calculate expires_at
+                    ttl = await self.redis.ttl(redis_key)
+                    expires_at = time.monotonic() + max(0, ttl) if ttl > 0 else time.monotonic() + 60
+
+                    result = _CachedOpportunityResult(
+                        payload=scan_data["payload"],
+                        expires_at=expires_at,
+                        partial=scan_data.get("partial", False)
+                    )
+
+                    # Restore to in-memory cache for faster subsequent access
+                    async with self._scan_cache_lock:
+                        self.opportunity_cache[cache_key] = result
+
+                    return result
+            except Exception as redis_error:
+                self.logger.warning("Failed to peek scan result from Redis",
+                                  error=str(redis_error),
+                                  cache_key=cache_key)
+
+        return None
 
     @staticmethod
     def _summarize_scan_filters(
