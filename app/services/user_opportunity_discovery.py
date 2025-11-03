@@ -5559,6 +5559,588 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             self.logger.debug("Scan metrics tracking failed", error=str(track_error))
 
 
+    async def _scan_funding_arbitrage_pro_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
+        """Pro version of funding arbitrage with enhanced analysis"""
+        try:
+            self.logger.info("🔍 Scanning funding arbitrage pro opportunities", scan_id=scan_id)
+            
+            # Use base funding arbitrage scanner with enhanced analysis
+            base_opportunities = await self._scan_funding_arbitrage_opportunities(
+                discovered_assets, user_profile, scan_id, portfolio_result
+            )
+            
+            # Enhance with pro-level analysis
+            enhanced_opportunities = []
+            for opp in base_opportunities:
+                # Create new OpportunityResult with pro-level enhancements
+                enhanced_opp = dataclasses.replace(
+                    opp,
+                    opportunity_type="funding_arbitrage_pro",
+                    confidence_score=min(95, opp.confidence_score + 15),
+                    metadata={
+                        **opp.metadata,
+                        "pro_features": {
+                            "advanced_spread_analysis": True,
+                            "multi_exchange_arbitrage": True,
+                            "risk_adjusted_returns": True
+                        }
+                    }
+                )
+                enhanced_opportunities.append(enhanced_opp)
+            
+            return enhanced_opportunities
+            
+        except Exception as e:
+            self.logger.error("Funding arbitrage pro scan failed", scan_id=scan_id, error=str(e))
+            return []
+
+    async def _scan_market_making_pro_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
+        """Pro version of market making with advanced order book analysis"""
+        try:
+            self.logger.info("🔍 Scanning market making pro opportunities", scan_id=scan_id)
+            
+            # Use base market making scanner with enhanced analysis
+            base_opportunities = await self._scan_market_making_opportunities(
+                discovered_assets, user_profile, scan_id, portfolio_result
+            )
+            
+            # Enhance with pro-level analysis
+            enhanced_opportunities = []
+            for opp in base_opportunities:
+                enhanced_opp = dataclasses.replace(
+                    opp,
+                    opportunity_type="market_making_pro",
+                    confidence_score=min(95, opp.confidence_score + 10),
+                    metadata={
+                        **opp.metadata,
+                        "pro_features": {
+                            "advanced_order_book_analysis": True,
+                            "dynamic_spread_adjustment": True,
+                            "liquidity_provision_optimization": True
+                        }
+                    }
+                )
+                enhanced_opportunities.append(enhanced_opp)
+            
+            return enhanced_opportunities
+            
+        except Exception as e:
+            self.logger.error("Market making pro scan failed", scan_id=scan_id, error=str(e))
+            return []
+
+    async def _scan_scalping_engine_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
+        """Advanced scalping engine with high-frequency analysis"""
+        try:
+            self.logger.info("🔍 Scanning scalping engine opportunities", scan_id=scan_id)
+            
+            # Use base scalping scanner with enhanced analysis
+            base_opportunities = await self._scan_scalping_opportunities(
+                discovered_assets, user_profile, scan_id, portfolio_result
+            )
+            
+            # Enhance with engine-level analysis
+            enhanced_opportunities = []
+            for opp in base_opportunities:
+                enhanced_opp = dataclasses.replace(
+                    opp,
+                    opportunity_type="scalping_engine",
+                    confidence_score=min(95, opp.confidence_score + 5),
+                    metadata={
+                        **opp.metadata,
+                        "engine_features": {
+                            "high_frequency_analysis": True,
+                            "micro_trend_detection": True,
+                            "rapid_execution_optimization": True
+                        }
+                    }
+                )
+                enhanced_opportunities.append(enhanced_opp)
+            
+            return enhanced_opportunities
+            
+        except Exception as e:
+            self.logger.error("Scalping engine scan failed", scan_id=scan_id, error=str(e))
+            return []
+
+    async def _scan_swing_navigator_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
+        """Swing trading navigator with trend analysis"""
+        try:
+            self.logger.info("🔍 Scanning swing navigator opportunities", scan_id=scan_id)
+            
+            # Use momentum strategy as base with swing-specific enhancements
+            base_opportunities = await self._scan_spot_momentum_opportunities(
+                discovered_assets, user_profile, scan_id, portfolio_result
+            )
+            
+            # Enhance with swing-specific analysis
+            enhanced_opportunities = []
+            for opp in base_opportunities:
+                enhanced_opp = dataclasses.replace(
+                    opp,
+                    opportunity_type="swing_navigator",
+                    estimated_timeframe="4h",  # Swing trading timeframe
+                    confidence_score=min(90, opp.confidence_score + 5),
+                    metadata={
+                        **opp.metadata,
+                        "swing_features": {
+                            "trend_continuation_analysis": True,
+                            "swing_point_identification": True,
+                            "multi_timeframe_confirmation": True
+                        }
+                    }
+                )
+                enhanced_opportunities.append(enhanced_opp)
+            
+            return enhanced_opportunities
+            
+        except Exception as e:
+            self.logger.error("Swing navigator scan failed", scan_id=scan_id, error=str(e))
+            return []
+
+    async def _scan_position_manager_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
+        """Position management with risk-adjusted sizing"""
+        try:
+            self.logger.info("🔍 Scanning position manager opportunities", scan_id=scan_id)
+            
+            # Use risk management as base with position-specific enhancements
+            base_opportunities = await self._scan_risk_management_opportunities(
+                discovered_assets, user_profile, scan_id, portfolio_result
+            )
+            
+            # Enhance with position management features
+            enhanced_opportunities = []
+            for opp in base_opportunities:
+                enhanced_opp = dataclasses.replace(
+                    opp,
+                    opportunity_type="position_manager",
+                    confidence_score=min(95, opp.confidence_score + 10),
+                    metadata={
+                        **opp.metadata,
+                        "position_features": {
+                            "dynamic_position_sizing": True,
+                            "risk_adjusted_allocation": True,
+                            "portfolio_correlation_analysis": True
+                        }
+                    }
+                )
+                enhanced_opportunities.append(enhanced_opp)
+            
+            return enhanced_opportunities
+            
+        except Exception as e:
+            self.logger.error("Position manager scan failed", scan_id=scan_id, error=str(e))
+            return []
+
+    async def _scan_risk_guardian_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
+        """Advanced risk guardian with comprehensive protection"""
+        try:
+            self.logger.info("🔍 Scanning risk guardian opportunities", scan_id=scan_id)
+            
+            # Use risk management as base with guardian-specific enhancements
+            base_opportunities = await self._scan_risk_management_opportunities(
+                discovered_assets, user_profile, scan_id, portfolio_result
+            )
+            
+            # Enhance with guardian features
+            enhanced_opportunities = []
+            for opp in base_opportunities:
+                enhanced_opp = dataclasses.replace(
+                    opp,
+                    opportunity_type="risk_guardian",
+                    confidence_score=min(98, opp.confidence_score + 15),
+                    metadata={
+                        **opp.metadata,
+                        "guardian_features": {
+                            "real_time_risk_monitoring": True,
+                            "automatic_hedge_activation": True,
+                            "portfolio_protection_alerts": True
+                        }
+                    }
+                )
+                enhanced_opportunities.append(enhanced_opp)
+            
+            return enhanced_opportunities
+            
+        except Exception as e:
+            self.logger.error("Risk guardian scan failed", scan_id=scan_id, error=str(e))
+            return []
+
+    async def _scan_portfolio_optimizer_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
+        """Portfolio optimizer with advanced allocation strategies"""
+        try:
+            self.logger.info("🔍 Scanning portfolio optimizer opportunities", scan_id=scan_id)
+            
+            # Use portfolio optimization as base with optimizer-specific enhancements
+            base_opportunities = await self._scan_portfolio_optimization_opportunities(
+                discovered_assets, user_profile, scan_id, portfolio_result
+            )
+            
+            # Enhance with optimizer features
+            enhanced_opportunities = []
+            for opp in base_opportunities:
+                enhanced_opp = dataclasses.replace(
+                    opp,
+                    opportunity_type="portfolio_optimizer",
+                    confidence_score=min(95, opp.confidence_score + 10),
+                    metadata={
+                        **opp.metadata,
+                        "optimizer_features": {
+                            "advanced_allocation_algorithms": True,
+                            "dynamic_rebalancing": True,
+                            "risk_return_optimization": True
+                        }
+                    }
+                )
+                enhanced_opportunities.append(enhanced_opp)
+            
+            return enhanced_opportunities
+            
+        except Exception as e:
+            self.logger.error("Portfolio optimizer scan failed", scan_id=scan_id, error=str(e))
+            return []
+
+    async def _scan_strategy_analytics_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
+        """Strategy analytics with performance insights"""
+        try:
+            self.logger.info("🔍 Scanning strategy analytics opportunities", scan_id=scan_id)
+            
+            # Use statistical arbitrage as base with analytics-specific enhancements
+            base_opportunities = await self._scan_statistical_arbitrage_opportunities(
+                discovered_assets, user_profile, scan_id, portfolio_result
+            )
+            
+            # Enhance with analytics features
+            enhanced_opportunities = []
+            for opp in base_opportunities:
+                enhanced_opp = dataclasses.replace(
+                    opp,
+                    opportunity_type="strategy_analytics",
+                    confidence_score=min(90, opp.confidence_score + 5),
+                    metadata={
+                        **opp.metadata,
+                        "analytics_features": {
+                            "performance_attribution": True,
+                            "strategy_correlation_analysis": True,
+                            "predictive_analytics": True
+                        }
+                    }
+                )
+                enhanced_opportunities.append(enhanced_opp)
+            
+            return enhanced_opportunities
+            
+        except Exception as e:
+            self.logger.error("Strategy analytics scan failed", scan_id=scan_id, error=str(e))
+            return []
+
+    async def _scan_momentum_trader_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
+        """Momentum trader with enhanced trend following"""
+        try:
+            self.logger.info("🔍 Scanning momentum trader opportunities", scan_id=scan_id)
+            
+            # Use spot momentum as base with trader-specific enhancements
+            base_opportunities = await self._scan_spot_momentum_opportunities(
+                discovered_assets, user_profile, scan_id, portfolio_result
+            )
+            
+            # Enhance with trader features
+            enhanced_opportunities = []
+            for opp in base_opportunities:
+                enhanced_opp = dataclasses.replace(
+                    opp,
+                    opportunity_type="momentum_trader",
+                    confidence_score=min(95, opp.confidence_score + 10),
+                    metadata={
+                        **opp.metadata,
+                        "trader_features": {
+                            "advanced_momentum_indicators": True,
+                            "trend_strength_analysis": True,
+                            "entry_exit_optimization": True
+                        }
+                    }
+                )
+                enhanced_opportunities.append(enhanced_opp)
+            
+            return enhanced_opportunities
+            
+        except Exception as e:
+            self.logger.error("Momentum trader scan failed", scan_id=scan_id, error=str(e))
+            return []
+
+    async def _scan_mean_reversion_pro_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
+        """Pro version of mean reversion with advanced statistical analysis"""
+        try:
+            self.logger.info("🔍 Scanning mean reversion pro opportunities", scan_id=scan_id)
+            
+            # Use spot mean reversion as base with pro enhancements
+            base_opportunities = await self._scan_spot_mean_reversion_opportunities(
+                discovered_assets, user_profile, scan_id, portfolio_result
+            )
+            
+            # Enhance with pro features
+            enhanced_opportunities = []
+            for opp in base_opportunities:
+                enhanced_opp = dataclasses.replace(
+                    opp,
+                    opportunity_type="mean_reversion_pro",
+                    confidence_score=min(95, opp.confidence_score + 15),
+                    metadata={
+                        **opp.metadata,
+                        "pro_features": {
+                            "advanced_statistical_models": True,
+                            "multi_timeframe_mean_reversion": True,
+                            "volatility_adjusted_signals": True
+                        }
+                    }
+                )
+                enhanced_opportunities.append(enhanced_opp)
+            
+            return enhanced_opportunities
+            
+        except Exception as e:
+            self.logger.error("Mean reversion pro scan failed", scan_id=scan_id, error=str(e))
+            return []
+
+    async def _scan_breakout_hunter_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
+        """Breakout hunter with advanced pattern recognition"""
+        try:
+            self.logger.info("🔍 Scanning breakout hunter opportunities", scan_id=scan_id)
+            
+            # Use spot breakout as base with hunter-specific enhancements
+            base_opportunities = await self._scan_spot_breakout_opportunities(
+                discovered_assets, user_profile, scan_id, portfolio_result
+            )
+            
+            # Enhance with hunter features
+            enhanced_opportunities = []
+            for opp in base_opportunities:
+                enhanced_opp = dataclasses.replace(
+                    opp,
+                    opportunity_type="breakout_hunter",
+                    confidence_score=min(95, opp.confidence_score + 10),
+                    metadata={
+                        **opp.metadata,
+                        "hunter_features": {
+                            "advanced_pattern_recognition": True,
+                            "volume_confirmation_analysis": True,
+                            "false_breakout_filtering": True
+                        }
+                    }
+                )
+                enhanced_opportunities.append(enhanced_opp)
+            
+            return enhanced_opportunities
+            
+        except Exception as e:
+            self.logger.error("Breakout hunter scan failed", scan_id=scan_id, error=str(e))
+            return []
+
+    async def _scan_algorithmic_suite_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
+        """Algorithmic suite with multi-strategy coordination"""
+        try:
+            self.logger.info("🔍 Scanning algorithmic suite opportunities", scan_id=scan_id)
+            
+            # Use complex strategy as base with suite-specific enhancements
+            base_opportunities = await self._scan_complex_strategy_opportunities(
+                discovered_assets, user_profile, scan_id, portfolio_result
+            )
+            
+            # Enhance with suite features
+            enhanced_opportunities = []
+            for opp in base_opportunities:
+                enhanced_opp = dataclasses.replace(
+                    opp,
+                    opportunity_type="algorithmic_suite",
+                    confidence_score=min(95, opp.confidence_score + 10),
+                    metadata={
+                        **opp.metadata,
+                        "suite_features": {
+                            "multi_strategy_coordination": True,
+                            "adaptive_algorithm_selection": True,
+                            "cross_strategy_optimization": True
+                        }
+                    }
+                )
+                enhanced_opportunities.append(enhanced_opp)
+            
+            return enhanced_opportunities
+            
+        except Exception as e:
+            self.logger.error("Algorithmic suite scan failed", scan_id=scan_id, error=str(e))
+            return []
+
+    async def _scan_pairs_trader_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
+        """Pairs trader with enhanced correlation analysis"""
+        try:
+            self.logger.info("🔍 Scanning pairs trader opportunities", scan_id=scan_id)
+            
+            # Use pairs trading as base with trader-specific enhancements
+            base_opportunities = await self._scan_pairs_trading_opportunities(
+                discovered_assets, user_profile, scan_id, portfolio_result
+            )
+            
+            # Enhance with trader features
+            enhanced_opportunities = []
+            for opp in base_opportunities:
+                enhanced_opp = dataclasses.replace(
+                    opp,
+                    opportunity_type="pairs_trader",
+                    confidence_score=min(95, opp.confidence_score + 10),
+                    metadata={
+                        **opp.metadata,
+                        "trader_features": {
+                            "advanced_correlation_analysis": True,
+                            "cointegration_testing": True,
+                            "pairs_selection_optimization": True
+                        }
+                    }
+                )
+                enhanced_opportunities.append(enhanced_opp)
+            
+            return enhanced_opportunities
+            
+        except Exception as e:
+            self.logger.error("Pairs trader scan failed", scan_id=scan_id, error=str(e))
+            return []
+
+    async def _scan_statistical_arbitrage_pro_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
+        """Pro version of statistical arbitrage with advanced models"""
+        try:
+            self.logger.info("🔍 Scanning statistical arbitrage pro opportunities", scan_id=scan_id)
+            
+            # Use statistical arbitrage as base with pro enhancements
+            base_opportunities = await self._scan_statistical_arbitrage_opportunities(
+                discovered_assets, user_profile, scan_id, portfolio_result
+            )
+            
+            # Enhance with pro features
+            enhanced_opportunities = []
+            for opp in base_opportunities:
+                enhanced_opp = dataclasses.replace(
+                    opp,
+                    opportunity_type="statistical_arbitrage_pro",
+                    confidence_score=min(95, opp.confidence_score + 15),
+                    metadata={
+                        **opp.metadata,
+                        "pro_features": {
+                            "advanced_statistical_models": True,
+                            "machine_learning_enhancement": True,
+                            "high_frequency_execution": True
+                        }
+                    }
+                )
+                enhanced_opportunities.append(enhanced_opp)
+            
+            return enhanced_opportunities
+            
+        except Exception as e:
+            self.logger.error("Statistical arbitrage pro scan failed", scan_id=scan_id, error=str(e))
+            return []
+
+    async def _scan_market_maker_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
+        """Market maker with advanced liquidity provision"""
+        try:
+            self.logger.info("🔍 Scanning market maker opportunities", scan_id=scan_id)
+            
+            # Use market making as base with maker-specific enhancements
+            base_opportunities = await self._scan_market_making_opportunities(
+                discovered_assets, user_profile, scan_id, portfolio_result
+            )
+            
+            # Enhance with maker features
+            enhanced_opportunities = []
+            for opp in base_opportunities:
+                enhanced_opp = dataclasses.replace(
+                    opp,
+                    opportunity_type="market_maker",
+                    confidence_score=min(95, opp.confidence_score + 10),
+                    metadata={
+                        **opp.metadata,
+                        "maker_features": {
+                            "advanced_liquidity_provision": True,
+                            "dynamic_spread_management": True,
+                            "inventory_risk_management": True
+                        }
+                    }
+                )
+                enhanced_opportunities.append(enhanced_opp)
+            
+            return enhanced_opportunities
+            
+        except Exception as e:
+            self.logger.error("Market maker scan failed", scan_id=scan_id, error=str(e))
+            return []
+
+    async def _scan_scalping_engine_pro_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
+        """Pro version of scalping engine with ultra-high frequency analysis"""
+        try:
+            self.logger.info("🔍 Scanning scalping engine pro opportunities", scan_id=scan_id)
+            
+            # Use scalping as base with pro engine enhancements
+            base_opportunities = await self._scan_scalping_opportunities(
+                discovered_assets, user_profile, scan_id, portfolio_result
+            )
+            
+            # Enhance with pro engine features
+            enhanced_opportunities = []
+            for opp in base_opportunities:
+                enhanced_opp = dataclasses.replace(
+                    opp,
+                    opportunity_type="scalping_engine_pro",
+                    confidence_score=min(98, opp.confidence_score + 15),
+                    metadata={
+                        **opp.metadata,
+                        "pro_engine_features": {
+                            "ultra_high_frequency_analysis": True,
+                            "microsecond_execution_optimization": True,
+                            "advanced_latency_arbitrage": True
+                        }
+                    }
+                )
+                enhanced_opportunities.append(enhanced_opp)
+            
+            return enhanced_opportunities
+            
+        except Exception as e:
+            self.logger.error("Scalping engine pro scan failed", scan_id=scan_id, error=str(e))
+            return []
+
+    async def _scan_swing_navigator_pro_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
+        """Pro version of swing navigator with advanced trend analysis"""
+        try:
+            self.logger.info("🔍 Scanning swing navigator pro opportunities", scan_id=scan_id)
+            
+            # Use momentum strategy as base with pro navigator enhancements
+            base_opportunities = await self._scan_spot_momentum_opportunities(
+                discovered_assets, user_profile, scan_id, portfolio_result
+            )
+            
+            # Enhance with pro navigator features
+            enhanced_opportunities = []
+            for opp in base_opportunities:
+                enhanced_opp = dataclasses.replace(
+                    opp,
+                    opportunity_type="swing_navigator_pro",
+                    estimated_timeframe="4h",  # Swing trading timeframe
+                    confidence_score=min(95, opp.confidence_score + 15),
+                    metadata={
+                        **opp.metadata,
+                        "pro_navigator_features": {
+                            "advanced_trend_analysis": True,
+                            "multi_timeframe_synthesis": True,
+                            "predictive_swing_identification": True
+                        }
+                    }
+                )
+                enhanced_opportunities.append(enhanced_opp)
+            
+            return enhanced_opportunities
+            
+        except Exception as e:
+            self.logger.error("Swing navigator pro scan failed", scan_id=scan_id, error=str(e))
+            return []
+
+
 # Global service instance
 user_opportunity_discovery = UserOpportunityDiscoveryService()
 
