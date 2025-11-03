@@ -83,6 +83,34 @@ export const adminService = {
     const response = await apiClient.post('/admin/system/configure', config);
     return response.data;
   },
+
+  async getOpportunityPolicies() {
+    const response = await apiClient.get('/admin/opportunity-policies');
+    return response.data;
+  },
+
+  async updateOpportunityPolicy(
+    strategyKey: string,
+    payload: {
+      max_symbols?: number | null;
+      chunk_size?: number | null;
+      priority?: number | null;
+      enabled?: boolean;
+    },
+  ) {
+    const response = await apiClient.put(
+      `/admin/opportunity-policies/${encodeURIComponent(strategyKey)}`,
+      payload,
+    );
+    return response.data;
+  },
+
+  async resetOpportunityPolicy(strategyKey: string) {
+    const response = await apiClient.delete(
+      `/admin/opportunity-policies/${encodeURIComponent(strategyKey)}`,
+    );
+    return response.data;
+  },
 };
 
 export default adminService;

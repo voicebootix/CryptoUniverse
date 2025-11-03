@@ -146,6 +146,7 @@ class UserStrategyAccess(Base):
         Index('idx_user_strategy_access_user_id', 'user_id'),
         Index('idx_user_strategy_access_strategy_id', 'strategy_id'),
         Index('idx_user_strategy_access_active', 'user_id', 'is_active'),
+        Index('idx_user_strategy_access_active_expires', 'user_id', 'is_active', 'expires_at'),
         Index('idx_user_strategy_access_expires', 'expires_at'),
         {"comment": "Enterprise unified strategy access control"}
     )

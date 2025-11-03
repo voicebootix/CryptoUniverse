@@ -146,6 +146,7 @@ class User(Base):
     # Indexes for performance - include extend_existing to handle schema conflicts
     __table_args__ = (
         Index("idx_user_email_active", "email", "is_active"),
+        Index("idx_users_auth_lookup", "email", "status", "is_active", "is_verified"),
         Index("idx_user_tenant_role", "tenant_id", "role"),
         Index("idx_user_status", "status"),
         Index("idx_user_created", "created_at"),

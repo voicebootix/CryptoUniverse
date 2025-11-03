@@ -30,14 +30,23 @@ import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/components/ui/use-toast';
 import { useUser } from '@/store/authStore';
+import { UserRole } from '@/types/auth';
 import { useExchanges } from '@/hooks/useExchanges';
 import { useStrategies } from '@/hooks/useStrategies';
 import { usePortfolioStore } from '@/hooks/usePortfolio';
@@ -48,6 +57,19 @@ import PhaseProgressVisualizer, { ExecutionPhase } from '@/components/trading/Ph
 import { PHASE_CONFIG } from '@/constants/trading';
 import { formatCurrency, formatPercentage } from '@/lib/utils';
 import { apiClient } from '@/lib/api/client';
+import {
+  opportunityApi,
+  OpportunityDiscoveryResponse,
+  OpportunityApiError,
+  type Opportunity as DiscoveryOpportunity,
+} from '@/lib/api/opportunityApi';
+import { AIConsensusCard } from '@/components/trading/AIConsensusCard';
+import { MarketContextCard } from '@/components/trading/MarketContextCard';
+import { AIUsageStats } from '@/components/trading/AIUsageStats';
+import { QuickActionBar } from '@/components/trading/QuickActionBar';
+import { OpportunitiesDrawer } from '@/components/trading/opportunities';
+import type { OpportunitiesDrawerState, Opportunity } from '@/components/trading/opportunities';
+import type { ConsensusData, MarketContext, AIPricingConfig } from './types';
 
 type ManualWorkflowType =
   | 'trade_validation'
@@ -111,9 +133,80 @@ const DEFAULT_WORKFLOW: WorkflowConfig = {
   customNotes: ''
 };
 
+type OpportunityScanFilterState = {
+  symbols: string[];
+  assetTiers: string[];
+  strategyIds: string[];
+};
+
+const ASSET_TIER_OPTIONS = [
+  {
+    value: 'tier_institutional',
+    label: 'Institutional',
+    description: '$100M+ daily volume',
+  },
+  {
+    value: 'tier_enterprise',
+    label: 'Enterprise',
+    description: '$50M+ daily volume',
+  },
+  {
+    value: 'tier_professional',
+    label: 'Professional',
+    description: '$10M+ daily volume',
+  },
+  {
+    value: 'tier_retail',
+    label: 'Retail',
+    description: '$1M+ daily volume',
+  },
+  {
+    value: 'tier_emerging',
+    label: 'Emerging',
+    description: '$100K+ daily volume',
+  },
+  {
+    value: 'tier_micro',
+    label: 'Micro',
+    description: '$10K+ daily volume',
+  },
+];
+
 const ManualTradingPage: React.FC = () => {
   const user = useUser();
   const { toast } = useToast();
+
+  // Access control: Only TRADER and ADMIN roles can access Manual Trading
+  if (!user || (user.role !== UserRole.TRADER && user.role !== UserRole.ADMIN)) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-4">
+        <Card className="w-full max-w-md">
+          <CardHeader className="text-center">
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-orange-100 dark:bg-orange-900/20">
+              <Shield className="h-6 w-6 text-orange-600 dark:text-orange-400" />
+            </div>
+            <CardTitle className="text-xl">Access Restricted</CardTitle>
+            <CardDescription>
+              Manual Trading is only available for traders and administrators.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="text-center text-sm text-muted-foreground">
+              <p>Your current role: <Badge variant="outline">{user?.role || 'Unknown'}</Badge></p>
+              <p className="mt-2">Please contact an administrator to upgrade your account if you need access to trading features.</p>
+            </div>
+            <Button 
+              onClick={() => window.history.back()} 
+              className="w-full"
+              variant="outline"
+            >
+              Go Back
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
   const { exchanges, aggregatedStats } = useExchanges();
   const { strategies, availableStrategies, actions: strategyActions, executing: strategyExecuting } = useStrategies();
   const {
@@ -183,8 +276,24 @@ const ManualTradingPage: React.FC = () => {
   type PhaseHistoryEntry = ComponentProps<typeof PhaseProgressVisualizer>['phaseHistory'][number];
   const [phaseHistory, setPhaseHistory] = useState<PhaseHistoryEntry[]>([]);
   const [isStreaming, setIsStreaming] = useState(false);
-  const [activeTab, setActiveTab] = useState('trade');
   const [aiInsights, setAiInsights] = useState<Array<{ id: string; title: string; payload: any; function: string; timestamp: string }>>([]);
+  const [latestConsensusData, setLatestConsensusData] = useState<ConsensusData | null>(null);
+  const [marketContext, setMarketContext] = useState<MarketContext | null>(null);
+  const [pricingConfig, setPricingConfig] = useState<AIPricingConfig | null>(null);
+  const [pricingError, setPricingError] = useState<string | null>(null);
+  const [opportunitiesDrawer, setOpportunitiesDrawer] = useState<OpportunitiesDrawerState>({
+    open: false,
+    data: null,
+    executing: new Set(),
+    validating: new Set()
+  });
+  const [scanDialogOpen, setScanDialogOpen] = useState(false);
+  const [scanFilters, setScanFilters] = useState<OpportunityScanFilterState>({
+    symbols: [],
+    assetTiers: [],
+    strategyIds: [],
+  });
+  const [scanSymbolInput, setScanSymbolInput] = useState('');
 
   const streamingControllerRef = useRef<AbortController | null>(null);
   const manualSessionRef = useRef<string | null>(null);
@@ -199,6 +308,10 @@ const ManualTradingPage: React.FC = () => {
     }
     return Array.from(symbols).sort();
   }, [positions, marketData, tradeForm.symbol]);
+  const suggestedSymbols = useMemo(() => {
+    const normalized = availableSymbols.map((symbol) => symbol.replace(/\s+/g, '').toUpperCase());
+    return Array.from(new Set(normalized)).slice(0, 12);
+  }, [availableSymbols]);
 
   const selectedStrategy = useMemo(() => {
     if (!workflowConfig.strategyId || workflowConfig.strategyId === 'manual') {
@@ -252,6 +365,138 @@ const ManualTradingPage: React.FC = () => {
         message
       }
     ]);
+  }, []);
+
+  const addScanSymbol = useCallback((rawSymbol: string) => {
+    const normalized = rawSymbol.replace(/\s+/g, '').toUpperCase();
+    if (!normalized) {
+      return;
+    }
+    setScanFilters((prev) => {
+      if (prev.symbols.includes(normalized)) {
+        return prev;
+      }
+      return {
+        ...prev,
+        symbols: [...prev.symbols, normalized],
+      };
+    });
+  }, []);
+
+  const removeScanSymbol = useCallback((symbol: string) => {
+    setScanFilters((prev) => ({
+      ...prev,
+      symbols: prev.symbols.filter((value) => value !== symbol),
+    }));
+  }, []);
+
+  const handleAddScanSymbol = useCallback(() => {
+    if (!scanSymbolInput.trim()) {
+      return;
+    }
+    addScanSymbol(scanSymbolInput);
+    setScanSymbolInput('');
+  }, [scanSymbolInput, addScanSymbol]);
+
+  const handleSymbolInputKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLInputElement>) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        handleAddScanSymbol();
+      }
+    },
+    [handleAddScanSymbol]
+  );
+
+  const toggleAssetTier = useCallback((tier: string, enabled: boolean) => {
+    const normalized = tier.trim();
+    if (!normalized) {
+      return;
+    }
+
+    setScanFilters((prev) => {
+      const hasTier = prev.assetTiers.includes(normalized);
+      if (enabled && !hasTier) {
+        return { ...prev, assetTiers: [...prev.assetTiers, normalized] };
+      }
+      if (!enabled && hasTier) {
+        return { ...prev, assetTiers: prev.assetTiers.filter((value) => value !== normalized) };
+      }
+      return prev;
+    });
+  }, []);
+
+  const clearAssetTiers = useCallback(() => {
+    setScanFilters((prev) => ({ ...prev, assetTiers: [] }));
+  }, []);
+
+  const toggleStrategySelection = useCallback((strategyId: string, enabled: boolean) => {
+    const normalized = strategyId.trim();
+    if (!normalized) {
+      return;
+    }
+
+    setScanFilters((prev) => {
+      const hasStrategy = prev.strategyIds.includes(normalized);
+      if (enabled && !hasStrategy) {
+        return { ...prev, strategyIds: [...prev.strategyIds, normalized] };
+      }
+      if (!enabled && hasStrategy) {
+        return { ...prev, strategyIds: prev.strategyIds.filter((value) => value !== normalized) };
+      }
+      return prev;
+    });
+  }, []);
+
+  const selectAllStrategies = useCallback(() => {
+    if (!strategies.length) {
+      return;
+    }
+    setScanFilters((prev) => {
+      const combined = new Set([...prev.strategyIds, ...strategies.map((strategy) => strategy.strategy_id)]);
+      return { ...prev, strategyIds: Array.from(combined) };
+    });
+  }, [strategies]);
+
+  const clearStrategies = useCallback(() => {
+    setScanFilters((prev) => ({ ...prev, strategyIds: [] }));
+  }, []);
+
+  const normalizeFiltersForSubmission = useCallback(
+    (filters: OpportunityScanFilterState): OpportunityScanFilterState => {
+      const normalizeArray = (values: string[], transform?: (value: string) => string): string[] => {
+        if (!values.length) {
+          return [];
+        }
+
+        const next = new Set<string>();
+        values.forEach((value) => {
+          if (!value) {
+            return;
+          }
+          const trimmed = value.trim();
+          if (!trimmed) {
+            return;
+          }
+          const finalValue = transform ? transform(trimmed) : trimmed;
+          if (finalValue) {
+            next.add(finalValue);
+          }
+        });
+        return Array.from(next);
+      };
+
+      return {
+        symbols: normalizeArray(filters.symbols, (value) => value.toUpperCase()),
+        assetTiers: normalizeArray(filters.assetTiers),
+        strategyIds: normalizeArray(filters.strategyIds),
+      };
+    },
+    []
+  );
+
+  const handleOpenScanDialog = useCallback(() => {
+    setScanDialogOpen(true);
   }, []);
 
   const appendPhase = useCallback((phase: ExecutionPhase, detail?: string) => {
@@ -578,7 +823,7 @@ const ManualTradingPage: React.FC = () => {
       pushWorkflowLog('success', `Trade executed successfully on ${result.exchange || 'selected exchange'}.`);
       toast({
         title: 'Trade Executed',
-        description: `${tradeForm.action.toUpperCase()} ${tradeForm.symbol} · ${formatCurrency(Number(result.amount || tradeForm.amount))}`,
+        description: `${tradeForm.action.toUpperCase()} ${tradeForm.symbol} ? ${formatCurrency(Number(result.amount || tradeForm.amount))}`,
         variant: 'default'
       });
 
@@ -594,7 +839,16 @@ const ManualTradingPage: React.FC = () => {
         variant: 'destructive'
       });
     }
-  }, [tradeForm, toast, selectedStrategy, pushWorkflowLog, creditActions, fetchPortfolio, fetchRecentTrades]);
+  }, [
+    tradeForm,
+    toast,
+    selectedStrategy,
+    pushWorkflowLog,
+    creditActions,
+    fetchPortfolio,
+    fetchRecentTrades,
+    scanFilters,
+  ]);
 
   const recordInsight = useCallback((title: string, fn: string, payload: any) => {
     setAiInsights((prev) => [
@@ -610,23 +864,387 @@ const ManualTradingPage: React.FC = () => {
   }, []);
 
   const handleConsensusAction = useCallback(
-    async (action: 'opportunity' | 'validation' | 'risk' | 'portfolio' | 'market' | 'decision') => {
+    async (
+      action: 'opportunity' | 'validation' | 'risk' | 'portfolio' | 'market' | 'decision',
+      options?: { filters?: OpportunityScanFilterState }
+    ) => {
       try {
         const primarySymbol = sanitizedTargetSymbols[0] || tradeForm.symbol;
 
         switch (action) {
           case 'opportunity': {
-            pushWorkflowLog('info', `Scanning live opportunities for ${primarySymbol}.`);
-            const result = await analyzeOpportunity({
-              symbol: primarySymbol,
-              analysis_type: workflowConfig.type === 'opportunity_scan' ? 'opportunity' : 'technical',
-              timeframe: workflowConfig.timeframe,
-              confidence_threshold: workflowConfig.confidence,
-              ai_models: workflowConfig.aiModels,
-              include_risk_metrics: workflowConfig.includeRiskMetrics
+            const appliedFilters = options?.filters ?? scanFilters;
+            if (options?.filters) {
+              setScanFilters(options.filters);
+            }
+            let lastLoggedMessage: string | null = null;
+            const logMessage = (level: WorkflowLogLevel, message: string) => {
+              if (lastLoggedMessage === message) {
+                return;
+              }
+              lastLoggedMessage = message;
+              pushWorkflowLog(level, message);
+            };
+
+            const filterMessages: string[] = [];
+            if (appliedFilters?.symbols?.length) {
+              filterMessages.push(`symbols (${appliedFilters.symbols.join(', ')})`);
+            }
+            if (appliedFilters?.assetTiers?.length) {
+              filterMessages.push(`asset tiers (${appliedFilters.assetTiers.join(', ')})`);
+            }
+            if (appliedFilters?.strategyIds?.length) {
+              filterMessages.push(`strategies (${appliedFilters.strategyIds.join(', ')})`);
+            }
+
+            const filterSuffix = filterMessages.length ? ` with ${filterMessages.join('; ')}` : '';
+
+            logMessage('info', `Scanning opportunities using your active trading strategies${filterSuffix}...`);
+
+            // 1. Initiate the enterprise opportunity discovery scan
+            const scanInitiation = await opportunityApi.discoverOpportunities({
+              force_refresh: true,
+              include_strategy_recommendations: true,
+              symbols: appliedFilters?.symbols?.length ? appliedFilters.symbols : undefined,
+              asset_tiers: appliedFilters?.assetTiers?.length ? appliedFilters.assetTiers : undefined,
+              strategy_ids: appliedFilters?.strategyIds?.length ? appliedFilters.strategyIds : undefined,
             });
-            recordInsight('Opportunity Analysis', 'analyze_opportunity', result);
-            pushWorkflowLog('success', 'Opportunity analysis completed.');
+
+            if (!scanInitiation?.success) {
+              throw new Error(scanInitiation?.message || 'Opportunity scan failed');
+            }
+
+            logMessage('info', `Scan initiated with ID: ${scanInitiation.scan_id}`);
+
+            // 2. Poll for scan results using the new async pattern
+            let scanResult: OpportunityDiscoveryResponse | null = null;
+            let pollAttempts = 0;
+            const pollIntervalMs = (scanInitiation.polling_interval_seconds ?? 3) * 1000;
+            const estimatedRuntimeMs = (scanInitiation.estimated_completion_seconds ?? 120) * 1000;
+            const maxWaitMs = Math.max(120_000, Math.floor(estimatedRuntimeMs * 1.5));
+            const maxPollAttempts = Math.max(40, Math.ceil(maxWaitMs / Math.max(pollIntervalMs, 1000)));
+            let consecutiveErrors = 0;
+            let lastNotFoundLoggedAt = -1;
+            let notFoundStreak = 0;
+            let lastPartialResults: DiscoveryOpportunity[] = [];
+
+            const attemptEarlyResultFetch = async (): Promise<OpportunityDiscoveryResponse | null> => {
+              try {
+                return await opportunityApi.getScanResults(scanInitiation.scan_id);
+              } catch (error) {
+                if (error instanceof OpportunityApiError) {
+                  const pendingCodes = ['SCAN_IN_PROGRESS', '202', '404', 'SCAN_NOT_FOUND'];
+                  if (pendingCodes.includes(error.code ?? '')) {
+                    return null;
+                  }
+                }
+
+                throw error;
+              }
+            };
+
+            while (pollAttempts < maxPollAttempts) {
+              await new Promise(resolve => setTimeout(resolve, pollIntervalMs));
+              pollAttempts++;
+
+              try {
+                const statusResponse = await opportunityApi.getScanStatus(scanInitiation.scan_id);
+
+                // Reset error counter on successful response
+                consecutiveErrors = 0;
+
+                const normalizedStatus = (statusResponse.status || '').toLowerCase();
+
+                switch (normalizedStatus) {
+                  case 'complete': {
+                    logMessage('success', 'Scan completed successfully! Fetching results...');
+
+                    const results = await attemptEarlyResultFetch();
+                    if (results) {
+                      scanResult = results;
+                      logMessage('success', `Retrieved ${results.total_opportunities} opportunities${filterSuffix}.`);
+                      break;
+                    }
+
+                    logMessage('info', 'Results not ready yet. Waiting for backend to finalize...');
+                    break;
+                  }
+                  case 'scanning':
+                  case 'running':
+                  case 'in_progress':
+                  case 'processing':
+                  case 'queued':
+                  case 'pending':
+                  case 'initiated':
+                  case 'initializing': {
+                    notFoundStreak = 0;
+                    const progress = statusResponse.progress;
+                    if (progress) {
+                      logMessage(
+                        'info',
+                        `Scanning... ${progress.strategies_completed}/${progress.total_strategies} strategies (${progress.percentage ?? 0}%)`
+                      );
+                    } else {
+                      logMessage('info', `Scan in progress (attempt ${pollAttempts}/${maxPollAttempts})...`);
+                    }
+
+                    if (Array.isArray(statusResponse.partial_results) && statusResponse.partial_results.length > 0) {
+                      lastPartialResults = statusResponse.partial_results;
+                    }
+
+                    if (pollAttempts >= 3 && pollAttempts % 5 === 0) {
+                      const results = await attemptEarlyResultFetch();
+                    if (results) {
+                      scanResult = results;
+                      logMessage('success', `Retrieved ${results.total_opportunities} opportunities${filterSuffix}.`);
+                        break;
+                      }
+                    }
+                    break;
+                  }
+                  case 'not_found': {
+                    notFoundStreak++;
+                    // Avoid spamming the log with the same message
+                    if (lastNotFoundLoggedAt !== pollAttempts) {
+                      logMessage('warning', 'Scan not yet registered - waiting for backend to initialise the job...');
+                      lastNotFoundLoggedAt = pollAttempts;
+                    }
+
+                    if (notFoundStreak >= 3) {
+                      const results = await attemptEarlyResultFetch();
+                    if (results) {
+                      scanResult = results;
+                      logMessage('success', `Retrieved ${results.total_opportunities} opportunities${filterSuffix}.`);
+                        break;
+                      }
+                    }
+                    break;
+                  }
+                  case 'failed': {
+                    const failureReason = statusResponse.message || 'Scan failed';
+                    logMessage('error', `Scan failed: ${failureReason}`);
+                    throw new Error(failureReason);
+                  }
+                  default: {
+                    logMessage('warning', `Unexpected scan status: ${statusResponse.status}`);
+                  }
+                }
+
+                if (scanResult) {
+                  break;
+                }
+              } catch (pollError: any) {
+                consecutiveErrors++;
+
+                if (pollError instanceof OpportunityApiError) {
+                  const statusCode = pollError.code;
+
+                  if (statusCode === '401' || statusCode === '403') {
+                    logMessage('error', `Authentication error (${statusCode}): ${pollError.message}`);
+                  } else if (statusCode === '404' || statusCode === 'SCAN_NOT_FOUND') {
+                    logMessage('error', `Scan not found (${statusCode}) - please initiate a new scan.`);
+                    throw pollError;
+                  } else if (statusCode === '500') {
+                    logMessage('error', `Backend service error (500): ${pollError.message}`);
+                  } else {
+                    logMessage('error', `Polling error (${statusCode || 'unknown'}): ${pollError.message}`);
+                  }
+                } else {
+                  // Extract detailed error information if available from Axios
+                  const statusCode = pollError?.response?.status;
+                  const errorDetail = pollError?.response?.data?.detail || pollError?.response?.data?.message;
+                  const errorMsg = pollError?.message || 'Unknown error';
+
+                  if (statusCode === 500) {
+                    logMessage('error', `Backend service error (500): ${errorDetail || errorMsg}`);
+                    logMessage('error', 'Internal server error occurred. Check backend logs for details.');
+                  } else if (statusCode === 404) {
+                    logMessage('error', `Scan not found (404) - scan_id may be invalid or scan was not created`);
+                  } else if (statusCode === 401 || statusCode === 403) {
+                    logMessage('error', `Authentication error (${statusCode}): ${errorDetail || errorMsg}`);
+                  } else if (pollError?.code === 'ECONNABORTED' || pollError?.code === 'ETIMEDOUT') {
+                    logMessage('warning', `Request timeout (attempt ${pollAttempts}/${maxPollAttempts})`);
+                  } else {
+                    logMessage('error', `Polling error (${statusCode || 'network'}): ${errorDetail || errorMsg}`);
+                  }
+                }
+
+                // If we have 3+ consecutive errors, fail fast
+                if (consecutiveErrors >= 3) {
+                  logMessage('error', `Aborting scan after ${consecutiveErrors} consecutive errors`);
+                  const error = new Error(`Backend service unavailable - ${consecutiveErrors} consecutive errors`);
+                  error.cause = pollError;
+                  throw error;
+                }
+
+                logMessage('info', `Retrying... (${consecutiveErrors} consecutive errors)`);
+                continue;
+              }
+            }
+
+            if (!scanResult) {
+              try {
+                const finalResults = await attemptEarlyResultFetch();
+                if (finalResults) {
+                  scanResult = finalResults;
+                  logMessage('success', `Retrieved ${finalResults.total_opportunities} opportunities${filterSuffix}.`);
+                }
+              } catch (finalError) {
+                if (
+                  !(finalError instanceof OpportunityApiError &&
+                  (finalError.code === 'SCAN_IN_PROGRESS' || finalError.code === 'SCAN_NOT_FOUND'))
+                ) {
+                  throw finalError;
+                }
+              }
+            }
+
+            if (!scanResult) {
+              if (lastPartialResults.length > 0) {
+                logMessage('warning', 'Scan timed out - using latest partial results while backend continues processing.');
+                scanResult = {
+                  success: true,
+                  scan_id: scanInitiation.scan_id,
+                  user_id: user?.id || 'unknown',
+                  opportunities: lastPartialResults,
+                  total_opportunities: lastPartialResults.length,
+                  signal_analysis: null,
+                  threshold_transparency: null,
+                  user_profile: {},
+                  strategy_performance: {},
+                  asset_discovery: {},
+                  strategy_recommendations: [],
+                  execution_time_ms: 0,
+                  last_updated: new Date().toISOString(),
+                  fallback_used: true
+                };
+              } else {
+                logMessage('error', `Scan timeout - taking longer than ${Math.round(maxWaitMs / 1000)} seconds`);
+                throw new Error('Scan timeout - taking longer than expected. The scan may still be running in the background.');
+              }
+            }
+
+            // 3. Parse opportunities from scan result
+            const opportunities = scanResult.opportunities || [];
+
+            logMessage('success', `Found ${opportunities.length} opportunities from your active strategies${filterSuffix}.`);
+
+            // 2. Map opportunities from discovery service to our Opportunity type
+            // These are already pre-validated by the strategy engine
+            const validated: Opportunity[] = opportunities.map((opp: any) => {
+              const expiresAt = new Date(Date.now() + 5 * 60 * 1000).toISOString(); // 5 minutes from now
+
+              // Normalize opportunity_type for case-insensitive comparison
+              const oppType = String(opp.opportunity_type || '').toLowerCase().trim();
+
+              // Determine side with explicit checks for long/buy and short/sell
+              let side: 'buy' | 'sell';
+              if (oppType.includes('long') || oppType.includes('buy')) {
+                side = 'buy';
+              } else if (oppType.includes('short') || oppType.includes('sell')) {
+                side = 'sell';
+              } else {
+                // Default fallback
+                side = 'sell';
+              }
+
+              return {
+                id: crypto.randomUUID(),
+                symbol: opp.symbol,
+                side,
+                strategy: opp.strategy_name || opp.strategy_id || 'Unknown',
+                confidence: Number(opp.confidence_score ?? 0) * 100, // Convert 0-1 to 0-100
+                entry_price: Number(opp.entry_price ?? 0),
+                stop_loss: Number(opp.metadata?.stop_loss ?? 0),
+                take_profit: Number(opp.metadata?.take_profit ?? 0),
+                suggested_position_size: Number(opp.required_capital_usd ?? 0),
+                position_size_percent: Number(opp.metadata?.position_size_percent ?? 5),
+                max_risk: Number(opp.metadata?.max_risk_usd ?? 0),
+                max_risk_percent: Number(opp.metadata?.max_risk_percent ?? 2),
+                potential_gain: Number(opp.profit_potential_usd ?? 0),
+                potential_gain_percent: Number(opp.metadata?.potential_gain_percent ?? 0),
+                risk_reward_ratio: Number(opp.metadata?.risk_reward_ratio ?? 0),
+                timeframe: opp.estimated_timeframe || '4h',
+                reasoning: opp.metadata?.reasoning || `Opportunity detected by ${opp.strategy_name}`,
+                indicators: opp.metadata?.indicators,
+                timestamp: opp.discovered_at || new Date().toISOString(),
+                expires_at: expiresAt,
+                aiValidated: true, // Already validated by strategy engine
+                validation: {
+                  approved: true,
+                  consensus_score: Number(opp.confidence_score ?? 0) * 100,
+                  confidence: Number(opp.confidence_score ?? 0) * 100,
+                  reason: `Strategy-validated opportunity: ${opp.strategy_name}`,
+                  model_responses: [],
+                  risk_assessment: {
+                    level: (opp.risk_level?.toUpperCase() || 'MEDIUM') as 'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL',
+                    max_loss: opp.stop_loss ? Math.abs(opp.entry_price - opp.stop_loss) * (opp.suggested_position_size || 0) : 0,
+                    max_loss_percent: opp.stop_loss ? Math.abs((opp.stop_loss - opp.entry_price) / opp.entry_price) * 100 : 0
+                  }
+                },
+                validationReason: undefined
+              };
+            });
+
+            const nonValidated: Opportunity[] = []; // All opportunities from service are pre-validated
+
+            // 4. Calculate costs from backend pricing config (use defaults if not loaded)
+            const config = pricingConfig || {
+              opportunity_scan_cost: 1,
+              validation_cost: 2,
+              execution_cost: 2,
+              per_call_estimate: 0.05
+            };
+            const scanCost = opportunities.length * config.opportunity_scan_cost;
+            const validationCost = opportunities.length * config.validation_cost;
+            const totalScanCost = scanCost + validationCost;
+
+            // 5. Show drawer with tiered results
+            setOpportunitiesDrawer({
+              open: true,
+              data: {
+                validated,
+                nonValidated,
+                totalCount: opportunities.length,
+                validatedCount: validated.length,
+                scanCost: totalScanCost,
+                executionCostPerTrade: config.execution_cost
+              },
+              executing: new Set(),
+              validating: new Set()
+            });
+
+            // 6. Update consensus card with best validated opportunity (sort by consensus_score)
+            if (validated.length > 0) {
+              // Clone and sort to avoid mutation
+              const sortedValidated = [...validated].sort((a, b) => {
+                const scoreA = a.validation?.consensus_score ?? 0;
+                const scoreB = b.validation?.consensus_score ?? 0;
+                return scoreB - scoreA; // Descending
+              });
+              const best = sortedValidated[0];
+              setLatestConsensusData({
+                consensus_score: best.validation?.consensus_score || 0,
+                recommendation: best.side === 'buy' ? 'BUY' : 'SELL',
+                confidence_threshold_met: true,
+                model_responses: (best.validation?.model_responses || []).map(mr => ({
+                  ...mr,
+                  score: mr.confidence || 0  // Add missing score property
+                })),
+                cost_summary: { total_cost: totalScanCost },
+                reasoning: best.reasoning || `Top opportunity from ${validated.length} validated`,
+                timestamp: new Date().toISOString()
+              });
+            }
+
+            // 7. Show toast
+            toast({
+              title: `? ${validated.length} AI-Validated Opportunities`,
+              description: `${opportunities.length} total found | ${validated.length} ready to execute`,
+            });
+
+            recordInsight('Opportunity Scan', 'analyze_opportunity', { validated: validated.length, total: opportunities.length });
+            pushWorkflowLog('success', `Found ${validated.length} validated, ${nonValidated.length} other opportunities`);
             break;
           }
           case 'validation': {
@@ -762,9 +1380,22 @@ const ManualTradingPage: React.FC = () => {
       creditActions,
       fetchPortfolio,
       toast,
-      selectedStrategy
+      selectedStrategy,
+      scanFilters,
+      pricingConfig,
+      user,
     ]
   );
+
+  const handleStartOpportunityScan = useCallback(() => {
+    const normalized = normalizeFiltersForSubmission(scanFilters);
+    setScanDialogOpen(false);
+    void handleConsensusAction('opportunity', { filters: normalized });
+  }, [
+    handleConsensusAction,
+    normalizeFiltersForSubmission,
+    scanFilters,
+  ]);
 
   const applyAiRecommendationToTrade = useCallback(() => {
     if (!aiSummary?.actionData) {
@@ -888,6 +1519,336 @@ const ManualTradingPage: React.FC = () => {
     [strategyActions, tradeForm.symbol, workflowConfig, recordInsight, pushWorkflowLog, creditActions]
   );
 
+  // Opportunities Drawer Handlers
+  const handleExecuteOpportunity = useCallback(
+    async (opportunityId: string, positionSize: number) => {
+      try {
+        // Add to executing set
+        setOpportunitiesDrawer(prev => ({
+          ...prev,
+          executing: new Set([...prev.executing, opportunityId])
+        }));
+
+        // Find the opportunity
+        const opportunity = [
+          ...(opportunitiesDrawer.data?.validated || []),
+          ...(opportunitiesDrawer.data?.nonValidated || [])
+        ].find(opp => opp.id === opportunityId);
+
+        if (!opportunity) {
+          throw new Error('Opportunity not found');
+        }
+
+        pushWorkflowLog('info', `Executing trade for ${opportunity.symbol}...`);
+
+        // Execute the trade
+        const response = await apiClient.post('/trading/execute', {
+          symbol: opportunity.symbol,
+          action: opportunity.side,
+          amount: positionSize,
+          order_type: 'market',
+          price: opportunity.entry_price,
+          stop_loss: opportunity.stop_loss,
+          take_profit: opportunity.take_profit,
+          leverage: 1,
+          strategy_type: opportunity.strategy,
+          source: 'ai_opportunity'
+        });
+
+        pushWorkflowLog('success', `Trade executed: ${opportunity.side.toUpperCase()} ${opportunity.symbol}`);
+
+        toast({
+          title: 'Trade Executed',
+          description: `${opportunity.side.toUpperCase()} ${formatCurrency(positionSize)} of ${opportunity.symbol}`,
+          variant: 'default'
+        });
+
+        // Refresh data
+        creditActions.fetchBalance();
+        fetchPortfolio();
+        fetchRecentTrades();
+
+        // Remove from executing set
+        setOpportunitiesDrawer(prev => {
+          const newExecuting = new Set(prev.executing);
+          newExecuting.delete(opportunityId);
+          return { ...prev, executing: newExecuting };
+        });
+      } catch (error: any) {
+        console.error('Trade execution failed', error);
+        pushWorkflowLog('error', error?.response?.data?.detail || error?.message || 'Trade execution failed.');
+        toast({
+          title: 'Trade Execution Failed',
+          description: error?.response?.data?.detail || error?.message || 'Unable to execute trade.',
+          variant: 'destructive'
+        });
+
+        // Remove from executing set
+        setOpportunitiesDrawer(prev => {
+          const newExecuting = new Set(prev.executing);
+          newExecuting.delete(opportunityId);
+          return { ...prev, executing: newExecuting };
+        });
+      }
+    },
+    [opportunitiesDrawer.data, pushWorkflowLog, toast, creditActions, fetchPortfolio, fetchRecentTrades]
+  );
+
+  const handleBatchExecuteOpportunities = useCallback(
+    async (opportunityIds: string[]) => {
+      try {
+        // Add all to executing set
+        setOpportunitiesDrawer(prev => ({
+          ...prev,
+          executing: new Set([...prev.executing, ...opportunityIds])
+        }));
+
+        pushWorkflowLog('info', `Executing batch of ${opportunityIds.length} trades...`);
+
+        // Execute all trades in parallel
+        const results = await Promise.allSettled(
+          opportunityIds.map(async (id) => {
+            const opportunity = [
+              ...(opportunitiesDrawer.data?.validated || []),
+            ].find(opp => opp.id === id);
+
+            if (!opportunity) {
+              throw new Error(`Opportunity ${id} not found`);
+            }
+
+            return apiClient.post('/trading/execute', {
+              symbol: opportunity.symbol,
+              action: opportunity.side,
+              amount: opportunity.suggested_position_size,
+              order_type: 'market',
+              price: opportunity.entry_price,
+              stop_loss: opportunity.stop_loss,
+              take_profit: opportunity.take_profit,
+              leverage: 1,
+              strategy_type: opportunity.strategy,
+              source: 'ai_opportunity_batch'
+            });
+          })
+        );
+
+        // Count successes
+        const successCount = results.filter(r => r.status === 'fulfilled').length;
+        const failCount = results.length - successCount;
+
+        pushWorkflowLog('success', `Batch execution complete: ${successCount} successful, ${failCount} failed`);
+
+        toast({
+          title: 'Batch Execution Complete',
+          description: `${successCount} trades executed successfully${failCount > 0 ? `, ${failCount} failed` : ''}`,
+          variant: successCount > 0 ? 'default' : 'destructive'
+        });
+
+        // Refresh data
+        creditActions.fetchBalance();
+        fetchPortfolio();
+        fetchRecentTrades();
+
+        // Clear executing set
+        setOpportunitiesDrawer(prev => ({
+          ...prev,
+          executing: new Set()
+        }));
+      } catch (error: any) {
+        console.error('Batch execution failed', error);
+        pushWorkflowLog('error', error?.message || 'Batch execution failed.');
+        toast({
+          title: 'Batch Execution Failed',
+          description: error?.message || 'Unable to execute batch trades.',
+          variant: 'destructive'
+        });
+
+        // Clear executing set
+        setOpportunitiesDrawer(prev => ({
+          ...prev,
+          executing: new Set()
+        }));
+      }
+    },
+    [opportunitiesDrawer.data, pushWorkflowLog, toast, creditActions, fetchPortfolio, fetchRecentTrades]
+  );
+
+  const handleValidateOpportunity = useCallback(
+    async (opportunityId: string) => {
+      try {
+        // Add to validating set
+        setOpportunitiesDrawer(prev => ({
+          ...prev,
+          validating: new Set([...prev.validating, opportunityId])
+        }));
+
+        // Find the opportunity
+        const opportunity = opportunitiesDrawer.data?.nonValidated.find(opp => opp.id === opportunityId);
+
+        if (!opportunity) {
+          throw new Error('Opportunity not found');
+        }
+
+        pushWorkflowLog('info', `Validating ${opportunity.symbol} with AI consensus...`);
+
+        // Validate the trade - calculate percentages based on side
+        const stopLossPercent = opportunity.side === 'buy'
+          ? ((opportunity.entry_price - opportunity.stop_loss) / opportunity.entry_price) * 100
+          : ((opportunity.stop_loss - opportunity.entry_price) / opportunity.entry_price) * 100;
+
+        const takeProfitPercent = opportunity.side === 'buy'
+          ? ((opportunity.take_profit - opportunity.entry_price) / opportunity.entry_price) * 100
+          : ((opportunity.entry_price - opportunity.take_profit) / opportunity.entry_price) * 100;
+
+        const result = await validateTrade({
+          trade_data: {
+            symbol: opportunity.symbol,
+            action: opportunity.side,
+            amount: opportunity.suggested_position_size,
+            order_type: 'market',
+            stop_loss: stopLossPercent,
+            take_profit: takeProfitPercent,
+            leverage: 1,
+            strategy: opportunity.strategy
+          },
+          confidence_threshold: workflowConfig.confidence,
+          ai_models: workflowConfig.aiModels,
+          execution_urgency: 'normal'
+        });
+
+        if (result.approved) {
+          // Move to validated
+          setOpportunitiesDrawer(prev => {
+            if (!prev.data) return prev;
+
+            const updatedOpportunity: Opportunity = {
+              ...opportunity,
+              aiValidated: true,
+              validation: {
+                approved: result.approved,
+                consensus_score: result.consensus_score || 0,
+                confidence: result.confidence || 0,
+                reason: result.reason,
+                model_responses: result.model_responses,
+                risk_assessment: result.risk_assessment
+              },
+              validationReason: undefined
+            };
+
+            return {
+              ...prev,
+              data: {
+                ...prev.data,
+                validated: [...prev.data.validated, updatedOpportunity],
+                nonValidated: prev.data.nonValidated.filter(opp => opp.id !== opportunityId),
+                validatedCount: prev.data.validatedCount + 1
+              },
+              validating: new Set([...prev.validating].filter(id => id !== opportunityId))
+            };
+          });
+
+          pushWorkflowLog('success', `${opportunity.symbol} validated successfully!`);
+          toast({
+            title: 'Opportunity Validated',
+            description: `${opportunity.symbol} passed AI consensus validation`,
+            variant: 'default'
+          });
+        } else {
+          pushWorkflowLog('warning', `${opportunity.symbol} did not pass validation`);
+          toast({
+            title: 'Validation Failed',
+            description: result.reason || 'Did not meet consensus threshold',
+            variant: 'destructive'
+          });
+
+          // Remove from validating set
+          setOpportunitiesDrawer(prev => {
+            const newValidating = new Set(prev.validating);
+            newValidating.delete(opportunityId);
+            return { ...prev, validating: newValidating };
+          });
+        }
+
+        creditActions.fetchBalance();
+      } catch (error: any) {
+        console.error('Validation failed', error);
+        pushWorkflowLog('error', error?.message || 'Validation failed.');
+        toast({
+          title: 'Validation Error',
+          description: error?.message || 'Unable to validate opportunity.',
+          variant: 'destructive'
+        });
+
+        // Remove from validating set
+        setOpportunitiesDrawer(prev => {
+          const newValidating = new Set(prev.validating);
+          newValidating.delete(opportunityId);
+          return { ...prev, validating: newValidating };
+        });
+      }
+    },
+    [opportunitiesDrawer.data, validateTrade, workflowConfig, pushWorkflowLog, toast, creditActions]
+  );
+
+  const handleApplyOpportunityToForm = useCallback(
+    (opportunity: Opportunity) => {
+      // Calculate percentages based on side
+      const stopLossPercent = opportunity.side === 'buy'
+        ? ((opportunity.entry_price - opportunity.stop_loss) / opportunity.entry_price) * 100
+        : ((opportunity.stop_loss - opportunity.entry_price) / opportunity.entry_price) * 100;
+
+      const takeProfitPercent = opportunity.side === 'buy'
+        ? ((opportunity.take_profit - opportunity.entry_price) / opportunity.entry_price) * 100
+        : ((opportunity.entry_price - opportunity.take_profit) / opportunity.entry_price) * 100;
+
+      setTradeForm({
+        symbol: opportunity.symbol,
+        action: opportunity.side,
+        amount: opportunity.suggested_position_size,
+        orderType: 'market',
+        price: opportunity.entry_price,
+        stopLoss: stopLossPercent,
+        takeProfit: takeProfitPercent,
+        leverage: 1
+      });
+
+      toast({
+        title: 'Applied to Form',
+        description: `${opportunity.symbol} parameters loaded into trade form`,
+        variant: 'default'
+      });
+    },
+    [toast]
+  );
+
+  // Fetch pricing configuration from backend
+  useEffect(() => {
+    const fetchPricing = async () => {
+      try {
+        const response = await apiClient.get('/ai/pricing');
+        setPricingConfig({
+          opportunity_scan_cost: response.data.opportunity_scan_cost || 1,
+          validation_cost: response.data.validation_cost || 2,
+          execution_cost: response.data.execution_cost || 2,
+          per_call_estimate: response.data.per_call_estimate || 0.05
+        });
+        setPricingError(null);
+      } catch (error: any) {
+        console.error('Failed to fetch pricing config, using defaults', error);
+        // Use default pricing config as fallback
+        setPricingConfig({
+          opportunity_scan_cost: 1,
+          validation_cost: 2,
+          execution_cost: 2,
+          per_call_estimate: 0.05
+        });
+        // Don't show error to user for missing pricing endpoint, just use defaults
+        setPricingError(null);
+      }
+    };
+
+    fetchPricing();
+  }, []);
+
   useEffect(() => {
     setCurrentMode(ChatMode.TRADING);
     if (!sessionId) {
@@ -923,52 +1884,125 @@ const ManualTradingPage: React.FC = () => {
     pushWorkflowLog('info', message);
   }, [connectionStatus, isConnectionOpen, pushWorkflowLog]);
 
+  // Removed: auto-switch to workflow tab (tabs no longer used)
+
+  // Update latestConsensusData when AI summary completes
   useEffect(() => {
-    if (isStreaming && activeTab !== 'workflow') {
-      setActiveTab('workflow');
+    if (aiSummary?.aiAnalysis) {
+      const analysis = aiSummary.aiAnalysis;
+
+      // Try to extract consensus data from the AI analysis
+      if (analysis.consensus_score !== undefined && analysis.recommendation) {
+        setLatestConsensusData({
+          consensus_score: analysis.consensus_score || 0,
+          recommendation: analysis.recommendation || 'HOLD',
+          confidence_threshold_met: analysis.confidence_threshold_met || false,
+          model_responses: analysis.model_responses || [],
+          cost_summary: analysis.cost_summary,
+          reasoning: analysis.reasoning || aiSummary.content,
+          timestamp: new Date().toISOString()
+        });
+      }
     }
-  }, [isStreaming, activeTab]);
+  }, [aiSummary]);
+
+  // Update marketContext when market data updates
+  useEffect(() => {
+    if (marketData && marketData.length > 0) {
+      // Derive market context from marketData
+      const symbols = marketData.map(item => item.symbol);
+      const avgChange = marketData.reduce((sum, item) => sum + (item.change || 0), 0) / marketData.length;
+
+      // Determine trend based on average change
+      let trend: 'bullish' | 'bearish' | 'neutral' = 'neutral';
+      if (avgChange > 2) trend = 'bullish';
+      else if (avgChange < -2) trend = 'bearish';
+
+      // Determine sentiment (simplified)
+      let sentiment: 'positive' | 'negative' | 'neutral' = 'neutral';
+      if (avgChange > 1) sentiment = 'positive';
+      else if (avgChange < -1) sentiment = 'negative';
+
+      setMarketContext({
+        symbols,
+        trend,
+        sentiment,
+        avgChange,
+        topGainers: marketData
+          .filter(item => (item.change || 0) > 0)
+          .sort((a, b) => (b.change || 0) - (a.change || 0))
+          .slice(0, 3),
+        topLosers: marketData
+          .filter(item => (item.change || 0) < 0)
+          .sort((a, b) => (a.change || 0) - (b.change || 0))
+          .slice(0, 3)
+      });
+    }
+  }, [marketData]);
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-6">
-      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Manual Trading Control Center</h1>
-          <p className="text-muted-foreground">
-            Execute trades, rebalancing, and AI-driven actions with full transparency into every phase.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
-          <Badge variant="outline" className="gap-1">
-            <Radio className="h-3 w-3" />
-            {isConnectionOpen ? 'AI live' : 'AI idle'}
-          </Badge>
-          <Badge variant="outline" className="gap-1">
-            <ListTree className="h-3 w-3" />
-            {aggregatedStats.connectedCount} Exchanges
-          </Badge>
-          <Badge variant="outline" className="gap-1">
-            <DollarSign className="h-3 w-3" />
-            {formatCurrency(availableBalance)} Available
-          </Badge>
-          <Badge variant="secondary" className="gap-1">
-            <Zap className="h-3 w-3" />
-            {creditsLoading ? 'Loading credits…' : `${balance.available_credits} credits`}
-          </Badge>
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="h-full flex flex-col">
+      {/* Header Section */}
+      <div className="flex-shrink-0 border-b p-6">
+        {/* Pricing Error Alert */}
+        {pricingError && (
+          <div className="mb-4 rounded-lg border-red-500/50 bg-red-500/10 p-4">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="h-5 w-5 text-red-500 mt-0.5" />
+              <div className="flex-1">
+                <h3 className="font-semibold text-red-500">Pricing Configuration Error</h3>
+                <p className="text-sm text-muted-foreground mt-1">{pricingError}</p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => window.location.reload()}
+                  className="mt-3"
+                >
+                  <RefreshCw className="mr-2 h-4 w-4" />
+                  Refresh Page
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <h1 className="text-3xl font-bold tracking-tight flex items-center gap-3">
+              <Target className="h-8 w-8 text-primary" />
+              Manual Trading
+            </h1>
+            <p className="text-muted-foreground mt-1">
+              Professional trading interface with AI-powered intelligence
+            </p>
+          </div>
+          <div className="flex flex-wrap items-center gap-3">
+            <Badge variant="outline" className="gap-1">
+              <Radio className="h-3 w-3" />
+              {isConnectionOpen ? 'AI Live' : 'AI Idle'}
+            </Badge>
+            <Badge variant="outline" className="gap-1">
+              <ListTree className="h-3 w-3" />
+              {aggregatedStats.connectedCount} Exchanges
+            </Badge>
+            <Badge variant="outline" className="gap-1">
+              <DollarSign className="h-3 w-3" />
+              {formatCurrency(availableBalance)}
+            </Badge>
+            <Badge variant="secondary" className="gap-1">
+              <Zap className="h-3 w-3" />
+              {creditsLoading ? 'Loading...' : `${balance.available_credits} credits`}
+            </Badge>
+          </div>
         </div>
       </div>
 
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
-        <TabsList className="grid w-full grid-cols-4">
-          <TabsTrigger value="trade">Execute Trade</TabsTrigger>
-          <TabsTrigger value="workflow">AI Workflow</TabsTrigger>
-          <TabsTrigger value="strategies">Strategies</TabsTrigger>
-          <TabsTrigger value="risk">Live Intelligence</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="trade" className="space-y-6">
-          <div className="grid gap-6 lg:grid-cols-3">
-            <Card className="lg:col-span-2">
+      {/* Main 2-Column Layout */}
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-12 gap-6 p-6 min-h-0">
+        {/* LEFT COLUMN: Trading Execution (col-span-8) */}
+        <div className="col-span-1 lg:col-span-8 flex flex-col gap-6 min-h-0">
+          {/* Trade Execution Form */}
+          <Card className="flex-1 flex flex-col overflow-hidden">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2">
                   <Target className="h-5 w-5" />
@@ -1144,12 +2178,286 @@ const ManualTradingPage: React.FC = () => {
                   </div>
                 </div>
               </CardContent>
-            </Card>
+          </Card>
 
-            <div className="space-y-6">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-base">
+          {/* Streaming Logs / Phase Execution */}
+          {(isStreaming || workflowLogs.length > 0) && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Activity className="h-4 w-4" />
+                  Execution Log
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ScrollArea className="h-64">
+                  <div className="space-y-2 text-sm font-mono">
+                    {workflowLogs.map((log) => (
+                      <div
+                        key={log.id}
+                        className={`p-2 rounded ${
+                          log.level === 'error'
+                            ? 'bg-red-500/10 text-red-500'
+                            : log.level === 'success'
+                            ? 'bg-green-500/10 text-green-500'
+                            : log.level === 'warning'
+                            ? 'bg-yellow-500/10 text-yellow-500'
+                            : 'bg-muted'
+                        }`}
+                      >
+                        <span className="text-muted-foreground">[{log.time}]</span> {log.message}
+                      </div>
+                    ))}
+                    {streamingContent && (
+                      <div className="p-2 rounded bg-blue-500/10 text-blue-500">
+                        {streamingContent}
+                      </div>
+                    )}
+                  </div>
+                </ScrollArea>
+              </CardContent>
+            </Card>
+          )}
+        </div>
+
+        {/* RIGHT COLUMN: AI Intelligence Panel (col-span-4) */}
+        <div className="col-span-1 lg:col-span-4 flex flex-col gap-4 min-h-0 overflow-hidden">
+          <div className="space-y-4 overflow-y-auto flex-1 pr-2 pb-4">
+            {/* Quick Action Bar */}
+            <Dialog open={scanDialogOpen} onOpenChange={setScanDialogOpen}>
+              <DialogContent className="max-w-3xl">
+                <DialogHeader>
+                  <DialogTitle>Configure opportunity scan</DialogTitle>
+                  <DialogDescription>
+                    Choose optional filters to focus the scan. Leave everything blank to analyze all eligible assets and strategies.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-6">
+                  <div>
+                    <Label className="text-sm font-semibold">Symbols</Label>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Provide trading pairs (e.g. BTCUSDT). Leave empty to scan the full asset universe.
+                    </p>
+                    <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                      <Input
+                        value={scanSymbolInput}
+                        onChange={(event) => setScanSymbolInput(event.target.value)}
+                        onKeyDown={handleSymbolInputKeyDown}
+                        placeholder="Add symbol (press Enter to add)"
+                        className="sm:flex-1"
+                      />
+                      <div className="flex gap-2">
+                        <Button type="button" variant="secondary" onClick={handleAddScanSymbol}>
+                          Add
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          onClick={() => setScanFilters((prev) => ({ ...prev, symbols: [] }))}
+                          disabled={!scanFilters.symbols.length}
+                        >
+                          Clear
+                        </Button>
+                      </div>
+                    </div>
+                    {scanFilters.symbols.length > 0 ? (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {scanFilters.symbols.map((symbol) => (
+                          <Badge key={symbol} variant="secondary" className="flex items-center gap-1">
+                            {symbol}
+                            <button
+                              type="button"
+                              onClick={() => removeScanSymbol(symbol)}
+                              className="text-xs leading-none text-muted-foreground transition-colors hover:text-destructive focus:outline-none"
+                              aria-label={`Remove ${symbol}`}
+                            >
+                              ?
+                            </button>
+                          </Badge>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="mt-3 text-sm text-muted-foreground">
+                        Leave empty to include every discovered asset.
+                      </p>
+                    )}
+                    {suggestedSymbols.length > 0 && (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {suggestedSymbols.map((symbol) => (
+                          <Button
+                            key={symbol}
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => addScanSymbol(symbol)}
+                            disabled={scanFilters.symbols.includes(symbol)}
+                          >
+                            {symbol}
+                          </Button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <Label className="text-sm font-semibold">Asset tiers</Label>
+                        <p className="text-sm text-muted-foreground">
+                          Narrow the scan by daily volume tier. Leave all unchecked to respect your profile tier.
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={clearAssetTiers}
+                        disabled={!scanFilters.assetTiers.length}
+                      >
+                        Use profile tiers
+                      </Button>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {ASSET_TIER_OPTIONS.map((tier) => (
+                        <label
+                          key={tier.value}
+                          className="flex items-start gap-3 rounded-md border p-3 transition-colors hover:bg-muted/60"
+                        >
+                          <Checkbox
+                            checked={scanFilters.assetTiers.includes(tier.value)}
+                            onCheckedChange={(checked) => toggleAssetTier(tier.value, checked === true)}
+                          />
+                          <div>
+                            <div className="font-medium">{tier.label}</div>
+                            <p className="text-xs text-muted-foreground">{tier.description}</p>
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <Label className="text-sm font-semibold">Strategies</Label>
+                        <p className="text-sm text-muted-foreground">
+                          Choose specific strategies to include. Leave empty to scan all active strategies.
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={selectAllStrategies}
+                          disabled={!strategies.length}
+                        >
+                          Select all
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={clearStrategies}
+                          disabled={!scanFilters.strategyIds.length}
+                        >
+                          Clear
+                        </Button>
+                      </div>
+                    </div>
+                    <ScrollArea className="max-h-48 rounded-md border">
+                      <div className="space-y-2 p-3">
+                        {strategies.length === 0 ? (
+                          <p className="text-sm text-muted-foreground">No active strategies available.</p>
+                        ) : (
+                          strategies.map((strategy) => (
+                            <label
+                              key={strategy.strategy_id}
+                              className="flex items-start gap-3 rounded-md p-2 transition-colors hover:bg-muted/60"
+                            >
+                              <Checkbox
+                                checked={scanFilters.strategyIds.includes(strategy.strategy_id)}
+                                onCheckedChange={(checked) => toggleStrategySelection(strategy.strategy_id, checked === true)}
+                              />
+                              <div>
+                                <div className="font-medium">{strategy.name}</div>
+                                <p className="text-xs text-muted-foreground capitalize">
+                                  {strategy.status?.replace(/_/g, ' ') || 'active'}
+                                </p>
+                              </div>
+                            </label>
+                          ))
+                        )}
+                      </div>
+                    </ScrollArea>
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button type="button" variant="outline" onClick={() => setScanDialogOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button type="button" onClick={handleStartOpportunityScan}>
+                    Start scan
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
+            <QuickActionBar
+              onScanOpportunities={handleOpenScanDialog}
+              onValidateTrade={() => handleConsensusAction('validation')}
+              onAssessRisk={() => handleConsensusAction('risk')}
+              onRebalancePortfolio={() => handleConsensusAction('portfolio')}
+              onFinalConsensus={() => handleConsensusAction('decision')}
+              availableCredits={balance.available_credits || 0}
+              compact={false}
+            />
+
+            {/* Phase Progress Visualizer */}
+            <PhaseProgressVisualizer
+              currentPhase={currentPhase}
+              phaseHistory={phaseHistory}
+              isCompact={false}
+              showMetrics={true}
+              allowManualControl={false}
+            />
+
+            {/* AI Consensus Card */}
+            {latestConsensusData && (
+              <AIConsensusCard
+                consensusData={latestConsensusData}
+                compact={true}
+                onApplyRecommendation={applyAiRecommendationToTrade}
+              />
+            )}
+
+            {/* Market Context Card */}
+            {/* TODO: Fix type mismatch between MarketContext and MarketContextData */}
+            {/* {marketContext && (
+              <MarketContextCard
+                marketData={marketContext}
+                compact={true}
+              />
+            )} */}
+
+            {/* AI Usage Stats */}
+            <AIUsageStats
+              usageData={{
+                remainingCredits: balance.available_credits || 0,
+                totalCredits: balance.total_purchased_credits || 0,
+                todayCalls: balance.total_used_credits || 0,
+                todayCost: (balance.total_used_credits || 0) * (pricingConfig?.per_call_estimate || 0.05),
+                profitGenerated: dailyPnL > 0 ? dailyPnL : 0,
+                roi: dailyPnL > 0 && balance.total_used_credits > 0 ? dailyPnL / ((balance.total_used_credits || 1) * (pricingConfig?.per_call_estimate || 0.05)) : 0
+              }}
+              isLoading={creditsLoading}
+              compact={true}
+            />
+
+            {/* Portfolio Snapshot */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center gap-2 text-base">
                     <BarChart3 className="h-4 w-4" />
                     Portfolio Snapshot
                   </CardTitle>
@@ -1176,590 +2484,59 @@ const ManualTradingPage: React.FC = () => {
                     </span>
                   </div>
                 </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    <Activity className="h-4 w-4" />
-                    Recent Trades
-                  </CardTitle>
-                  <CardDescription>Live feed from all connected exchanges.</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <ScrollArea className="h-48 pr-2">
-                    <div className="space-y-3 text-sm">
-                      {recentTrades.length === 0 ? (
-                        <p className="text-muted-foreground">No recent trades recorded.</p>
-                      ) : (
-                        recentTrades.map((trade) => (
-                          <div key={trade.id} className="rounded-md border p-3">
-                            <div className="flex items-center justify-between">
-                              <span className="font-semibold">{trade.symbol}</span>
-                              <Badge variant="outline" className="gap-1">
-                                {trade.side === 'buy' ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
-                                {trade.side.toUpperCase()}
-                              </Badge>
-                            </div>
-                            <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
-                              <span>{new Date(trade.time).toLocaleString()}</span>
-                              <span>{formatCurrency(trade.price)}</span>
-                            </div>
-                            <div className="mt-2 flex items-center justify-between text-xs">
-                              <span>Amount: {trade.amount}</span>
-                              <span className={trade.pnl >= 0 ? 'text-green-500 font-semibold' : 'text-red-500 font-semibold'}>
-                                P&amp;L: {formatCurrency(trade.pnl)}
-                              </span>
-                            </div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </ScrollArea>
-                </CardContent>
-              </Card>
-            </div>
-          </div>
-        </TabsContent>
-
-        <TabsContent value="workflow" className="space-y-6">
-          <div className="grid gap-6 xl:grid-cols-3">
-            <Card className="xl:col-span-2">
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Brain className="h-5 w-5" />
-                  Live AI Workflow
-                </CardTitle>
-                <CardDescription>
-                  Mirror the chat-based AI process with step-by-step transparency and actionable results.
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-6">
-                <div className="grid gap-4 md:grid-cols-2">
-                  <div className="space-y-2">
-                    <Label>Workflow Type</Label>
-                    <Select
-                      value={workflowConfig.type}
-                      onValueChange={(value) => setWorkflowConfig((prev) => ({ ...prev, type: value as ManualWorkflowType }))}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="trade_validation">Trade Validation</SelectItem>
-                        <SelectItem value="portfolio_rebalance">Portfolio Rebalancing</SelectItem>
-                        <SelectItem value="opportunity_scan">Opportunity Scan</SelectItem>
-                        <SelectItem value="market_analysis">Market Analysis</SelectItem>
-                        <SelectItem value="portfolio_review">Portfolio Review</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>Preferred Strategy</Label>
-                    <Select
-                      value={workflowConfig.strategyId}
-                      onValueChange={(value) => setWorkflowConfig((prev) => ({ ...prev, strategyId: value }))}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select strategy" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="manual">Manual Parameters</SelectItem>
-                        {Object.entries(availableStrategies).map(([key, strategy]) => (
-                          <SelectItem key={key} value={key}>
-                            {strategy.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {selectedStrategy && (
-                      <p className="text-xs text-muted-foreground">
-                        {selectedStrategy.description}
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>Timeframe</Label>
-                    <Input
-                      value={workflowConfig.timeframe}
-                      onChange={(event) => setWorkflowConfig((prev) => ({ ...prev, timeframe: event.target.value }))}
-                      placeholder="e.g. 1h, 4h, 1d"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>Target Confidence (%)</Label>
-                    <Slider
-                      value={[workflowConfig.confidence]}
-                      min={55}
-                      max={95}
-                      step={1}
-                      onValueChange={([value]) => setWorkflowConfig((prev) => ({ ...prev, confidence: value }))}
-                    />
-                    <div className="text-xs text-muted-foreground">{workflowConfig.confidence}% consensus target</div>
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>Symbols to Monitor</Label>
-                    <Input
-                      value={workflowConfig.targetSymbolsText}
-                      onChange={(event) => setWorkflowConfig((prev) => ({ ...prev, targetSymbolsText: event.target.value }))}
-                      placeholder="Comma separated list (e.g. BTC/USDT,ETH/USDT)"
-                    />
-                  </div>
-
-                  <div className="space-y-2">
-                    <Label>Rebalance Threshold (%)</Label>
-                    <Input
-                      type="number"
-                      value={workflowConfig.rebalanceThreshold}
-                      onChange={(event) =>
-                        setWorkflowConfig((prev) => ({ ...prev, rebalanceThreshold: Number(event.target.value) || 0 }))
-                      }
-                    />
-                  </div>
-                </div>
-
-                <div className="flex flex-col gap-4 rounded-lg border p-4">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <Label>AI Model Strategy</Label>
-                      <p className="text-xs text-muted-foreground">Select the weighting of GPT-4, Claude, and Gemini.</p>
-                    </div>
-                    <Select
-                      value={workflowConfig.aiModels}
-                      onValueChange={(value) => setWorkflowConfig((prev) => ({ ...prev, aiModels: value }))}
-                    >
-                      <SelectTrigger className="w-[200px]">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">Balanced (all models)</SelectItem>
-                        <SelectItem value="gpt4_claude">GPT-4 + Claude</SelectItem>
-                        <SelectItem value="cost_optimized">Cost Optimized</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="flex items-center justify-between rounded-md border p-3">
-                    <div>
-                      <Label className="flex items-center gap-2 text-sm">
-                        <Shield className="h-4 w-4" /> Include risk metrics
-                      </Label>
-                      <p className="text-xs text-muted-foreground">
-                        Stress tests, drawdown analysis, and liquidity checks during the workflow.
-                      </p>
-                    </div>
-                    <Switch
-                      checked={workflowConfig.includeRiskMetrics}
-                      onCheckedChange={(checked) => setWorkflowConfig((prev) => ({ ...prev, includeRiskMetrics: checked }))}
-                    />
-                  </div>
-                  <Textarea
-                    value={workflowConfig.customNotes}
-                    onChange={(event) => setWorkflowConfig((prev) => ({ ...prev, customNotes: event.target.value }))}
-                    placeholder="Optional notes or constraints for the AI (e.g. prefer exchanges with deep liquidity)."
-                  />
-                </div>
-
-                <div className="flex flex-wrap items-center justify-between gap-3">
-                  <div className="text-xs text-muted-foreground">
-                    Credits are automatically deducted per workflow step. Available: {balance.available_credits}
-                  </div>
-                  <div className="flex flex-wrap gap-3">
-                    <Button variant="outline" onClick={() => handleConsensusAction('opportunity')} disabled={workflowDisabled}>
-                      <Target className="mr-2 h-4 w-4" />
-                      Scan Opportunities
-                    </Button>
-                    <Button variant="outline" onClick={() => handleConsensusAction('validation')} disabled={workflowDisabled}>
-                      <CheckCircle className="mr-2 h-4 w-4" />
-                      Validate Trade
-                    </Button>
-                    <Button variant="outline" onClick={() => handleConsensusAction('risk')} disabled={workflowDisabled}>
-                      <Shield className="mr-2 h-4 w-4" />
-                      Assess Risk
-                    </Button>
-                    <Button variant="outline" onClick={() => handleConsensusAction('decision')} disabled={workflowDisabled}>
-                      <Equal className="mr-2 h-4 w-4" />
-                      Final Consensus
-                    </Button>
-                    <Button onClick={runLiveWorkflow} disabled={workflowDisabled}>
-                      {isStreaming ? (
-                        <>
-                          <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
-                          Streaming...
-                        </>
-                      ) : (
-                        <>
-                          <Brain className="mr-2 h-4 w-4" />
-                          Run Live Workflow
-                        </>
-                      )}
-                    </Button>
-                  </div>
-                </div>
-              </CardContent>
             </Card>
 
-            <div className="space-y-6">
-              <PhaseProgressVisualizer currentPhase={currentPhase} phaseHistory={phaseHistory} isCompact />
-
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    <Activity className="h-4 w-4" />
-                    Workflow Stream
-                  </CardTitle>
-                  <CardDescription>Live commentary from the AI as phases progress.</CardDescription>
-                </CardHeader>
-                <CardContent>
-                  <ScrollArea className="h-48 pr-2 text-sm">
-                    {streamingContent ? (
-                      <pre className="whitespace-pre-wrap text-muted-foreground">{streamingContent}</pre>
-                    ) : (
-                      <p className="text-muted-foreground">Start a workflow to stream analysis in real time.</p>
-                    )}
-                  </ScrollArea>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle className="flex items-center gap-2 text-base">
-                    <LineChart className="h-4 w-4" />
-                    AI Workflow Logs
-                  </CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <ScrollArea className="h-48 pr-2 text-sm">
-                    <div className="space-y-2">
-                      {workflowLogs.length === 0 ? (
-                        <p className="text-muted-foreground">No workflow logs yet.</p>
-                      ) : (
-                        workflowLogs
-                          .slice()
-                          .reverse()
-                          .map((log) => (
-                            <div key={log.id} className="rounded-md border p-2">
-                              <div className="flex items-center justify-between text-xs text-muted-foreground">
-                                <span>{log.time}</span>
-                                <span className="capitalize">{log.level}</span>
-                              </div>
-                              <p className="text-sm">{log.message}</p>
-                            </div>
-                          ))
-                      )}
-                    </div>
-                  </ScrollArea>
-                </CardContent>
-              </Card>
-            </div>
-          </div>
-
-          {aiSummary && (
+            {/* Recent Trades */}
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-base">
-                  <Brain className="h-4 w-4" />
-                  AI Recommendation Summary
+                  <Activity className="h-4 w-4" />
+                  Recent Trades
                 </CardTitle>
-                <CardDescription>Final consensus from the AI workflow with actionable context.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex flex-wrap items-center gap-3 text-sm text-muted-foreground">
-                  {aiSummary.confidence && (
-                    <Badge variant="outline">Confidence {aiSummary.confidence.toFixed(1)}%</Badge>
-                  )}
-                  {aiSummary.intent && <Badge variant="outline">Intent {aiSummary.intent}</Badge>}
-                  {aiSummary.requiresApproval && <Badge variant="outline">Requires Approval</Badge>}
-                </div>
-
-                <ScrollArea className="h-40 rounded-md border p-4 text-sm">
-                  <pre className="whitespace-pre-wrap text-muted-foreground">{aiSummary.content}</pre>
-                </ScrollArea>
-
-                {aiSummary.actionData && (
-                  <div className="rounded-lg border bg-muted/40 p-4 text-sm">
-                    <h4 className="mb-2 font-semibold">Suggested Action</h4>
-                    <div className="grid gap-2 md:grid-cols-2">
-                      {Object.entries(aiSummary.actionData).map(([key, value]) => (
-                        <div key={key} className="flex items-center justify-between">
-                          <span className="text-muted-foreground">{key.replace(/_/g, ' ')}</span>
-                          <span className="font-medium">{typeof value === 'number' ? value.toString() : String(value)}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <div className="flex flex-wrap gap-3">
-                  <Button variant="outline" onClick={applyAiRecommendationToTrade}>
-                    <Settings className="mr-2 h-4 w-4" />
-                    Apply to Trade Form
-                  </Button>
-                  <Button onClick={() => handleConsensusAction('decision')}>
-                    <Brain className="mr-2 h-4 w-4" />
-                    Refresh Consensus
-                  </Button>
-                </div>
-              </CardContent>
-            </Card>
-          )}
-
-          {aiInsights.length > 0 && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-base">
-                  <Sparkles className="h-4 w-4" />
-                  AI Insights Feed
-                </CardTitle>
-                <CardDescription>Recent consensus calls and data pulls driven by manual requests.</CardDescription>
               </CardHeader>
               <CardContent>
-                <ScrollArea className="max-h-64 pr-2">
-                  <div className="space-y-3 text-sm">
-                    {aiInsights.map((insight) => (
-                      <div key={insight.id} className="rounded-md border p-3">
-                        <div className="flex items-center justify-between text-xs text-muted-foreground">
-                          <span>{new Date(insight.timestamp).toLocaleTimeString()}</span>
-                          <Badge variant="outline">{insight.function}</Badge>
+                <ScrollArea className="h-48">
+                  <div className="space-y-2 text-sm">
+                    {recentTrades.length === 0 ? (
+                      <p className="text-muted-foreground text-center py-4">No recent trades</p>
+                    ) : (
+                      recentTrades.slice(0, 5).map((trade) => (
+                        <div key={trade.id} className="rounded-md border p-2">
+                          <div className="flex items-center justify-between">
+                            <span className="font-semibold">{trade.symbol}</span>
+                            <Badge variant="outline" className="text-xs">
+                              {trade.side === 'buy' ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
+                              {trade.side.toUpperCase()}
+                            </Badge>
+                          </div>
+                          <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
+                            <span>{new Date(trade.time).toLocaleTimeString()}</span>
+                            <span className={trade.pnl >= 0 ? 'text-green-500' : 'text-red-500'}>
+                              {formatCurrency(trade.pnl)}
+                            </span>
+                          </div>
                         </div>
-                        <h4 className="mt-1 font-semibold">{insight.title}</h4>
-                        <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap text-muted-foreground">
-                          {JSON.stringify(insight.payload, null, 2)}
-                        </pre>
-                      </div>
-                    ))}
+                      ))
+                    )}
                   </div>
                 </ScrollArea>
               </CardContent>
             </Card>
-          )}
-        </TabsContent>
-
-        <TabsContent value="strategies" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Settings className="h-5 w-5" />
-                Strategy Controls
-              </CardTitle>
-              <CardDescription>
-                Execute any available strategy — including your unlocked premium strategies — directly from the manual dashboard.
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                {Object.entries(availableStrategies).map(([key, strategy]) => (
-                  <Card key={key} className="flex flex-col justify-between">
-                    <CardHeader>
-                      <CardTitle className="text-lg">{strategy.name}</CardTitle>
-                      <CardDescription className="capitalize">{strategy.category}</CardDescription>
-                    </CardHeader>
-                    <CardContent className="space-y-3 text-sm">
-                      <p className="text-muted-foreground">{strategy.description}</p>
-                      <div className="flex items-center justify-between">
-                        <span>Risk Level</span>
-                        <Badge variant="outline">{strategy.risk_level}</Badge>
-                      </div>
-                      <div className="flex items-center justify-between">
-                        <span>Minimum Capital</span>
-                        <span className="font-medium">{formatCurrency(strategy.min_capital)}</span>
-                      </div>
-                      <Button
-                        size="sm"
-                        className="w-full"
-                        onClick={() => handleStrategyExecution(key)}
-                        disabled={strategyExecuting}
-                      >
-                        <Play className="mr-2 h-3 w-3" />
-                        Execute Strategy
-                      </Button>
-                    </CardContent>
-                  </Card>
-                ))}
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <BarChart3 className="h-4 w-4" />
-                Active Strategy Performance
-              </CardTitle>
-              <CardDescription>Metrics pulled live from the backend for each configured strategy.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                {strategies.length === 0 ? (
-                  <p className="text-muted-foreground text-sm">
-                    No strategies configured yet. Use the marketplace or IDE to add strategies.
-                  </p>
-                ) : (
-                  strategies.map((strategy) => (
-                    <Card key={strategy.strategy_id} className="border-dashed">
-                      <CardHeader>
-                        <CardTitle className="text-lg">{strategy.name}</CardTitle>
-                        <CardDescription>{strategy.status}</CardDescription>
-                      </CardHeader>
-                      <CardContent className="space-y-2 text-sm">
-                        <div className="flex items-center justify-between">
-                          <span>Total Trades</span>
-                          <span className="font-medium">{strategy.total_trades}</span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span>Win Rate</span>
-                          <span className="font-medium">{formatPercentage(strategy.win_rate)}</span>
-                        </div>
-                        <div className="flex items-center justify-between">
-                          <span>Total P&amp;L</span>
-                          <span className={strategy.total_pnl >= 0 ? 'text-green-500 font-semibold' : 'text-red-500 font-semibold'}>
-                            {formatCurrency(Number(strategy.total_pnl))}
-                          </span>
-                        </div>
-                        <div className="text-xs text-muted-foreground">
-                          Last executed: {strategy.last_executed_at ? new Date(strategy.last_executed_at).toLocaleString() : '—'}
-                        </div>
-                      </CardContent>
-                    </Card>
-                  ))
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="risk" className="space-y-6">
-          <div className="grid gap-6 lg:grid-cols-2">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Shield className="h-5 w-5" />
-                  Portfolio &amp; Risk Metrics
-                </CardTitle>
-                <CardDescription>Live portfolio composition with AI-monitored balances.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="rounded-lg border p-3 text-sm">
-                  <div className="flex items-center justify-between">
-                    <span>Positions Tracked</span>
-                    <Badge variant="outline">{positions.length}</Badge>
-                  </div>
-                  <Separator className="my-3" />
-                  <ScrollArea className="h-48 pr-2">
-                    {positions.length === 0 ? (
-                      <p className="text-muted-foreground">No open positions detected.</p>
-                    ) : (
-                      <div className="space-y-3">
-                        {positions.map((position) => (
-                          <div key={position.symbol} className="rounded-md border p-3 text-sm">
-                            <div className="flex items-center justify-between">
-                              <span className="font-semibold">{position.symbol}</span>
-                              <Badge variant="outline">{position.side.toUpperCase()}</Badge>
-                            </div>
-                            <div className="mt-2 flex items-center justify-between text-xs text-muted-foreground">
-                              <span>Amount: {position.amount}</span>
-                              <span>Value: {formatCurrency(position.value)}</span>
-                            </div>
-                            <div className="mt-1 flex items-center justify-between text-xs">
-                              <span>Unrealized P&amp;L</span>
-                              <span className={position.unrealizedPnL >= 0 ? 'text-green-500 font-semibold' : 'text-red-500 font-semibold'}>
-                                {formatCurrency(position.unrealizedPnL)}
-                              </span>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </ScrollArea>
-                </div>
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Brain className="h-5 w-5" />
-                  AI System Health
-                </CardTitle>
-                <CardDescription>Model status, cost usage, and consensus telemetry in real time.</CardDescription>
-              </CardHeader>
-              <CardContent className="space-y-4 text-sm">
-                <div className="rounded-md border p-3">
-                  <h4 className="font-semibold mb-2">Model Status</h4>
-                  <div className="grid gap-2">
-                    {aiStatus?.ai_models_status
-                      ? Object.entries(aiStatus.ai_models_status).map(([model, status]) => (
-                          <div key={model} className="flex items-center justify-between">
-                            <span>{model}</span>
-                            <Badge variant="outline">{String(status)}</Badge>
-                          </div>
-                        ))
-                      : <p className="text-muted-foreground">Model telemetry not available.</p>}
-                  </div>
-                </div>
-                <div className="rounded-md border p-3">
-                  <h4 className="font-semibold mb-2">Consensus Stream</h4>
-                  <ScrollArea className="h-32 pr-2">
-                    <div className="space-y-2">
-                      {consensusHistory.length === 0 ? (
-                        <p className="text-muted-foreground text-xs">No consensus events yet.</p>
-                      ) : (
-                        consensusHistory.slice(-20).reverse().map((item, index) => (
-                          <div key={`${item.timestamp}-${index}`} className="flex items-center justify-between text-xs">
-                            <span>{new Date(item.timestamp).toLocaleTimeString()}</span>
-                            <span>{item.recommendation} @ {item.consensus}%</span>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </ScrollArea>
-                </div>
-              </CardContent>
-            </Card>
           </div>
+        </div>
+      </div>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-base">
-                <BarChart3 className="h-4 w-4" />
-                Market Data Stream
-              </CardTitle>
-              <CardDescription>Real-time pricing feed from the trading websocket.</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <ScrollArea className="max-h-64 pr-2">
-                <div className="grid gap-2 text-sm md:grid-cols-2 xl:grid-cols-3">
-                  {marketData.length === 0 ? (
-                    <p className="text-muted-foreground">Market data will appear as soon as subscriptions update.</p>
-                  ) : (
-                    marketData.map((item) => (
-                      <div key={item.symbol} className="rounded-md border p-3">
-                        <div className="flex items-center justify-between">
-                          <span className="font-semibold">{item.symbol}</span>
-                          <span className={item.change >= 0 ? 'text-green-500 font-semibold' : 'text-red-500 font-semibold'}>
-                            {formatPercentage(item.change)}
-                          </span>
-                        </div>
-                        <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
-                          <span>Price</span>
-                          <span>{formatCurrency(item.price)}</span>
-                        </div>
-                        <div className="mt-1 flex items-center justify-between text-xs text-muted-foreground">
-                          <span>Volume</span>
-                          <span>{item.volume}</span>
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </ScrollArea>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+      {/* Opportunities Drawer */}
+      <OpportunitiesDrawer
+        state={opportunitiesDrawer}
+        onClose={() => setOpportunitiesDrawer(prev => ({ ...prev, open: false }))}
+        onExecuteTrade={handleExecuteOpportunity}
+        onExecuteBatch={handleBatchExecuteOpportunities}
+        onValidateOpportunity={handleValidateOpportunity}
+        onApplyToForm={handleApplyOpportunityToForm}
+        availableCredits={balance.available_credits || 0}
+        portfolioValue={totalValue}
+      />
     </motion.div>
   );
 };

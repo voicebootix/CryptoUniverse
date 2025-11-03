@@ -7,7 +7,7 @@ deployment environments (development, staging, production).
 
 import os
 from functools import lru_cache
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from pydantic import Field, field_validator, model_validator, computed_field
 from pydantic_settings import BaseSettings
@@ -197,6 +197,56 @@ class Settings(BaseSettings):
         env="CHAT_CREDIT_COST_OVERRIDES",
         description="JSON object mapping chat intents or conversation modes to specific credit costs",
     )
+
+    OPPORTUNITY_STRATEGY_SYMBOL_POLICIES: str = Field(
+        default="{}",
+        env="OPPORTUNITY_STRATEGY_SYMBOL_POLICIES",
+        description=(
+            "JSON object describing per-strategy symbol limits and chunk sizes for the "
+            "opportunity discovery scanners. Example: {\"funding_arbitrage\": {\"max_symbols\": 250, \"chunk_size\": 75}}"
+        ),
+    )
+
+    @computed_field
+    @property
+    def opportunity_strategy_symbol_policies(self) -> Dict[str, Dict[str, Optional[int]]]:
+        """Parse per-strategy symbol policies for opportunity discovery scanners."""
+
+        raw_value = self.OPPORTUNITY_STRATEGY_SYMBOL_POLICIES or "{}"
+        try:
+            parsed: Any = json.loads(raw_value)
+        except (TypeError, json.JSONDecodeError):
+            return {}
+
+        if not isinstance(parsed, dict):
+            return {}
+
+        policies: Dict[str, Dict[str, Optional[int]]] = {}
+        for strategy_key, strategy_policy in parsed.items():
+            if not isinstance(strategy_key, str) or not isinstance(strategy_policy, dict):
+                continue
+
+            sanitized_policy: Dict[str, Optional[int]] = {}
+            for field_name in ("max_symbols", "chunk_size"):
+                if field_name not in strategy_policy:
+                    continue
+
+                field_value = strategy_policy[field_name]
+                if field_value is None or field_value == "":
+                    sanitized_policy[field_name] = None
+                    continue
+
+                try:
+                    int_value = int(field_value)
+                except (TypeError, ValueError):
+                    continue
+
+                sanitized_policy[field_name] = int_value
+
+            if sanitized_policy:
+                policies[strategy_key] = sanitized_policy
+
+        return policies
 
     # Validator to prevent insecure SSL in production
     @model_validator(mode="after")

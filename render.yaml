@@ -6,8 +6,8 @@ services:
     runtime: python
     plan: pro  # Professional tier for production workload
     region: oregon  # Choose region closest to your users
-    buildCommand: pip install fastapi==0.104.1 uvicorn==0.24.0 pydantic==2.5.1 python-dotenv==1.0.0 gunicorn==21.2.0
-    startCommand: gunicorn main:app -w ${WORKERS:-4} -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --access-logfile - --error-logfile - --log-level ${LOG_LEVEL:-info}
+    buildCommand: chmod +x scripts/render_build.sh && ./scripts/render_build.sh
+    startCommand: gunicorn main:app -w ${WORKERS:-4} -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --timeout 180 --graceful-timeout 180 --access-logfile - --error-logfile - --log-level ${LOG_LEVEL:-info}
     envVars:
       - key: ENVIRONMENT
         value: production
@@ -56,7 +56,7 @@ services:
     runtime: python
     plan: pro
     region: oregon
-    buildCommand: pip install fastapi==0.104.1 uvicorn==0.24.0 pydantic==2.5.1 python-dotenv==1.0.0
+    buildCommand: chmod +x scripts/render_build.sh && ./scripts/render_build.sh
     startCommand: python -m app.services.background_worker
     envVars:
       - key: ENVIRONMENT

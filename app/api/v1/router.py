@@ -6,17 +6,24 @@ This router includes all API endpoints for the enterprise platform.
 
 import time
 import asyncio
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
+from typing import Any, Dict, List, Optional
+
 from fastapi import APIRouter, HTTPException, status as http_status
 import structlog
+from sqlalchemy import text
 
 # Import endpoint routers
 from app.api.v1.endpoints import (
     auth, trading, admin, exchanges, strategies, credits,
     telegram, paper_trading, unified_chat, market_analysis, api_keys, ai_consensus,
     password_reset, health, opportunity_discovery, admin_testing, ab_testing, admin_strategy_access,
-    signals, unified_strategies, risk, diagnostics
+    signals, unified_strategies, risk, diagnostics, scan_diagnostics, system_monitoring
 )
+
+from app.core.database import AsyncSessionLocal
+from app.core.redis import get_redis_client
+from app.services.system_monitoring import system_monitoring_service
 
 logger = structlog.get_logger(__name__)
 
@@ -39,6 +46,8 @@ api_router.include_router(signals.router, tags=["Signal Intelligence"])
 api_router.include_router(admin.router, prefix="/admin", tags=["Admin"])
 api_router.include_router(admin_testing.router, tags=["Admin Testing"])  # Admin testing endpoints
 api_router.include_router(diagnostics.router, prefix="/diagnostics", tags=["Diagnostics"])
+api_router.include_router(scan_diagnostics.router, prefix="/scan-diagnostics", tags=["Scan Diagnostics"])
+api_router.include_router(system_monitoring.router, prefix="/monitoring", tags=["System Monitoring"])
 # Unified chat - single source of truth
 api_router.include_router(unified_chat.router, prefix="/chat", tags=["Unified Chat"])
 api_router.include_router(risk.router, prefix="/risk", tags=["Risk Management"])
@@ -47,30 +56,322 @@ api_router.include_router(risk.router, prefix="/risk", tags=["Risk Management"])
 api_router.include_router(unified_chat.router, prefix="/unified-chat", tags=["Unified Chat (Compatibility)"])
 api_router.include_router(unified_chat.router, prefix="/conversational-chat", tags=["Unified Chat (Compatibility)"])
 api_router.include_router(ai_consensus.router, prefix="/ai-consensus", tags=["AI Consensus"])
+api_router.include_router(ai_consensus.router, prefix="/ai", tags=["AI Consensus (Compatibility)"])
 api_router.include_router(opportunity_discovery.router, prefix="/opportunities", tags=["Opportunity Discovery"])
 api_router.include_router(ab_testing.router, prefix="/ab-testing", tags=["A/B Testing"])
 api_router.include_router(admin_strategy_access.router, tags=["Admin Strategy Management"])
 api_router.include_router(unified_strategies.router, tags=["Enterprise Strategy Management"])
 
 # Add monitoring endpoint that frontend expects
+def _build_alert(
+    severity: str,
+    message: str,
+    *,
+    metric: str,
+    value: Any,
+    threshold: Optional[Any] = None
+) -> Dict[str, Any]:
+    """Helper to build a consistent alert payload."""
+
+    alert: Dict[str, Any] = {
+        "severity": severity,
+        "message": message,
+        "metric": metric,
+        "observed_value": value,
+        "timestamp": datetime.utcnow().isoformat(),
+    }
+    if threshold is not None:
+        alert["threshold"] = threshold
+    return alert
+
+
+def _collect_endpoint_metrics(
+    window_minutes: int = 5,
+) -> Dict[str, Dict[str, float]]:
+    """Return latency statistics for critical endpoints from in-memory metrics."""
+
+    metrics: Dict[str, Dict[str, float]] = {}
+    collector_metrics = system_monitoring_service.metrics_collector.metrics.get(
+        "http_request_duration_ms"
+    )
+
+    if not collector_metrics:
+        return metrics
+
+    cutoff = datetime.utcnow() - timedelta(minutes=window_minutes)
+    critical_paths = {
+        "/api/v1/auth/login": "login",
+        "/api/v1/diagnostics/test-layers": "diagnostics_layers",
+        "/api/v1/scan-diagnostics/scan-metrics": "scan_metrics",
+    }
+    prefix_paths = {
+        "/api/v1/scan-diagnostics/scan-lifecycle": "scan_lifecycle",
+    }
+
+    all_labels = set(critical_paths.values()) | set(prefix_paths.values())
+    bucket: Dict[str, List[float]] = {label: [] for label in all_labels}
+
+    for point in collector_metrics:
+        if point.timestamp < cutoff:
+            continue
+        path = point.tags.get("path") if point.tags else None
+        label: Optional[str] = None
+        if path in critical_paths:
+            label = critical_paths[path]
+        else:
+            for prefix, prefix_label in prefix_paths.items():
+                if path and path.startswith(prefix):
+                    label = prefix_label
+                    break
+        if label:
+            bucket[label].append(point.value)
+
+    for label, values in bucket.items():
+        if not values:
+            continue
+        sorted_values = sorted(values)
+        if len(sorted_values) > 1:
+            index = max(0, int(len(sorted_values) * 0.95) - 1)
+            p95 = sorted_values[index]
+        else:
+            p95 = sorted_values[0]
+        avg_ms = sum(values) / len(values)
+        first_value = values[0]
+        last_value = values[-1]
+        change_pct = None
+        if first_value:
+            change_pct = ((last_value - first_value) / first_value) * 100
+        trend = "stable"
+        if change_pct is not None:
+            if change_pct > 10:
+                trend = "increasing"
+            elif change_pct < -10:
+                trend = "decreasing"
+        metrics[label] = {
+            "count": len(values),
+            "avg_ms": avg_ms,
+            "p95_ms": p95,
+            "max_ms": max(values),
+            "trend": trend,
+            "change_pct": change_pct,
+        }
+
+    return metrics
+
+
 @api_router.get("/monitoring/alerts")
 async def get_monitoring_alerts():
-    """Get system monitoring alerts."""
+    """Get system monitoring alerts with live infrastructure checks."""
+
+    alerts: List[Dict[str, Any]] = []
+    metrics: Dict[str, Any] = {}
+    metrics["performance_trends"] = system_monitoring_service.get_performance_trends()
+
+    # Database latency check
+    db_latency_ms: Optional[float] = None
     try:
-        # Return basic alerts structure that frontend expects
-        return {
-            "success": True,
-            "alerts": [],
-            "system_status": "operational",
-            "last_updated": datetime.utcnow().isoformat()
-        }
-    except Exception as e:
-        logger.error("Failed to get monitoring alerts", error=str(e), exc_info=True)
-        from fastapi import HTTPException, status
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve monitoring alerts: {str(e)}"
+        async with AsyncSessionLocal() as session:
+            start = time.perf_counter()
+            await session.execute(text("SELECT 1"))
+            db_latency_ms = (time.perf_counter() - start) * 1000
+        metrics["database_latency_ms"] = round(db_latency_ms, 2)
+
+        if db_latency_ms > 5000:
+            alerts.append(
+                _build_alert(
+                    "critical",
+                    "Database latency exceeded 5s",
+                    metric="database_latency_ms",
+                    value=round(db_latency_ms, 2),
+                    threshold=5000,
+                )
+            )
+        elif db_latency_ms > 2000:
+            alerts.append(
+                _build_alert(
+                    "warning",
+                    "Database latency is above 2s",
+                    metric="database_latency_ms",
+                    value=round(db_latency_ms, 2),
+                    threshold=2000,
+                )
+            )
+    except Exception as db_error:
+        alerts.append(
+            _build_alert(
+                "critical",
+                "Database health check failed",
+                metric="database_latency_ms",
+                value=str(db_error),
+            )
         )
+        metrics["database_error"] = str(db_error)
+
+    db_query_summary = system_monitoring_service.metrics_collector.get_metric_summary(
+        "db_query_duration_ms", 15
+    )
+    if "error" not in db_query_summary:
+        metrics["database_query_ms"] = db_query_summary
+        p95_query = db_query_summary.get("p95")
+        if p95_query and p95_query > 2000:
+            alerts.append(
+                _build_alert(
+                    "critical",
+                    "Database query p95 latency above 2s",
+                    metric="database_query_ms.p95",
+                    value=round(p95_query, 2),
+                    threshold=2000,
+                )
+            )
+        elif p95_query and p95_query > 1000:
+            alerts.append(
+                _build_alert(
+                    "warning",
+                    "Database query p95 latency above 1s",
+                    metric="database_query_ms.p95",
+                    value=round(p95_query, 2),
+                    threshold=1000,
+                )
+            )
+
+    # Redis health check
+    redis_latency_ms: Optional[float] = None
+    try:
+        redis = await get_redis_client()
+        if not redis:
+            raise RuntimeError("Redis client unavailable")
+        start = time.perf_counter()
+        await redis.ping()
+        redis_latency_ms = (time.perf_counter() - start) * 1000
+        metrics["redis_latency_ms"] = round(redis_latency_ms, 2)
+
+        if redis_latency_ms > 1000:
+            alerts.append(
+                _build_alert(
+                    "warning",
+                    "Redis ping latency is elevated",
+                    metric="redis_latency_ms",
+                    value=round(redis_latency_ms, 2),
+                    threshold=1000,
+                )
+            )
+    except Exception as redis_error:
+        alerts.append(
+            _build_alert(
+                "critical",
+                "Redis health check failed",
+                metric="redis_latency_ms",
+                value=str(redis_error),
+            )
+        )
+        metrics["redis_error"] = str(redis_error)
+
+    # Endpoint performance metrics
+    endpoint_metrics = _collect_endpoint_metrics()
+    metrics["endpoint_latency"] = endpoint_metrics
+
+    for endpoint, stats in endpoint_metrics.items():
+        max_latency = stats.get("max_ms")
+        if max_latency is None:
+            continue
+        if max_latency > 5000:
+            alerts.append(
+                _build_alert(
+                    "critical",
+                    f"{endpoint.replace('_', ' ').title()} latency exceeded 5s",
+                    metric=f"endpoint_latency.{endpoint}",
+                    value=round(max_latency, 2),
+                    threshold=5000,
+                )
+            )
+        elif max_latency > 2000:
+            alerts.append(
+                _build_alert(
+                    "warning",
+                    f"{endpoint.replace('_', ' ').title()} latency above 2s",
+                    metric=f"endpoint_latency.{endpoint}",
+                    value=round(max_latency, 2),
+                    threshold=2000,
+                )
+            )
+        change_pct = stats.get("change_pct")
+        if (
+            stats.get("trend") == "increasing"
+            and isinstance(change_pct, (int, float))
+            and change_pct is not None
+            and change_pct > 50
+        ):
+            alerts.append(
+                _build_alert(
+                    "warning",
+                    f"{endpoint.replace('_', ' ').title()} latency trending upward",
+                    metric=f"endpoint_latency.{endpoint}.trend",
+                    value=round(change_pct, 2),
+                )
+            )
+
+    # System resource utilisation summaries
+    for resource_metric in ("cpu_usage_pct", "memory_usage_pct", "disk_usage_pct"):
+        summary = system_monitoring_service.metrics_collector.get_metric_summary(
+            resource_metric, 30
+        )
+        if "error" in summary:
+            continue
+        metrics[resource_metric] = summary
+        current_value = summary.get("current", 0)
+        thresholds = system_monitoring_service.thresholds.get(resource_metric, {})
+        critical_threshold = thresholds.get("critical")
+        warning_threshold = thresholds.get("warning")
+        if critical_threshold is not None and current_value >= critical_threshold:
+            alerts.append(
+                _build_alert(
+                    "critical",
+                    f"{resource_metric.replace('_', ' ').title()} above critical threshold",
+                    metric=resource_metric,
+                    value=round(current_value, 2),
+                    threshold=critical_threshold,
+                )
+            )
+        elif warning_threshold is not None and current_value >= warning_threshold:
+            alerts.append(
+                _build_alert(
+                    "warning",
+                    f"{resource_metric.replace('_', ' ').title()} above warning threshold",
+                    metric=resource_metric,
+                    value=round(current_value, 2),
+                    threshold=warning_threshold,
+                )
+            )
+
+        change_pct = summary.get("change_pct")
+        if (
+            summary.get("trend") == "increasing"
+            and isinstance(change_pct, (int, float))
+            and change_pct is not None
+            and change_pct > 25
+        ):
+            alerts.append(
+                _build_alert(
+                    "warning",
+                    f"{resource_metric.replace('_', ' ').title()} increasing rapidly",
+                    metric=f"{resource_metric}.trend",
+                    value=round(change_pct, 2),
+                )
+            )
+
+    system_status = "operational"
+    if any(alert["severity"] == "critical" for alert in alerts):
+        system_status = "critical"
+    elif any(alert["severity"] == "warning" for alert in alerts):
+        system_status = "degraded"
+
+    return {
+        "success": len(alerts) == 0,
+        "alerts": alerts,
+        "system_status": system_status,
+        "metrics": metrics,
+        "last_updated": datetime.utcnow().isoformat(),
+    }
 
 @api_router.get("/status")
 async def api_status():

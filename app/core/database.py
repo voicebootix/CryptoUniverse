@@ -11,7 +11,7 @@ import logging
 import os
 import ssl
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator, AsyncIterator, Optional
+from typing import Any, AsyncGenerator, AsyncIterator, Dict, Optional
 
 import sqlalchemy
 from sqlalchemy import MetaData, event, text
@@ -104,10 +104,10 @@ engine_kwargs = {
 if "postgresql" in async_db_url:
     engine_kwargs.update({
         "pool_size": 20,          # Base number of connections
-        "max_overflow": 30,       # Additional connections when needed
+        "max_overflow": 10,       # Additional connections when needed
         "pool_timeout": 30,       # Timeout for getting connection
         "pool_pre_ping": True,    # ENTERPRISE: Health check connections
-        "pool_recycle": 1800,     # PRODUCTION: Recycle connections (30 min)
+        "pool_recycle": 3600,     # PRODUCTION: Recycle connections (1 hour)
     })
 else:
     engine_kwargs["poolclass"] = NullPool
@@ -515,6 +515,37 @@ class DatabaseUtils:
 
 # Database utils instance
 db_utils = DatabaseUtils()
+
+
+# Connection health monitoring
+async def check_database_health() -> Dict[str, Any]:
+    """Check database connectivity and pool utilization."""
+    try:
+        async with AsyncSessionLocal() as session:
+            await session.execute(text("SELECT 1"))
+
+            pool_metrics: Dict[str, Any] = {}
+            bind = session.bind
+            if bind is not None:
+                sync_engine = bind.sync_engine
+                pool = getattr(sync_engine, "pool", None)
+                if pool is not None:
+                    pool_metrics = {
+                        "pool_size": pool.size() if hasattr(pool, "size") else None,
+                        "checked_in": pool.checkedin() if hasattr(pool, "checkedin") else None,
+                        "checked_out": pool.checkedout() if hasattr(pool, "checkedout") else None,
+                        "overflow": pool.overflow() if hasattr(pool, "overflow") else None,
+                    }
+
+            return {
+                "status": "healthy",
+                "pool": pool_metrics,
+            }
+    except Exception as health_error:
+        return {
+            "status": "unhealthy",
+            "error": str(health_error),
+        }
 
 
 # ENTERPRISE: Database session dependencies removed - use the main get_database function above
