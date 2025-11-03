@@ -24,7 +24,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete, func
-from sqlalchemy.orm import load_only
+from sqlalchemy.orm import load_only, selectinload
 from fastapi.security import OAuth2PasswordRequestForm
 
 from app.core.config import get_settings
@@ -36,6 +36,7 @@ from app.models.session import UserSession
 from app.services.rate_limit import rate_limiter
 from app.services.system_monitoring import system_monitoring_service
 from app.services.oauth import OAuthService
+from app.services.user_cache import get_cached_user
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -238,13 +239,18 @@ async def get_current_user(
     else:
         logger.warning("Redis unavailable for blacklist check, proceeding without")
     
-    result = await db.execute(select(User).filter(User.id == user_id))
-    user = result.scalar_one_or_none()
+    user = await get_cached_user(user_id, db)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found"
         )
+    
+    # If user came from cache, merge it into the session so it can be mutated/refreshed
+    # This is necessary because cached users are transient instances not bound to the session
+    if user not in db and hasattr(user, 'id'):
+        # User is detached (from cache) - merge into session
+        user = await db.merge(user)
     
     if user.get_status_safe() != UserStatus.ACTIVE:
         raise HTTPException(
@@ -307,7 +313,8 @@ async def login(
                         User.two_factor_enabled,
                         User.tenant_id,
                         User.last_login,
-                    )
+                    ),
+                    selectinload(User.exchange_accounts),
                 )
                 .filter(User.email == request.email)
             )
@@ -477,7 +484,11 @@ async def register(
         )
     
     # Check if user exists
-    result = await db.execute(select(User).filter(User.email == request.email))
+    result = await db.execute(
+        select(User)
+        .filter(User.email == request.email)
+        .options(selectinload(User.exchange_accounts))
+    )
     existing_user = result.scalar_one_or_none()
     if existing_user:
         raise HTTPException(
@@ -530,7 +541,7 @@ async def register(
     
     logger.info("User registered", user_id=str(user.id), email=user.email)
     
-    # 🚀 ENTERPRISE USER ONBOARDING: FREE STRATEGIES + CREDITS + PORTFOLIO SETUP
+    # ?? ENTERPRISE USER ONBOARDING: FREE STRATEGIES + CREDITS + PORTFOLIO SETUP
     try:
         from app.services.user_onboarding_service import user_onboarding_service
         
@@ -543,7 +554,7 @@ async def register(
         
         if onboarding_result.get("success"):
             logger.info(
-                "🎯 ENTERPRISE User Onboarding completed for new registration",
+                "?? ENTERPRISE User Onboarding completed for new registration",
                 user_id=str(user.id),
                 onboarding_id=onboarding_result.get("onboarding_id"),
                 free_strategies=len(onboarding_result.get("results", {}).get("free_strategies", {}).get("provisioned_strategies", [])),
@@ -892,7 +903,9 @@ async def create_debug_admin(db: AsyncSession = Depends(get_database)):
     try:
         # Check if admin already exists
         result = await db.execute(
-            select(User).filter(User.email == "admin@cryptouniverse.com")
+            select(User)
+            .filter(User.email == "admin@cryptouniverse.com")
+            .options(selectinload(User.exchange_accounts))
         )
         existing_admin = result.scalar_one_or_none()
         
@@ -951,8 +964,7 @@ async def debug_current_user_token(
         payload = auth_service.verify_token(token)
         
         user_id = payload.get("sub")
-        result = await db.execute(select(User).filter(User.id == user_id))
-        user = result.scalar_one_or_none()
+        user = await get_cached_user(user_id, db)
         
         return {
             "token_valid": True,

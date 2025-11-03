@@ -823,7 +823,7 @@ const ManualTradingPage: React.FC = () => {
       pushWorkflowLog('success', `Trade executed successfully on ${result.exchange || 'selected exchange'}.`);
       toast({
         title: 'Trade Executed',
-        description: `${tradeForm.action.toUpperCase()} ${tradeForm.symbol} · ${formatCurrency(Number(result.amount || tradeForm.amount))}`,
+        description: `${tradeForm.action.toUpperCase()} ${tradeForm.symbol} ? ${formatCurrency(Number(result.amount || tradeForm.amount))}`,
         variant: 'default'
       });
 
@@ -1239,7 +1239,7 @@ const ManualTradingPage: React.FC = () => {
 
             // 7. Show toast
             toast({
-              title: `✨ ${validated.length} AI-Validated Opportunities`,
+              title: `? ${validated.length} AI-Validated Opportunities`,
               description: `${opportunities.length} total found | ${validated.length} ready to execute`,
             });
 
@@ -2271,7 +2271,7 @@ const ManualTradingPage: React.FC = () => {
                               className="text-xs leading-none text-muted-foreground transition-colors hover:text-destructive focus:outline-none"
                               aria-label={`Remove ${symbol}`}
                             >
-                              ×
+                              ?
                             </button>
                           </Badge>
                         ))}
