@@ -2719,7 +2719,6 @@ class PortfolioRiskServiceExtended(PortfolioRiskService):
                 stmt = (
                     select(ExchangeAccount)
                     .where(ExchangeAccount.user_id == user_id)
-                    .options(selectinload(ExchangeAccount.balances))
                     .order_by(ExchangeAccount.created_at.asc())
                     .limit(1)
                 )

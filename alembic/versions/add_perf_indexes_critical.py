@@ -7,10 +7,16 @@ Create Date: 2025-11-02 07:13:28.699504
 from alembic import op
 import sqlalchemy as sa
 
+# revision identifiers, used by Alembic.
+revision = 'add_perf_indexes_critical'
+down_revision = '011_add_legacy_backtest_metrics'
+branch_labels = None
+depends_on = None
+
 
 def upgrade():
     """Create critical performance indexes used by high-traffic queries.
-    
+
     Note: Some indexes may already exist from model __table_args__ definitions.
     The if_not_exists=True flag prevents errors, but duplicate indexes still
     consume storage. We check for existing indexes before creating.
@@ -20,7 +26,7 @@ def upgrade():
     # Users table: idx_users_id_status_perf - checking if columns differ from existing
     # ExchangeAccounts: idx_exchange_accounts_user_exchange_status already exists
     # ExchangeAccounts: idx_exchange_user_status already exists
-    
+
     # These indexes duplicate existing ones from model definitions, so we skip them
     # to avoid unnecessary write/storage overhead
     pass

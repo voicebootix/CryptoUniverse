@@ -5,7 +5,7 @@ import json
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 import structlog
 from sqlalchemy import select
@@ -33,6 +33,7 @@ class CachedUserPayload:
     status: Optional[str]
     tenant_id: Optional[str]
     last_login: Optional[str]
+    exchange_accounts: Optional[List[dict]] = None
 
     @classmethod
     def from_model(cls, user: User) -> "CachedUserPayload":
@@ -46,6 +47,24 @@ class CachedUserPayload:
             status=user.status.value if getattr(user, "status", None) else None,
             tenant_id=str(user.tenant_id) if getattr(user, "tenant_id", None) else None,
             last_login=user.last_login.isoformat() if getattr(user, "last_login", None) else None,
+            exchange_accounts=[
+                {
+                    "id": str(acc.id),
+                    "user_id": str(acc.user_id),
+                    "exchange_name": acc.exchange_name,
+                    "account_name": getattr(acc, "account_name", None),
+                    "account_type": getattr(acc, "account_type", None),
+                    "exchange_type": acc.exchange_type.value if getattr(acc, "exchange_type", None) else None,
+                    "exchange_account_id": getattr(acc, "exchange_account_id", None),
+                    "status": acc.status.value if getattr(acc, "status", None) else None,
+                    "is_default": getattr(acc, "is_default", False),
+                    "is_simulation": getattr(acc, "is_simulation", True),
+                    "trading_enabled": getattr(acc, "trading_enabled", True),
+                    "created_at": acc.created_at.isoformat() if getattr(acc, "created_at", None) else None,
+                    "updated_at": acc.updated_at.isoformat() if getattr(acc, "updated_at", None) else None,
+                }
+                for acc in (getattr(user, "exchange_accounts", None) or [])
+            ],
         )
 
     def hydrate_model(self) -> User:
@@ -67,6 +86,50 @@ class CachedUserPayload:
                 user.last_login = datetime.fromisoformat(self.last_login)
             except Exception:
                 user.last_login = None
+
+        # Reconstruct exchange accounts
+        if self.exchange_accounts:
+            from app.models.exchange import ExchangeAccount, ExchangeStatus, ExchangeType
+            user.exchange_accounts = []
+            for acc_data in self.exchange_accounts:
+                acc = ExchangeAccount()
+                try:
+                    acc.id = uuid.UUID(acc_data["id"]) if acc_data.get("id") else None
+                except Exception:
+                    acc.id = acc_data.get("id")
+                try:
+                    acc.user_id = uuid.UUID(acc_data["user_id"]) if acc_data.get("user_id") else None
+                except Exception:
+                    acc.user_id = acc_data.get("user_id")
+                acc.exchange_name = acc_data.get("exchange_name")
+                acc.account_name = acc_data.get("account_name")
+                acc.account_type = acc_data.get("account_type")
+                acc.exchange_account_id = acc_data.get("exchange_account_id")
+                if acc_data.get("exchange_type"):
+                    try:
+                        acc.exchange_type = ExchangeType(acc_data["exchange_type"])
+                    except Exception:
+                        acc.exchange_type = None
+                if acc_data.get("status"):
+                    try:
+                        acc.status = ExchangeStatus(acc_data["status"])
+                    except Exception:
+                        acc.status = None
+                acc.is_default = acc_data.get("is_default", False)
+                acc.is_simulation = acc_data.get("is_simulation", True)
+                acc.trading_enabled = acc_data.get("trading_enabled", True)
+                if acc_data.get("created_at"):
+                    try:
+                        acc.created_at = datetime.fromisoformat(acc_data["created_at"])
+                    except Exception:
+                        acc.created_at = None
+                if acc_data.get("updated_at"):
+                    try:
+                        acc.updated_at = datetime.fromisoformat(acc_data["updated_at"])
+                    except Exception:
+                        acc.updated_at = None
+                user.exchange_accounts.append(acc)
+
         return user
 
 
@@ -81,7 +144,15 @@ async def _hydrate_user_from_cache(raw: str) -> Optional[User]:
 
 
 async def get_cached_user(user_id: str, db: AsyncSession) -> Optional[User]:
-    """Fetch a user with Redis caching to reduce database load."""
+    """Fetch a user with Redis caching to reduce database load.
+
+    NOTE: Cached users are returned as detached (read-only) instances to prevent
+    stale cached data from overwriting fresh database values. If you need to mutate
+    the user, fetch the authoritative row from the database first:
+        fresh_user = await db.get(User, user_id)
+        fresh_user.some_field = new_value
+        await db.commit()
+    """
     redis = await get_redis_client()
     cache_key = f"user:{user_id}"
 
@@ -91,6 +162,10 @@ async def get_cached_user(user_id: str, db: AsyncSession) -> Optional[User]:
             user = await _hydrate_user_from_cache(cached)
             if user:
                 logger.debug("User cache hit", user_id=user_id)
+                # NOTE: Cached user is returned as detached (read-only) to avoid overwriting
+                # fresh DB values with stale cached data. If mutations are needed, callers
+                # should fetch the authoritative row from the database (e.g., await db.get(User, user.id))
+                # before making changes and committing.
                 return user
             await redis.delete(cache_key)
 

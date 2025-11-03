@@ -1022,7 +1022,6 @@ class MarketDataFeeds:
                             }
                     elif response.status == 429:
                         retry_after = int(response.headers.get("Retry-After", 60))
-                        error_msg = f"API error: 429 - Rate limited (retry after {retry_after}s)"
                         logger.warning(
                             "CoinGecko rate limited",
                             symbol=symbol,
@@ -1064,27 +1063,15 @@ class MarketDataFeeds:
         except MarketDataRateLimitError as rate_error:
             await _rate_limit_queue.add_request("coingecko", self.get_real_time_price, symbol)
             if rate_error.retry_after:
-                asyncio.create_task(
+                # Store task reference to prevent premature garbage collection
+                task = asyncio.create_task(
                     self._process_queue_after_delay("coingecko", rate_error.retry_after)
                 )
+                self._bg_tasks.add(task)
+                task.add_done_callback(self._bg_tasks.discard)
 
-            is_critical = symbol.upper() in CRITICAL_SYMBOLS
-
-            # Schedule retry as background task for critical symbols to avoid blocking timeout
-            if is_critical and rate_error.retry_after:
-                async def _retry_critical_symbol() -> None:
-                    """Background task to retry fetching critical symbol after rate limit."""
-                    try:
-                        await asyncio.sleep(rate_error.retry_after)
-                        await self.get_real_time_price(symbol)
-                    except (MarketDataRateLimitError, asyncio.CancelledError) as e:
-                        logger.debug("Background retry cancelled or rate limited", symbol=symbol, error=str(e))
-                    except Exception as e:
-                        logger.warning("Background retry failed", symbol=symbol, error=str(e))
-                
-                # Don't await - let it run in background
-                asyncio.create_task(_retry_critical_symbol())
-
+            # Return cached data immediately; don't block request with long sleep
+            # Background queue will handle retry for critical symbols
             cached_price = await self._load_cached_price_entry(symbol)
             if cached_price:
                 cached_payload = copy.deepcopy(cached_price)
@@ -1577,7 +1564,7 @@ class MarketDataFeeds:
         """Check if CoinCap API endpoint is reachable before making requests."""
         try:
             # Use async DNS resolution to avoid blocking the event loop
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             await loop.getaddrinfo("api.coincap.io", 443, type=socket.SOCK_STREAM)
             timeout = aiohttp.ClientTimeout(total=5)
             async with aiohttp.ClientSession(timeout=timeout) as session:
