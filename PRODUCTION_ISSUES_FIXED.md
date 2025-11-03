@@ -30,21 +30,31 @@ column backtest_results.annual_return does not exist
 ## Issue 2: Scan Results 404 Errors
 
 ### Problem
-Multiple requests to `/api/v1/opportunities/results/scan_75aff964c1534957bab424e6aabddbd1` are returning 404, even though the status endpoint returns 200. This suggests scan results aren't being found.
+Multiple requests to `/api/v1/opportunities/results/{scan_id}` are returning 404, even though the status endpoint initially returns success. Investigation revealed scans complete successfully but then disappear after ~12 seconds.
 
-### Possible Causes
-1. **Cross-worker cache issue**: Scan initiated on Worker A, but results endpoint hits Worker B
-2. **Redis persistence not working**: Results not being persisted to Redis correctly
-3. **Scan completion race condition**: Scan completes but results aren't saved before lookup
+### Root Cause Identified
+**BUG IN `_unregister_scan_lookup()`**: The cleanup callback calls `_unregister_scan_lookup()` when scan task completes. This method only checked in-memory cache and didn't check Redis. When the result wasn't in memory (cross-worker scenario or after worker restart), it removed the `scan_id -> cache_key` lookup mapping even though the result was still in Redis with a 300-second TTL.
 
-### Analysis Needed
-- Check if `_register_scan_lookup()` is persisting to Redis correctly
-- Check if `_update_cached_scan_result()` is persisting to Redis correctly  
-- Verify Redis keys are being created: `opportunity_scan_lookup:{scan_id}` and `opportunity_scan_result:{cache_key}`
-- Check if scan is completing successfully or timing out
+**Evidence from Investigation**:
+- Scan completes successfully (14/14 strategies, 100% completion)
+- Status shows "scanning" initially
+- After ~12 seconds, status changes to "not_found"
+- Results endpoint returns 404 even though Redis still has the data
+
+### Fix Applied
+Modified `_unregister_scan_lookup()` in `app/services/user_opportunity_discovery.py` (lines 363-441) to:
+1. Check Redis lookup key (`opportunity_scan_lookup:{scan_id}`) if not found in memory
+2. Check Redis result key (`opportunity_scan_result:{cache_key}`) TTL before removing mapping
+3. Only remove lookup mapping when BOTH memory and Redis caches are expired
+4. Remove Redis lookup keys when cache is truly expired (cleanup)
+
+### Location
+- File: `app/services/user_opportunity_discovery.py`
+- Method: `_unregister_scan_lookup()`
+- Lines: 363-441
 
 ### Status
-⚠️ Needs investigation - The Redis persistence code exists (commit a60e39c1) but may not be working correctly
+✅ Fixed and committed to `fix-production-issues` branch
 
 ---
 
