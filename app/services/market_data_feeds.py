@@ -1064,19 +1064,15 @@ class MarketDataFeeds:
         except MarketDataRateLimitError as rate_error:
             await _rate_limit_queue.add_request("coingecko", self.get_real_time_price, symbol)
             if rate_error.retry_after:
-                asyncio.create_task(
+                # Store task reference to prevent premature garbage collection
+                task = asyncio.create_task(
                     self._process_queue_after_delay("coingecko", rate_error.retry_after)
                 )
+                self._bg_tasks.add(task)
+                task.add_done_callback(self._bg_tasks.discard)
 
-            is_critical = symbol.upper() in CRITICAL_SYMBOLS
-
-            if is_critical and rate_error.retry_after:
-                await asyncio.sleep(rate_error.retry_after)
-                try:
-                    return await self.get_real_time_price(symbol)
-                except MarketDataRateLimitError:
-                    pass
-
+            # Return cached data immediately; don't block request with long sleep
+            # Background queue will handle retry for critical symbols
             cached_price = await self._load_cached_price_entry(symbol)
             if cached_price:
                 cached_payload = copy.deepcopy(cached_price)

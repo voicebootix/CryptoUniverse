@@ -5,7 +5,7 @@ import json
 import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any, List, Optional
 
 import structlog
 from sqlalchemy import select
@@ -33,6 +33,7 @@ class CachedUserPayload:
     status: Optional[str]
     tenant_id: Optional[str]
     last_login: Optional[str]
+    exchange_accounts: Optional[List[dict]] = None
 
     @classmethod
     def from_model(cls, user: User) -> "CachedUserPayload":
@@ -46,6 +47,16 @@ class CachedUserPayload:
             status=user.status.value if getattr(user, "status", None) else None,
             tenant_id=str(user.tenant_id) if getattr(user, "tenant_id", None) else None,
             last_login=user.last_login.isoformat() if getattr(user, "last_login", None) else None,
+            exchange_accounts=[
+                {
+                    "id": str(acc.id),
+                    "user_id": str(acc.user_id),
+                    "exchange_name": acc.exchange_name,
+                    "account_type": getattr(acc, "account_type", None),
+                    "status": acc.status.value if getattr(acc, "status", None) else None,
+                }
+                for acc in (getattr(user, "exchange_accounts", None) or [])
+            ],
         )
 
     def hydrate_model(self) -> User:
@@ -67,6 +78,30 @@ class CachedUserPayload:
                 user.last_login = datetime.fromisoformat(self.last_login)
             except Exception:
                 user.last_login = None
+
+        # Reconstruct exchange accounts
+        if self.exchange_accounts:
+            from app.models.exchange import ExchangeAccount, ExchangeStatus
+            user.exchange_accounts = []
+            for acc_data in self.exchange_accounts:
+                acc = ExchangeAccount()
+                try:
+                    acc.id = uuid.UUID(acc_data["id"]) if acc_data.get("id") else None
+                except Exception:
+                    acc.id = acc_data.get("id")
+                try:
+                    acc.user_id = uuid.UUID(acc_data["user_id"]) if acc_data.get("user_id") else None
+                except Exception:
+                    acc.user_id = acc_data.get("user_id")
+                acc.exchange_name = acc_data.get("exchange_name")
+                acc.account_type = acc_data.get("account_type")
+                if acc_data.get("status"):
+                    try:
+                        acc.status = ExchangeStatus(acc_data["status"])
+                    except Exception:
+                        acc.status = None
+                user.exchange_accounts.append(acc)
+
         return user
 
 
