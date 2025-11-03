@@ -5655,7 +5655,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     try:
                         cached_data = await self.redis.get(cache_key)
                         if cached_data:
-                            data = json.loads(cached_data)
+                            raw = cached_data.decode() if isinstance(cached_data, (bytes, bytearray)) else cached_data
+                            data = json.loads(raw)
 
                             # Cache entries now wrap the payload for metadata. Support
                             # both the new {"payload": ...} structure and the legacy
@@ -5683,7 +5684,12 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                     "source": "cached_fallback",
                                     "warning": "Limited opportunities from cache due to system error"
                                 }
-                    except:
+                    except Exception as e:
+                        self.logger.debug("Failed reading cached fallback",
+                                        scan_id=scan_id,
+                                        user_id=user_id,
+                                        cache_key=str(cache_key),
+                                        error=str(e))
                         continue
             
             # If no cache available, provide basic strategy recommendations
