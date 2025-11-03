@@ -2485,6 +2485,16 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         if not isinstance(price_snapshot, dict):
                             price_snapshot = {}
 
+                        # Compute required capital with sensible fallbacks
+                        required_capital_usd = self._to_float(risk_mgmt.get("notional_usd"))
+                        if required_capital_usd is None or required_capital_usd <= 0:
+                            if position_notional and position_notional > 0:
+                                required_capital_usd = float(position_notional)
+                            elif entry_price and position_size_units:
+                                required_capital_usd = round(float(entry_price) * float(position_size_units), 2)
+                            else:
+                                required_capital_usd = 1000.0
+
                         opportunity = OpportunityResult(
                             strategy_id="ai_spot_breakout_strategy",
                             strategy_name=f"AI Breakout Trading ({quality_tier.upper()} confidence)",
@@ -2494,7 +2504,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                             profit_potential_usd=float(potential_profit or 0.0),
                             confidence_score=float(confidence_score),
                             risk_level=self._signal_to_risk_level(signal_strength),
-                            required_capital_usd=float(position_notional) if position_notional else float(required_capital_usd),
+                            required_capital_usd=float(required_capital_usd),
                             estimated_timeframe="2-8h",
                             entry_price=float(entry_price) if entry_price else None,
                             exit_price=float(take_profit_price) if take_profit_price else None,
