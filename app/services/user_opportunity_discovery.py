@@ -341,7 +341,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             self._scan_lookup[scan_id] = cache_key
             self._user_latest_scan_key[user_id] = cache_key
 
-        # CRITICAL FIX: Also persist scan_id → cache_key mapping to Redis for cross-worker access
+        # CRITICAL FIX: Also persist scan_id ? cache_key mapping to Redis for cross-worker access
         if self.redis:
             try:
                 redis_lookup_key = f"opportunity_scan_lookup:{scan_id}"
@@ -366,21 +366,74 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         We keep the scan_id ? cache_key mapping alive while the cached result
         is still available, so follow-up polls using the scan_id can retrieve
         the correct payload even after the scan task completes.
+        
+        CRITICAL FIX: Also checks Redis before removing lookup mapping to prevent
+        cross-worker issues where results exist in Redis but not in memory.
         """
         async with self._scan_lookup_lock:
             cache_key = self._scan_lookup.get(scan_id)
             if not cache_key:
-                return
+                # Also check Redis - might exist there even if not in memory
+                if self.redis:
+                    try:
+                        redis_lookup_key = f"opportunity_scan_lookup:{scan_id}"
+                        cached_key = await self.redis.get(redis_lookup_key)
+                        if cached_key:
+                            cache_key = cached_key.decode('utf-8') if isinstance(cached_key, bytes) else cached_key
+                        else:
+                            # Not in memory or Redis - safe to skip
+                            return
+                    except Exception as redis_error:
+                        self.logger.warning("Failed to check Redis during unregister",
+                                          error=str(redis_error),
+                                          scan_id=scan_id)
+                        return
+                else:
+                    return
             
-            # Check if cache entry still exists and hasn't expired
+            # Check if cache entry still exists in memory and hasn't expired
             async with self._scan_cache_lock:
                 cached_result = self.opportunity_cache.get(cache_key)
                 if cached_result and cached_result.expires_at > time.monotonic():
-                    # Cache entry still valid - keep the mapping alive
+                    # Cache entry still valid in memory - keep the mapping alive
                     return
             
-            # Cache entry expired or doesn't exist - safe to remove mapping
+            # CRITICAL FIX: Also check Redis before removing lookup mapping
+            # This prevents removing the mapping when results exist in Redis (cross-worker scenario)
+            if self.redis:
+                try:
+                    redis_result_key = f"opportunity_scan_result:{cache_key}"
+                    redis_ttl = await self.redis.ttl(redis_result_key)
+                    if redis_ttl > 0:
+                        # Result still exists in Redis with valid TTL - keep the mapping alive
+                        self.logger.debug("Keeping scan lookup alive - result exists in Redis",
+                                        scan_id=scan_id,
+                                        cache_key=cache_key,
+                                        redis_ttl=redis_ttl)
+                        return
+                except Exception as redis_error:
+                    self.logger.warning("Failed to check Redis result during unregister",
+                                      error=str(redis_error),
+                                      scan_id=scan_id,
+                                      cache_key=cache_key)
+                    # On Redis error, be conservative and keep the mapping
+            
+            # Cache entry expired or doesn't exist in both memory and Redis - safe to remove mapping
             self._scan_lookup.pop(scan_id, None)
+            
+            # Also remove Redis lookup keys if cache is truly expired
+            if self.redis:
+                try:
+                    redis_lookup_key = f"opportunity_scan_lookup:{scan_id}"
+                    await self.redis.delete(redis_lookup_key)
+                    self.logger.debug("Removed scan lookup from Redis",
+                                    scan_id=scan_id,
+                                    cache_key=cache_key)
+                except Exception as redis_error:
+                    self.logger.warning("Failed to remove Redis lookup key",
+                                      error=str(redis_error),
+                                      scan_id=scan_id)
+            
             user_id, *_ = cache_key.split(":", 1)
             latest_key = self._user_latest_scan_key.get(user_id)
             if latest_key == cache_key:
@@ -6460,7 +6513,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     async def _scan_funding_arbitrage_pro_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
         """Pro version of funding arbitrage with enhanced analysis"""
         try:
-            self.logger.info("🔍 Scanning funding arbitrage pro opportunities", scan_id=scan_id)
+            self.logger.info("?? Scanning funding arbitrage pro opportunities", scan_id=scan_id)
             
             # Use base funding arbitrage scanner with enhanced analysis
             base_opportunities = await self._scan_funding_arbitrage_opportunities(
@@ -6495,7 +6548,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     async def _scan_market_making_pro_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
         """Pro version of market making with advanced order book analysis"""
         try:
-            self.logger.info("🔍 Scanning market making pro opportunities", scan_id=scan_id)
+            self.logger.info("?? Scanning market making pro opportunities", scan_id=scan_id)
             
             # Use base market making scanner with enhanced analysis
             base_opportunities = await self._scan_market_making_opportunities(
@@ -6529,7 +6582,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     async def _scan_scalping_engine_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
         """Advanced scalping engine with high-frequency analysis"""
         try:
-            self.logger.info("🔍 Scanning scalping engine opportunities", scan_id=scan_id)
+            self.logger.info("?? Scanning scalping engine opportunities", scan_id=scan_id)
             
             # Use base scalping scanner with enhanced analysis
             base_opportunities = await self._scan_scalping_opportunities(
@@ -6563,7 +6616,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     async def _scan_swing_navigator_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
         """Swing trading navigator with trend analysis"""
         try:
-            self.logger.info("🔍 Scanning swing navigator opportunities", scan_id=scan_id)
+            self.logger.info("?? Scanning swing navigator opportunities", scan_id=scan_id)
             
             # Use momentum strategy as base with swing-specific enhancements
             base_opportunities = await self._scan_spot_momentum_opportunities(
@@ -6598,7 +6651,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     async def _scan_position_manager_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
         """Position management with risk-adjusted sizing"""
         try:
-            self.logger.info("🔍 Scanning position manager opportunities", scan_id=scan_id)
+            self.logger.info("?? Scanning position manager opportunities", scan_id=scan_id)
             
             # Use risk management as base with position-specific enhancements
             base_opportunities = await self._scan_risk_management_opportunities(
@@ -6632,7 +6685,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     async def _scan_risk_guardian_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
         """Advanced risk guardian with comprehensive protection"""
         try:
-            self.logger.info("🔍 Scanning risk guardian opportunities", scan_id=scan_id)
+            self.logger.info("?? Scanning risk guardian opportunities", scan_id=scan_id)
             
             # Use risk management as base with guardian-specific enhancements
             base_opportunities = await self._scan_risk_management_opportunities(
@@ -6666,7 +6719,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     async def _scan_portfolio_optimizer_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
         """Portfolio optimizer with advanced allocation strategies"""
         try:
-            self.logger.info("🔍 Scanning portfolio optimizer opportunities", scan_id=scan_id)
+            self.logger.info("?? Scanning portfolio optimizer opportunities", scan_id=scan_id)
             
             # Use portfolio optimization as base with optimizer-specific enhancements
             base_opportunities = await self._scan_portfolio_optimization_opportunities(
@@ -6700,7 +6753,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     async def _scan_strategy_analytics_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
         """Strategy analytics with performance insights"""
         try:
-            self.logger.info("🔍 Scanning strategy analytics opportunities", scan_id=scan_id)
+            self.logger.info("?? Scanning strategy analytics opportunities", scan_id=scan_id)
             
             # Use statistical arbitrage as base with analytics-specific enhancements
             base_opportunities = await self._scan_statistical_arbitrage_opportunities(
@@ -6734,7 +6787,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     async def _scan_momentum_trader_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
         """Momentum trader with enhanced trend following"""
         try:
-            self.logger.info("🔍 Scanning momentum trader opportunities", scan_id=scan_id)
+            self.logger.info("?? Scanning momentum trader opportunities", scan_id=scan_id)
             
             # Use spot momentum as base with trader-specific enhancements
             base_opportunities = await self._scan_spot_momentum_opportunities(
@@ -6768,7 +6821,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     async def _scan_mean_reversion_pro_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
         """Pro version of mean reversion with advanced statistical analysis"""
         try:
-            self.logger.info("🔍 Scanning mean reversion pro opportunities", scan_id=scan_id)
+            self.logger.info("?? Scanning mean reversion pro opportunities", scan_id=scan_id)
             
             # Use spot mean reversion as base with pro enhancements
             base_opportunities = await self._scan_spot_mean_reversion_opportunities(
@@ -6802,7 +6855,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     async def _scan_breakout_hunter_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
         """Breakout hunter with advanced pattern recognition"""
         try:
-            self.logger.info("🔍 Scanning breakout hunter opportunities", scan_id=scan_id)
+            self.logger.info("?? Scanning breakout hunter opportunities", scan_id=scan_id)
             
             # Use spot breakout as base with hunter-specific enhancements
             base_opportunities = await self._scan_spot_breakout_opportunities(
@@ -6836,7 +6889,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     async def _scan_algorithmic_suite_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
         """Algorithmic suite with multi-strategy coordination"""
         try:
-            self.logger.info("🔍 Scanning algorithmic suite opportunities", scan_id=scan_id)
+            self.logger.info("?? Scanning algorithmic suite opportunities", scan_id=scan_id)
             
             # Use complex strategy as base with suite-specific enhancements
             base_opportunities = await self._scan_complex_strategy_opportunities(
@@ -6870,7 +6923,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     async def _scan_pairs_trader_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
         """Pairs trader with enhanced correlation analysis"""
         try:
-            self.logger.info("🔍 Scanning pairs trader opportunities", scan_id=scan_id)
+            self.logger.info("?? Scanning pairs trader opportunities", scan_id=scan_id)
             
             # Use pairs trading as base with trader-specific enhancements
             base_opportunities = await self._scan_pairs_trading_opportunities(
@@ -6904,7 +6957,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     async def _scan_statistical_arbitrage_pro_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
         """Pro version of statistical arbitrage with advanced models"""
         try:
-            self.logger.info("🔍 Scanning statistical arbitrage pro opportunities", scan_id=scan_id)
+            self.logger.info("?? Scanning statistical arbitrage pro opportunities", scan_id=scan_id)
             
             # Use statistical arbitrage as base with pro enhancements
             base_opportunities = await self._scan_statistical_arbitrage_opportunities(
@@ -6938,7 +6991,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     async def _scan_market_maker_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
         """Market maker with advanced liquidity provision"""
         try:
-            self.logger.info("🔍 Scanning market maker opportunities", scan_id=scan_id)
+            self.logger.info("?? Scanning market maker opportunities", scan_id=scan_id)
             
             # Use market making as base with maker-specific enhancements
             base_opportunities = await self._scan_market_making_opportunities(
@@ -6972,7 +7025,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     async def _scan_scalping_engine_pro_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
         """Pro version of scalping engine with ultra-high frequency analysis"""
         try:
-            self.logger.info("🔍 Scanning scalping engine pro opportunities", scan_id=scan_id)
+            self.logger.info("?? Scanning scalping engine pro opportunities", scan_id=scan_id)
             
             # Use scalping as base with pro engine enhancements
             base_opportunities = await self._scan_scalping_opportunities(
@@ -7006,7 +7059,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     async def _scan_swing_navigator_pro_opportunities(self, discovered_assets, user_profile, scan_id, portfolio_result):
         """Pro version of swing navigator with advanced trend analysis"""
         try:
-            self.logger.info("🔍 Scanning swing navigator pro opportunities", scan_id=scan_id)
+            self.logger.info("?? Scanning swing navigator pro opportunities", scan_id=scan_id)
             
             # Use momentum strategy as base with pro navigator enhancements
             base_opportunities = await self._scan_spot_momentum_opportunities(

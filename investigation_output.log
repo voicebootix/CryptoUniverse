@@ -1,0 +1,103 @@
+================================================================================
+SCAN RESULTS 404 INVESTIGATION
+================================================================================
+🔐 Authenticating...
+✅ Authenticated successfully (user_id: 7a1ee8cd-bfc9-4e4e-85b2-69c8e91054af)
+
+================================================================================
+STEP 1: User Status Check
+================================================================================
+⚠️  Failed to get user status: HTTPSConnectionPool(host='cryptouniverse.onrender.com', port=443): Read timed out. (read timeout=10)
+
+================================================================================
+STEP 2: System Metrics
+================================================================================
+{
+  "success": true,
+  "daily_errors": 0,
+  "system_status": "operational",
+  "last_updated": "2025-11-03T13:31:46.516025"
+}
+
+================================================================================
+STEP 3: Initiating New Scan
+================================================================================
+
+🚀 Initiating new opportunity scan...
+✅ Scan initiated: scan_id=scan_3a708b2cf8fd426b9df40dffac47bd61, status=initiated
+   Poll URL: /api/v1/opportunities/status/scan_3a708b2cf8fd426b9df40dffac47bd61
+   Results URL: /api/v1/opportunities/results/scan_3a708b2cf8fd426b9df40dffac47bd61
+
+⏳ Waiting 2 seconds for background task to register...
+
+================================================================================
+STEP 4: Redis Key Investigation
+================================================================================
+
+🔍 Investigating Redis keys for scan_id=scan_3a708b2cf8fd426b9df40dffac47bd61
+   Expected Redis keys:
+   - lookup: opportunity_scan_lookup:scan_3a708b2cf8fd426b9df40dffac47bd61
+   - user_latest: opportunity_user_latest_scan:7a1ee8cd-bfc9-4e4e-85b2-69c8e91054af
+{
+  "expected_keys": {
+    "lookup": "opportunity_scan_lookup:scan_3a708b2cf8fd426b9df40dffac47bd61",
+    "user_latest": "opportunity_user_latest_scan:7a1ee8cd-bfc9-4e4e-85b2-69c8e91054af"
+  },
+  "note": "Direct Redis access not available via API. Checking via service endpoints..."
+}
+
+================================================================================
+STEP 5: Monitoring Scan Progress
+================================================================================
+
+📊 Monitoring scan scan_3a708b2cf8fd426b9df40dffac47bd61 (max wait: 180s)...
+
+[0.0s] Status: scanning (success: True)
+   Progress: 14/14 strategies
+   Opportunities found so far: 0
+   Completion: 100%
+[12.4s] ⚠️  Status: not_found (attempt 1/5)
+[19.4s] ⚠️  Status: not_found (attempt 2/5)
+[22.1s] ⚠️  Status: not_found (attempt 3/5)
+[26.5s] ⚠️  Status: not_found (attempt 4/5)
+[28.6s] ⚠️  Status: not_found (attempt 5/5)
+
+⚠️  Scan not found after 6 attempts (31.5s)
+
+================================================================================
+STEP 6: Checking Results Endpoint
+================================================================================
+❌ Error getting results: 404_NOT_FOUND
+   Message: {"error":"No scan results found. Please initiate a new scan.","status_code":404,"path":"/api/v1/opportunities/results/scan_3a708b2cf8fd426b9df40dffac47bd61","timestamp":440801.776}
+
+================================================================================
+STEP 7: Final Status Check
+================================================================================
+{
+  "success": false,
+  "status": "not_found",
+  "message": "No scan found for this user. Please initiate a new scan."
+}
+
+================================================================================
+INVESTIGATION SUMMARY
+================================================================================
+Scan ID: scan_3a708b2cf8fd426b9df40dffac47bd61
+Monitor Status: not_found
+Elapsed Time: 31.5s
+
+❌ RESULTS ENDPOINT ERROR: 404_NOT_FOUND
+
+🔍 ROOT CAUSE ANALYSIS (404 Not Found):
+   - Scan status endpoint returned: success=True
+   - But results endpoint returned: 404 Not Found
+
+   Possible causes:
+   1. Scan completed but results not persisted to Redis
+   2. Cache key lookup failed (scan_id -> cache_key mapping missing)
+   3. Cross-worker issue (scan on Worker A, results request on Worker B)
+   4. Scan timed out before saving results
+   5. Redis persistence code path not executing
+   6. _register_scan_lookup() not called or failed silently
+
+================================================================================

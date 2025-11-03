@@ -7432,7 +7432,38 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
                     }
 
                 # Fallback to latest backtest results if available
-                backtest_stmt = select(BacktestResult).order_by(BacktestResult.end_date.desc()).limit(1)
+                # Use explicit column selection to avoid errors if columns don't exist yet
+                backtest_stmt = select(
+                    BacktestResult.id,
+                    BacktestResult.strategy_id,
+                    BacktestResult.strategy_name,
+                    BacktestResult.user_id,
+                    BacktestResult.start_date,
+                    BacktestResult.end_date,
+                    BacktestResult.initial_capital,
+                    BacktestResult.symbols,
+                    BacktestResult.strategy_params,
+                    BacktestResult.risk_params,
+                    BacktestResult.execution_params,
+                    BacktestResult.final_capital,
+                    BacktestResult.total_return,
+                    BacktestResult.total_return_pct,
+                    BacktestResult.total_trades,
+                    BacktestResult.winning_trades,
+                    BacktestResult.losing_trades,
+                    BacktestResult.win_rate,
+                    BacktestResult.profit_factor,
+                    BacktestResult.expectancy,
+                    BacktestResult.max_drawdown,
+                    BacktestResult.max_drawdown_duration,
+                    BacktestResult.sharpe_ratio,
+                    BacktestResult.sortino_ratio,
+                    BacktestResult.calmar_ratio,
+                    # Legacy metrics - exclude annual_return as it may not exist in DB yet
+                    # Only select columns that are actually used below
+                    BacktestResult.volatility,
+                    BacktestResult.avg_trade_return,
+                ).order_by(BacktestResult.end_date.desc()).limit(1)
 
                 if strategy_name:
                     backtest_stmt = backtest_stmt.where(
@@ -7449,46 +7480,54 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
                             BacktestResult.user_id.is_(None)
                         )
                     )
+                
+                # Wrap query execution in try/except to handle missing columns gracefully
+                try:
+                    backtest_result = await db.execute(backtest_stmt)
+                    backtest_row = backtest_result.first()
 
-                backtest_result = await db.execute(backtest_stmt)
-                backtest = backtest_result.scalars().first()
+                    if backtest_row:
+                        # Access columns safely - some may not exist if migration hasn't run
+                        total_return_decimal = safe_float(getattr(backtest_row, 'total_return_pct', None), safe_float(getattr(backtest_row, 'total_return', None), 0.0)) / 100
+                        win_rate_decimal = safe_float(getattr(backtest_row, 'win_rate', None), 0.0) / 100
+                        profit_factor = safe_float(getattr(backtest_row, 'profit_factor', None), 0.0)
+                        avg_trade_decimal = safe_float(getattr(backtest_row, 'avg_trade_return', None), 0.0) / 100
+                        max_drawdown = safe_float(getattr(backtest_row, 'max_drawdown', None), 0.0)
+                        volatility_ratio = safe_float(getattr(backtest_row, 'volatility', None), 0.0)
+                        recovery_time = safe_int(getattr(backtest_row, 'max_drawdown_duration', None), 0)
 
-                if backtest:
-                    total_return_decimal = safe_float(backtest.total_return_pct, safe_float(backtest.total_return, 0.0)) / 100
-                    win_rate_decimal = safe_float(backtest.win_rate, 0.0) / 100
-                    profit_factor = safe_float(backtest.profit_factor, 0.0)
-                    avg_trade_decimal = safe_float(backtest.avg_trade_return, 0.0) / 100
-                    max_drawdown = safe_float(backtest.max_drawdown, 0.0)
-                    volatility_ratio = safe_float(backtest.volatility, 0.0)
-                    recovery_time = safe_int(backtest.max_drawdown_duration, 0)
-
-                    return {
-                        "total_return": total_return_decimal,
-                        "total_return_units": "decimal",
-                        "benchmark_return": 0.0,
-                        "benchmark_return_units": "decimal",
-                        "volatility": volatility_ratio,
-                        "volatility_units": "ratio",
-                        "max_drawdown": max_drawdown,
-                        "max_drawdown_units": "decimal",
-                        "recovery_time": recovery_time,
-                        "recovery_time_units": "days",
-                        "win_rate": win_rate_decimal,
-                        "win_rate_units": "decimal",
-                        "profit_factor": profit_factor,
-                        "avg_trade": avg_trade_decimal,
-                        "avg_trade_units": "decimal",
-                        "largest_win": 0.0,
-                        "largest_win_units": "decimal",
-                        "largest_loss": 0.0,
-                        "largest_loss_units": "decimal",
-                        "total_trades": safe_int(backtest.total_trades, 0),
-                        "net_pnl": safe_float(backtest.final_capital, 0.0) - safe_float(backtest.initial_capital, 0.0),
-                        "net_pnl_units": "usd",
-                        "data_quality": "simulated_backtest",
-                        "status": "backtest_only",
-                        "performance_badges": ["Simulated / No live trades"]
-                    }
+                        return {
+                            "total_return": total_return_decimal,
+                            "total_return_units": "decimal",
+                            "benchmark_return": 0.0,
+                            "benchmark_return_units": "decimal",
+                            "volatility": volatility_ratio,
+                            "volatility_units": "ratio",
+                            "max_drawdown": max_drawdown,
+                            "max_drawdown_units": "decimal",
+                            "recovery_time": recovery_time,
+                            "recovery_time_units": "days",
+                            "win_rate": win_rate_decimal,
+                            "win_rate_units": "decimal",
+                            "profit_factor": profit_factor,
+                            "avg_trade": avg_trade_decimal,
+                            "avg_trade_units": "decimal",
+                            "largest_win": 0.0,
+                            "largest_win_units": "decimal",
+                            "largest_loss": 0.0,
+                            "largest_loss_units": "decimal",
+                            "total_trades": safe_int(getattr(backtest_row, 'total_trades', None), 0),
+                            "net_pnl": safe_float(getattr(backtest_row, 'final_capital', None), 0.0) - safe_float(getattr(backtest_row, 'initial_capital', None), 0.0),
+                            "net_pnl_units": "usd",
+                            "data_quality": "simulated_backtest",
+                            "status": "backtest_only",
+                            "performance_badges": ["Simulated / No live trades"]
+                        }
+                except Exception as backtest_error:
+                    # If query fails due to missing columns, log and continue without backtest data
+                    self.logger.warning("Failed to fetch backtest results (column may not exist)",
+                                 error=str(backtest_error),
+                                 strategy_name=strategy_name)
 
             # No data available
             return {
