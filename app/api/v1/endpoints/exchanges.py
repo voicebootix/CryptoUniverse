@@ -221,11 +221,12 @@ class KrakenNonceManager:
                         current_time_ms = int(server_time * 1000)
                         
                         # Atomic nonce generation script
+                        # Increase buffer from 100 to 500 to prevent collisions during worker restarts
                         lua_script = """
                         local key = KEYS[1]
                         local last = tonumber(redis.call('GET', key) or '0')
                         local now = tonumber(ARGV[1])
-                        local candidate = math.max(last + 1, now) + 100
+                        local candidate = math.max(last + 1, now) + 500
                         redis.call('SET', key, candidate, 'EX', ARGV[2])
                         return candidate
                         """
@@ -273,12 +274,13 @@ class KrakenNonceManager:
                 # Layer 3: Local counter increment
                 self._local_call_count += 1
                 
-                # Layer 4: Fallback nonce tracking
-                fallback_nonce = base_time_ms + node_hash + self._local_call_count
-                
+                # Layer 4: Fallback nonce tracking with increased buffer
+                # Add 500ms buffer (same as Redis path) to prevent collisions
+                fallback_nonce = base_time_ms + node_hash + self._local_call_count + 500
+
                 # Ensure it's always greater than previous fallback
                 if fallback_nonce <= self._fallback_nonce:
-                    fallback_nonce = self._fallback_nonce + 1
+                    fallback_nonce = self._fallback_nonce + 500
                     
                 self._fallback_nonce = fallback_nonce
                 
