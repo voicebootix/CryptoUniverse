@@ -1415,7 +1415,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         raise
                     else:
                         # Track strategy completion (only if no exception)
-                        execution_time = (time.time() - start_time) * 1000
+                        execution_time = (time.monotonic() - strategy_start_time) * 1000
                         await self._track_debug_step(
                             user_id, scan_id, step_number,
                             f"Strategy: {strategy_name}",
@@ -1427,7 +1427,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         )
                         return result
                     finally:
-                        strategy_timings[strategy_identifier] = time.time() - start_time
+                        strategy_timings[strategy_identifier] = time.monotonic() - strategy_start_time
 
             # Run all strategy scans concurrently
             self.logger.info("?? STARTING CONCURRENT STRATEGY SCANS",
