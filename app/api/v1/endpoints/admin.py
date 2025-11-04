@@ -1682,7 +1682,7 @@ async def get_credit_pricing_config(
             "strategy_pricing": profit_sharing_service.strategy_pricing,
             "explanation": {
                 "platform_fee": "Percentage of profits users pay as platform fee",
-                "credit_calculation": "Credits = Profit Potential × Platform Fee Percentage",
+                "credit_calculation": "Credits = Profit Potential [emoji] Platform Fee Percentage",
                 "example": f"$100 profit potential = ${pricing_config.get('platform_fee_percentage', 25):.0f} credits at {pricing_config.get('platform_fee_percentage', 25):.0f}% fee"
             }
         }
@@ -3022,7 +3022,7 @@ async def assign_strategy_submission(
             "message": "Strategy submission assigned",
             "submission_id": submission_id,
             "reviewer": reviewer.email,
-            "status_value": submission.status.value
+            "status_value": submission.status
         }
 
     except HTTPException:
@@ -3079,7 +3079,7 @@ async def review_strategy(
             "submission_id": submission.id,
             "reviewer": current_user.email,
             "timestamp": datetime.utcnow().isoformat(),
-            "status_value": submission.status.value,
+            "status_value": submission.status,
             "published_strategy_id": (submission.strategy_config or {}).get("published_strategy_id")
         }
 
