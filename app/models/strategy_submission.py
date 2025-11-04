@@ -7,8 +7,9 @@ who want to list their strategies on the marketplace.
 
 from sqlalchemy import (
     Column, String, Integer, Float, Boolean, Text, JSON,
-    DateTime, ForeignKey, Enum as SQLEnum, DECIMAL
+    DateTime, ForeignKey, DECIMAL
 )
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from sqlalchemy.ext.mutable import MutableDict
@@ -58,16 +59,16 @@ class StrategySubmission(Base):
     __tablename__ = "strategy_submissions"
 
     # Primary key
-    id = Column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    id = Column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4()))
 
     # Foreign key to user (publisher)
-    user_id = Column(String(36), ForeignKey("users.id"), nullable=False)
+    user_id = Column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=False)
 
     # Basic Information
     name = Column(String(255), nullable=False)
     description = Column(Text, nullable=False)
     category = Column(String(100), nullable=False)
-    risk_level = Column(SQLEnum(RiskLevel), default=RiskLevel.MEDIUM)
+    risk_level = Column(String(50), default=RiskLevel.MEDIUM.value)
 
     # Financial Details
     expected_return_min = Column(Float, default=0.0)
@@ -75,12 +76,12 @@ class StrategySubmission(Base):
     required_capital = Column(DECIMAL(15, 2), default=1000.0)
 
     # Pricing
-    pricing_model = Column(SQLEnum(PricingModel), default=PricingModel.FREE)
+    pricing_model = Column(String(50), default=PricingModel.FREE.value)
     price_amount = Column(DECIMAL(10, 2), nullable=True)
     profit_share_percentage = Column(Float, nullable=True)
 
     # Status
-    status = Column(SQLEnum(StrategyStatus), default=StrategyStatus.DRAFT)
+    status = Column(String(50), default=StrategyStatus.DRAFT.value)
 
     # Timestamps
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -90,7 +91,7 @@ class StrategySubmission(Base):
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     # Review Details
-    reviewer_id = Column(String(36), ForeignKey("users.id"), nullable=True)
+    reviewer_id = Column(UUID(as_uuid=False), ForeignKey("users.id"), nullable=True)
     reviewer_feedback = Column(Text, nullable=True)
     rejection_reason = Column(Text, nullable=True)
 
@@ -123,11 +124,11 @@ class StrategySubmission(Base):
     )
 
     # Publishing Details
-    tags = Column(MutableDict.as_mutable(JSON), nullable=True, default=list)
-    target_audience = Column(MutableDict.as_mutable(JSON), nullable=True, default=list)
-    complexity_level = Column(SQLEnum(ComplexityLevel), default=ComplexityLevel.INTERMEDIATE)
+    tags = Column(JSON, nullable=True, default=list)
+    target_audience = Column(JSON, nullable=True, default=list)
+    complexity_level = Column(String(50), default=ComplexityLevel.INTERMEDIATE.value)
     documentation_quality = Column(Integer, default=0)
-    support_level = Column(SQLEnum(SupportLevel), default=SupportLevel.STANDARD)
+    support_level = Column(String(50), default=SupportLevel.STANDARD.value)
 
     # Strategy Code/Configuration (stored securely)
     strategy_code = Column(Text, nullable=True)  # Encrypted in production

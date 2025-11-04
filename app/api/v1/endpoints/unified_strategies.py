@@ -235,7 +235,7 @@ async def bulk_grant_strategy_access(
 
     try:
         logger.info(
-            "🔐 BULK STRATEGY GRANT INITIATED",
+            "[emoji] BULK STRATEGY GRANT INITIATED",
             admin_user_id=str(current_user.id),
             target_user_id=target_user_id,
             strategy_filter=request.strategy_filter,
@@ -269,7 +269,7 @@ async def bulk_grant_strategy_access(
         )
 
         logger.info(
-            "✅ BULK STRATEGY GRANT COMPLETED",
+            "[OK] BULK STRATEGY GRANT COMPLETED",
             admin_user_id=str(current_user.id),
             target_user_id=target_user_id,
             strategies_granted=len(strategies_granted),
@@ -290,7 +290,7 @@ async def bulk_grant_strategy_access(
         execution_time = (datetime.utcnow() - operation_start).total_seconds()
 
         logger.error(
-            "❌ BULK STRATEGY GRANT FAILED",
+            "[X] BULK STRATEGY GRANT FAILED",
             admin_user_id=str(current_user.id),
             target_user_id=target_user_id,
             error=str(e),
@@ -390,7 +390,7 @@ async def log_bulk_grant_operation(
 
     try:
         logger.info(
-            "📝 AUDIT: Bulk strategy grant executed",
+            "[NOTE] AUDIT: Bulk strategy grant executed",
             admin_user_id=admin_user_id,
             target_user_id=target_user_id,
             strategies_count=len(strategies_granted),

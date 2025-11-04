@@ -516,7 +516,7 @@ class UnifiedStrategyService(LoggerMixin):
         operation_id = f"portfolio_{user_id[:8]}"
 
         self.logger.info(
-            "🏢 ENTERPRISE PORTFOLIO REQUEST",
+            " ENTERPRISE PORTFOLIO REQUEST",
             operation_id=operation_id,
             user_id=user_id,
             user_role=user_role.value if user_role else "unknown"
@@ -534,7 +534,7 @@ class UnifiedStrategyService(LoggerMixin):
             execution_time = (datetime.utcnow() - operation_start).total_seconds()
 
             self.logger.error(
-                "❌ ENTERPRISE PORTFOLIO FAILED",
+                "[X] ENTERPRISE PORTFOLIO FAILED",
                 operation_id=operation_id,
                 user_id=user_id,
                 error=str(e),
@@ -595,7 +595,7 @@ class UnifiedStrategyService(LoggerMixin):
         })
 
         self.logger.info(
-            "✅ ENTERPRISE PORTFOLIO SUCCESS",
+            "[OK] ENTERPRISE PORTFOLIO SUCCESS",
             operation_id=operation_id,
             user_id=user_id,
             strategies_count=len(portfolio.strategies),
@@ -612,7 +612,7 @@ class UnifiedStrategyService(LoggerMixin):
     ) -> UnifiedStrategyPortfolio:
         """Admin users get full access to all strategies"""
 
-        self.logger.info("🔑 ADMIN FULL ACCESS", user_id=user_id)
+        self.logger.info(" ADMIN FULL ACCESS", user_id=user_id)
 
         strategies = []
 
@@ -657,7 +657,7 @@ class UnifiedStrategyService(LoggerMixin):
     ) -> UnifiedStrategyPortfolio:
         """Regular users get only their owned/purchased strategies"""
 
-        self.logger.info("👤 USER OWNED ACCESS", user_id=user_id)
+        self.logger.info(" USER OWNED ACCESS", user_id=user_id)
 
         # Get user's strategy access records
         access_query = select(UserStrategyAccess).where(
