@@ -7459,9 +7459,8 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
                     BacktestResult.sharpe_ratio,
                     BacktestResult.sortino_ratio,
                     BacktestResult.calmar_ratio,
-                    # Legacy metrics - exclude annual_return as it may not exist in DB yet
+                    # Legacy metrics - exclude annual_return, volatility, beta, alpha as they may not exist in DB yet
                     # Only select columns that are actually used below
-                    BacktestResult.volatility,
                     BacktestResult.avg_trade_return,
                 ).order_by(BacktestResult.end_date.desc()).limit(1)
 
