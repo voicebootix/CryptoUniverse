@@ -5284,6 +5284,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         timeout_seconds=marketplace_timeout,
                     )
                     marketplace_result = {"success": False, "error": "timeout"}
+                except asyncio.CancelledError:
+                    raise
                 except Exception as marketplace_error:  # pragma: no cover - defensive logging
                     self.logger.warning(
                         "Strategy recommendations marketplace lookup failed",
