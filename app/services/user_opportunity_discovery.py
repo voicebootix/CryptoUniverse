@@ -1358,7 +1358,12 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
                 async with strategy_semaphore:
                     # Start time and debug tracking inside semaphore to measure pure execution time (not queue wait)
-                    strategy_start_time = time.monotonic()
+                    strategy_start_monotonic = time.monotonic()
+                    strategy_start_wall = time.time()
+                    # Helper to compute elapsed durations consistently using the monotonic clock
+                    def _strategy_elapsed_seconds() -> float:
+                        return time.monotonic() - strategy_start_monotonic
+
                     step_number = 100 + strategy_index  # 100-series reserved for per-strategy steps
                     await self._track_debug_step(
                         user_id, scan_id, step_number,
@@ -1366,7 +1371,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         "starting",
                         strategy_id=strategy_identifier,
                         strategy_index=strategy_index,
-                        started_at=datetime.fromtimestamp(strategy_start_time, tz=timezone.utc).isoformat()
+                        started_at=datetime.fromtimestamp(strategy_start_wall, tz=timezone.utc).isoformat()
                     )
 
                     try:
@@ -1378,11 +1383,11 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                             scan_id,
                             portfolio_result,
                             timeout_seconds=per_strategy_timeout_s,
-                            start_time=strategy_start_time,
+                            start_time=strategy_start_wall,
                         )
                     except asyncio.CancelledError as e:
                         # Track strategy cancellation (parent task cancelled)
-                        execution_time = (time.monotonic() - strategy_start_time) * 1000
+                        execution_time = _strategy_elapsed_seconds() * 1000
                         await self._track_debug_step(
                             user_id, scan_id, step_number,
                             f"Strategy: {strategy_name}",
@@ -1397,7 +1402,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         raise
                     except Exception as e:
                         # Track strategy failure (timeout or other)
-                        execution_time = (time.monotonic() - strategy_start_time) * 1000
+                        execution_time = _strategy_elapsed_seconds() * 1000
                         error_type = type(e).__name__
                         is_timeout = isinstance(e, asyncio.TimeoutError)
 
@@ -1415,7 +1420,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         raise
                     else:
                         # Track strategy completion (only if no exception)
-                        execution_time = (time.monotonic() - strategy_start_time) * 1000
+                        execution_time = _strategy_elapsed_seconds() * 1000
                         await self._track_debug_step(
                             user_id, scan_id, step_number,
                             f"Strategy: {strategy_name}",
@@ -1427,7 +1432,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         )
                         return result
                     finally:
-                        strategy_timings[strategy_identifier] = time.monotonic() - strategy_start_time
+                        strategy_timings[strategy_identifier] = _strategy_elapsed_seconds()
 
             # Run all strategy scans concurrently
             self.logger.info("?? STARTING CONCURRENT STRATEGY SCANS",
@@ -1562,7 +1567,11 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     await self._track_debug_step(user_id, scan_id, 7, "Generate strategy recommendations", "starting")
 
                     strategy_recommendations = await self._generate_strategy_recommendations(
-                        user_id, user_profile, len(ranked_opportunities), portfolio_result
+                        user_id,
+                        user_profile,
+                        len(ranked_opportunities),
+                        portfolio_result,
+                        scan_id=scan_id,
                     )
 
                     await self._track_debug_step(user_id, scan_id, 7, "Generate strategy recommendations",
@@ -1705,7 +1714,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             return final_response
 
         except Exception as e:
-            execution_time = (time.time() - discovery_start_time) * 1000
+            execution_time = (time.monotonic() - discovery_start_time) * 1000
             error_type = type(e).__name__
             is_timeout = "Timeout" in error_type or "timeout" in str(e).lower()
 
@@ -5244,7 +5253,10 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         user_id: str,
         user_profile: UserOpportunityProfile,
         current_opportunities_count: int,
-        portfolio_result: Dict[str, Any]
+        portfolio_result: Dict[str, Any],
+        *,
+        scan_id: Optional[str] = None,
+        timeout_seconds: float = 5.0,
     ) -> List[Dict[str, Any]]:
         """Generate strategy purchase recommendations to increase opportunities."""
         
@@ -5254,12 +5266,36 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             # If user has few opportunities, recommend more strategies
             if current_opportunities_count < 10:
                 # Get marketplace to see what strategies user doesn't have
-                marketplace_result = await strategy_marketplace_service.get_marketplace_strategies(
-                    user_id=user_id,
-                    include_ai_strategies=True,
-                    include_community_strategies=False
-                )
-                
+                marketplace_timeout = max(1.0, float(timeout_seconds))
+                try:
+                    marketplace_result = await asyncio.wait_for(
+                        strategy_marketplace_service.get_marketplace_strategies(
+                            user_id=user_id,
+                            include_ai_strategies=True,
+                            include_community_strategies=False,
+                        ),
+                        timeout=marketplace_timeout,
+                    )
+                except asyncio.TimeoutError:
+                    self.logger.warning(
+                        "Strategy recommendations marketplace lookup timed out",
+                        user_id=user_id,
+                        scan_id=scan_id,
+                        timeout_seconds=marketplace_timeout,
+                    )
+                    marketplace_result = {"success": False, "error": "timeout"}
+                except asyncio.CancelledError:
+                    raise
+                except Exception as marketplace_error:  # pragma: no cover - defensive logging
+                    self.logger.warning(
+                        "Strategy recommendations marketplace lookup failed",
+                        user_id=user_id,
+                        scan_id=scan_id,
+                        error=str(marketplace_error),
+                        error_type=type(marketplace_error).__name__,
+                    )
+                    marketplace_result = {"success": False, "error": str(marketplace_error)}
+
                 if marketplace_result.get("success"):
                     # Use passed portfolio result instead of N+1 query
                     user_portfolio = portfolio_result
