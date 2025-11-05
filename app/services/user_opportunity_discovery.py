@@ -1619,7 +1619,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         "failed",
                         error=str(rec_error),
                     )
-                    raise
+                    if isinstance(rec_error, asyncio.CancelledError):
+                        raise
+                    strategy_recommendations = []
                 else:
                     await self._track_debug_step(
                         user_id,
@@ -1708,6 +1710,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     "failed",
                     error=str(cache_opp_error),
                 )
+                if isinstance(cache_opp_error, asyncio.CancelledError):
+                    raise
                 self.logger.warning(
                     "Opportunity cache update failed",
                     scan_id=scan_id,
@@ -1733,6 +1737,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     "failed",
                     error=str(lifecycle_error),
                 )
+                if isinstance(lifecycle_error, asyncio.CancelledError):
+                    raise
                 self.logger.warning(
                     "Strategy completion lifecycle tracking failed",
                     scan_id=scan_id,
@@ -1765,6 +1771,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     "failed",
                     error=str(metrics_error),
                 )
+                if isinstance(metrics_error, asyncio.CancelledError):
+                    raise
                 self.logger.warning(
                     "Scan metrics tracking failed",
                     scan_id=scan_id,
@@ -1790,6 +1798,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     "failed",
                     error=str(final_lifecycle_error),
                 )
+                if isinstance(final_lifecycle_error, asyncio.CancelledError):
+                    raise
                 self.logger.warning(
                     "Final scan lifecycle tracking failed",
                     scan_id=scan_id,
