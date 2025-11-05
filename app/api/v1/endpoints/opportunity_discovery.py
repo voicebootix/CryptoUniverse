@@ -184,9 +184,11 @@ async def discover_opportunities(
         await user_opportunity_discovery.async_init()
 
         user_id_str = str(current_user.id)
-        symbols = request.symbols or []
-        asset_tiers = request.asset_tiers or []
-        strategy_ids = request.strategy_ids or []
+        # CRITICAL FIX: Treat empty arrays as None (no filter) instead of filtering to nothing
+        # Empty arrays from UI mean "don't filter", not "filter to nothing"
+        symbols = request.symbols if request.symbols and len(request.symbols) > 0 else None
+        asset_tiers = request.asset_tiers if request.asset_tiers and len(request.asset_tiers) > 0 else None
+        strategy_ids = request.strategy_ids if request.strategy_ids and len(request.strategy_ids) > 0 else None
         filter_summary = user_opportunity_discovery._summarize_scan_filters(
             symbols=symbols,
             asset_tiers=asset_tiers,
