@@ -1563,7 +1563,11 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     await self._track_debug_step(user_id, scan_id, 7, "Generate strategy recommendations", "starting")
 
                     strategy_recommendations = await self._generate_strategy_recommendations(
-                        user_id, user_profile, len(ranked_opportunities), portfolio_result
+                        user_id,
+                        user_profile,
+                        len(ranked_opportunities),
+                        portfolio_result,
+                        scan_id=scan_id,
                     )
 
                     await self._track_debug_step(user_id, scan_id, 7, "Generate strategy recommendations",
@@ -5245,7 +5249,10 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         user_id: str,
         user_profile: UserOpportunityProfile,
         current_opportunities_count: int,
-        portfolio_result: Dict[str, Any]
+        portfolio_result: Dict[str, Any],
+        *,
+        scan_id: Optional[str] = None,
+        timeout_seconds: float = 5.0,
     ) -> List[Dict[str, Any]]:
         """Generate strategy purchase recommendations to increase opportunities."""
         
@@ -5255,12 +5262,34 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             # If user has few opportunities, recommend more strategies
             if current_opportunities_count < 10:
                 # Get marketplace to see what strategies user doesn't have
-                marketplace_result = await strategy_marketplace_service.get_marketplace_strategies(
-                    user_id=user_id,
-                    include_ai_strategies=True,
-                    include_community_strategies=False
-                )
-                
+                marketplace_timeout = max(1.0, float(timeout_seconds))
+                try:
+                    marketplace_result = await asyncio.wait_for(
+                        strategy_marketplace_service.get_marketplace_strategies(
+                            user_id=user_id,
+                            include_ai_strategies=True,
+                            include_community_strategies=False,
+                        ),
+                        timeout=marketplace_timeout,
+                    )
+                except asyncio.TimeoutError:
+                    self.logger.warning(
+                        "Strategy recommendations marketplace lookup timed out",
+                        user_id=user_id,
+                        scan_id=scan_id,
+                        timeout_seconds=marketplace_timeout,
+                    )
+                    marketplace_result = {"success": False, "error": "timeout"}
+                except Exception as marketplace_error:  # pragma: no cover - defensive logging
+                    self.logger.warning(
+                        "Strategy recommendations marketplace lookup failed",
+                        user_id=user_id,
+                        scan_id=scan_id,
+                        error=str(marketplace_error),
+                        error_type=type(marketplace_error).__name__,
+                    )
+                    marketplace_result = {"success": False, "error": str(marketplace_error)}
+
                 if marketplace_result.get("success"):
                     # Use passed portfolio result instead of N+1 query
                     user_portfolio = portfolio_result
