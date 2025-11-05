@@ -1706,7 +1706,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             return final_response
 
         except Exception as e:
-            execution_time = (time.time() - discovery_start_time) * 1000
+            execution_time = (time.monotonic() - discovery_start_time) * 1000
             error_type = type(e).__name__
             is_timeout = "Timeout" in error_type or "timeout" in str(e).lower()
 
