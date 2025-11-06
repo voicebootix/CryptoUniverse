@@ -233,23 +233,30 @@ USING (
 -- ========================================
 
 -- Example 1: Exchange API Keys (Extra Secure!)
+-- Using EXISTS for better performance on large tables
 CREATE POLICY "users_own_api_keys_select"
 ON exchange_api_keys FOR SELECT
 USING (
-  auth.uid() IN (
-    SELECT user_id FROM exchange_accounts
+  EXISTS (
+    SELECT 1 FROM exchange_accounts
     WHERE id = exchange_api_keys.account_id
+    AND user_id = auth.uid()
   )
 );
 
 CREATE POLICY "users_own_api_keys_insert"
 ON exchange_api_keys FOR INSERT
 WITH CHECK (
-  auth.uid() IN (
-    SELECT user_id FROM exchange_accounts
+  EXISTS (
+    SELECT 1 FROM exchange_accounts
     WHERE id = exchange_api_keys.account_id
+    AND user_id = auth.uid()
   )
 );
+
+-- NOTE: Ensure exchange_accounts has an index on user_id:
+-- CREATE INDEX IF NOT EXISTS idx_exchange_accounts_user_id
+-- ON exchange_accounts(user_id);
 
 -- Example 2: Trading Strategies (Public + Private)
 CREATE POLICY "strategies_visibility"

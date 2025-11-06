@@ -17,6 +17,24 @@
 -- ESTIMATED TIME: 5-15 minutes (depending on database size)
 -- ========================================
 
+-- Verify required files exist (informational)
+DO $$
+BEGIN
+  RAISE NOTICE '';
+  RAISE NOTICE '========================================';
+  RAISE NOTICE 'PRE-FLIGHT CHECKS';
+  RAISE NOTICE '========================================';
+  RAISE NOTICE '';
+  RAISE NOTICE 'Required migration files:';
+  RAISE NOTICE '  ✓ supabase_security_fixes.sql';
+  RAISE NOTICE '  ✓ supabase_performance_fixes.sql';
+  RAISE NOTICE '  ✓ supabase_function_fixes.sql';
+  RAISE NOTICE '';
+  RAISE NOTICE 'If any file is missing, this script will fail.';
+  RAISE NOTICE 'Ensure all files are in the same directory as this script.';
+  RAISE NOTICE '';
+END $$;
+
 -- Verify you want to proceed
 DO $$
 BEGIN
@@ -88,6 +106,38 @@ FROM pg_policies
 WHERE schemaname = 'public';
 
 \echo '';
+
+-- Checkpoint: Verify Phase 1 success before continuing
+DO $$
+DECLARE
+  rls_count INTEGER;
+  policy_count INTEGER;
+BEGIN
+  SELECT COUNT(*) INTO rls_count
+  FROM pg_tables
+  WHERE schemaname = 'public' AND rowsecurity = true;
+
+  SELECT COUNT(*) INTO policy_count
+  FROM pg_policies
+  WHERE schemaname = 'public';
+
+  IF rls_count < 70 THEN
+    RAISE WARNING 'RLS enabled on fewer tables than expected (found: %, expected: 70+)', rls_count;
+    RAISE WARNING 'Phase 1 may have failed. Review output above.';
+  ELSE
+    RAISE NOTICE '✅ Phase 1 verification passed (% tables with RLS)', rls_count;
+  END IF;
+
+  IF policy_count < 40 THEN
+    RAISE EXCEPTION 'CRITICAL: Only % policies created (expected 80+). Phase 1 failed! Check logs and do NOT continue to Phase 2.', policy_count;
+  ELSE
+    RAISE NOTICE '✅ Policy count verification passed (% policies)', policy_count;
+  END IF;
+
+  RAISE NOTICE '';
+  RAISE NOTICE '✅ All Phase 1 verifications passed. Proceeding to Phase 2...';
+  RAISE NOTICE '';
+END $$;
 
 -- ========================================
 -- PHASE 3: PERFORMANCE FIXES

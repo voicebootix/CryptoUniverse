@@ -29,33 +29,79 @@ BEGIN
   END IF;
 END $$;
 
--- Fix match_documents function
+-- Fix match_documents function (dynamic signature detection)
 DO $$
+DECLARE
+  func_signature TEXT;
+  func_oid OID;
+  alter_sql TEXT;
 BEGIN
-  IF EXISTS (
-    SELECT 1 FROM pg_proc p
-    JOIN pg_namespace n ON p.pronamespace = n.oid
-    WHERE n.nspname = 'public' AND p.proname = 'match_documents'
-  ) THEN
-    -- Note: match_documents may have different signatures
-    -- Adjust parameters as needed
-    ALTER FUNCTION public.match_documents(vector, float, int)
-    SET search_path = public, pg_temp;
-    RAISE NOTICE '✅ Fixed search_path for match_documents';
+  -- Find the function OID and signature
+  SELECT p.oid, pg_get_function_identity_arguments(p.oid)
+  INTO func_oid, func_signature
+  FROM pg_proc p
+  JOIN pg_namespace n ON p.pronamespace = n.oid
+  WHERE n.nspname = 'public' AND p.proname = 'match_documents'
+  LIMIT 1;
+
+  IF func_oid IS NOT NULL THEN
+    -- Build and execute ALTER FUNCTION statement with correct signature
+    alter_sql := format('ALTER FUNCTION public.match_documents(%s) SET search_path = public, pg_temp', func_signature);
+    EXECUTE alter_sql;
+    RAISE NOTICE '✅ Fixed search_path for match_documents(%)', func_signature;
   ELSE
-    RAISE NOTICE '⚠️  Function match_documents not found (may have different signature)';
+    RAISE NOTICE 'ℹ️  Function match_documents not found (may not exist in this database)';
   END IF;
 EXCEPTION
   WHEN OTHERS THEN
-    RAISE NOTICE '⚠️  Could not fix match_documents - check function signature';
+    RAISE WARNING '⚠️  Could not fix match_documents: % (SQLSTATE: %)', SQLERRM, SQLSTATE;
+    IF func_signature IS NOT NULL THEN
+      RAISE WARNING '    Detected signature: match_documents(%)', func_signature;
+      RAISE WARNING '    Try manually: ALTER FUNCTION public.match_documents(%) SET search_path = public, pg_temp;', func_signature;
+    END IF;
 END $$;
 
 -- ========================================
 -- PART 2: FIX SECURITY DEFINER VIEWS
 -- ========================================
 
--- Option A: Recreate views WITHOUT security_definer
--- This is safer but may break functionality if views rely on elevated permissions
+-- ⚠️  CRITICAL WARNING:
+-- The following views will be DROPPED and must be recreated manually!
+-- This is a BLOCKING operation that will break application functionality
+-- until views are recreated.
+--
+-- BEFORE proceeding, you MUST:
+-- 1. Backup view definitions from your application repository or database
+-- 2. Understand the original view logic and dependencies
+-- 3. Plan view recreation with proper security (auth.uid() checks or security_invoker)
+-- 4. Schedule deployment window where application can tolerate missing views
+--
+-- To get original view definitions, run this query BEFORE running this migration:
+-- SELECT viewname, definition
+-- FROM pg_views
+-- WHERE schemaname = 'public'
+-- AND viewname IN ('portfolio_evolution', 'daily_performance', 'v_user_strategy_summary', 'ai_performance');
+
+DO $$
+BEGIN
+  RAISE WARNING '';
+  RAISE WARNING '========================================';
+  RAISE WARNING '⚠️  DROPPING SECURITY DEFINER VIEWS';
+  RAISE WARNING '========================================';
+  RAISE WARNING '';
+  RAISE WARNING 'The following views will be DROPPED:';
+  RAISE WARNING '  1. portfolio_evolution';
+  RAISE WARNING '  2. daily_performance';
+  RAISE WARNING '  3. v_user_strategy_summary';
+  RAISE WARNING '  4. ai_performance';
+  RAISE WARNING '';
+  RAISE WARNING 'These views MUST be recreated after this migration!';
+  RAISE WARNING 'Application functionality will be BROKEN until views are recreated.';
+  RAISE WARNING '';
+  RAISE WARNING 'See VIEW_RECREATION_GUIDE.md for detailed instructions.';
+  RAISE WARNING 'Original definitions should be in your app repository or backup.';
+  RAISE WARNING '';
+END $$;
 
 -- portfolio_evolution view
 DROP VIEW IF EXISTS public.portfolio_evolution CASCADE;
@@ -172,20 +218,52 @@ CREATE SCHEMA IF NOT EXISTS extensions;
 -- Grant usage to appropriate roles
 GRANT USAGE ON SCHEMA extensions TO postgres, anon, authenticated, service_role;
 
--- Move vector extension
--- ⚠️ This may fail if vector is not installed or if there are dependencies
+-- Move vector extension with improved error handling
 DO $$
+DECLARE
+  dep_count INTEGER;
 BEGIN
-  IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') THEN
-    ALTER EXTENSION vector SET SCHEMA extensions;
-    RAISE NOTICE '✅ Moved vector extension to extensions schema';
-  ELSE
-    RAISE NOTICE 'ℹ️  Vector extension not found or already moved';
+  -- Check if vector extension exists
+  IF NOT EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'vector') THEN
+    RAISE NOTICE 'ℹ️  Vector extension not installed in this database';
+    RETURN;
   END IF;
+
+  -- Check for dependencies before attempting move
+  SELECT COUNT(*) INTO dep_count
+  FROM pg_depend d
+  JOIN pg_extension e ON d.refobjid = e.oid
+  WHERE e.extname = 'vector'
+  AND d.deptype = 'n'; -- normal dependencies
+
+  IF dep_count > 0 THEN
+    RAISE WARNING 'Vector extension has % dependent objects. Move may fail.', dep_count;
+    RAISE WARNING 'To see dependencies, run:';
+    RAISE WARNING 'SELECT classid::regclass, objid, objsubid FROM pg_depend WHERE refobjid = (SELECT oid FROM pg_extension WHERE extname = ''vector'');';
+  END IF;
+
+  -- Attempt to move the extension
+  ALTER EXTENSION vector SET SCHEMA extensions;
+  RAISE NOTICE '✅ Successfully moved vector extension to extensions schema';
+
 EXCEPTION
+  WHEN dependent_objects_still_exist THEN
+    RAISE WARNING '⚠️  Cannot move vector extension: dependent objects still exist';
+    RAISE WARNING '    SQLSTATE: %, Message: %', SQLSTATE, SQLERRM;
+    RAISE WARNING '    ';
+    RAISE WARNING '    To resolve, query dependent objects:';
+    RAISE WARNING '    SELECT n.nspname, c.relname, a.attname';
+    RAISE WARNING '    FROM pg_attribute a';
+    RAISE WARNING '    JOIN pg_class c ON a.attrelid = c.oid';
+    RAISE WARNING '    JOIN pg_namespace n ON c.relnamespace = n.oid';
+    RAISE WARNING '    JOIN pg_type t ON a.atttypid = t.oid';
+    RAISE WARNING '    WHERE t.typname = ''vector'';';
+    RAISE WARNING '    ';
+    RAISE WARNING '    You may need to drop/recreate objects using vector type.';
   WHEN OTHERS THEN
-    RAISE NOTICE '⚠️  Could not move vector extension. It may have dependencies.';
-    RAISE NOTICE '    You may need to drop and recreate objects that depend on it.';
+    RAISE WARNING '⚠️  Unexpected error moving vector extension';
+    RAISE WARNING '    SQLSTATE: %, Message: %', SQLSTATE, SQLERRM;
+    RAISE WARNING '    Skipping vector extension move.';
 END $$;
 
 COMMIT;

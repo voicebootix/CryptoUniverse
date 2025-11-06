@@ -117,8 +117,10 @@ ALTER TABLE IF EXISTS ab_test_metrics ENABLE ROW LEVEL SECURITY;
 -- OAuth
 ALTER TABLE IF EXISTS oauth_states ENABLE ROW LEVEL SECURITY;
 
--- Alembic
-ALTER TABLE IF EXISTS alembic_version ENABLE ROW LEVEL SECURITY;
+-- NOTE: alembic_version is NOT RLS-enabled because it's a system table
+-- that Alembic migrations need to access without user context.
+-- If you need to enable RLS on it, ensure you create a permissive policy
+-- for the role used by Alembic (typically postgres or service_role).
 
 COMMIT;
 
@@ -400,7 +402,337 @@ CREATE POLICY "Users can view their own documents"
 ON documents FOR SELECT
 USING (auth.uid()::text = user_id::text);
 
--- Add more policies as needed for other tables...
+-- ----------------------------------------
+-- REMAINING TABLES - ADD POLICIES FOR ALL RLS-ENABLED TABLES
+-- ----------------------------------------
+
+-- Portfolio Snapshots
+DROP POLICY IF EXISTS "Users view own portfolio snapshots" ON portfolio_snapshots;
+CREATE POLICY "Users view own portfolio snapshots"
+ON portfolio_snapshots FOR SELECT
+USING (
+  portfolio_id IN (
+    SELECT id FROM portfolios WHERE user_id = auth.uid()
+  )
+);
+
+-- Trading Sessions
+DROP POLICY IF EXISTS "Users view own trading sessions" ON trading_sessions;
+CREATE POLICY "Users view own trading sessions"
+ON trading_sessions FOR ALL
+USING (auth.uid() = user_id);
+
+-- Strategy Performance History
+DROP POLICY IF EXISTS "Users view own strategy performance" ON strategy_performance_history;
+CREATE POLICY "Users view own strategy performance"
+ON strategy_performance_history FOR SELECT
+USING (auth.uid() = user_id);
+
+-- Strategy Performance
+DROP POLICY IF EXISTS "Users view own performance" ON strategy_performance;
+CREATE POLICY "Users view own performance"
+ON strategy_performance FOR SELECT
+USING (
+  strategy_id IN (
+    SELECT id FROM trading_strategies WHERE user_id = auth.uid()
+  )
+);
+
+-- Strategy Followers
+DROP POLICY IF EXISTS "Users manage own follows" ON strategy_followers;
+CREATE POLICY "Users manage own follows"
+ON strategy_followers FOR ALL
+USING (auth.uid() = user_id);
+
+-- Strategy Publishers
+DROP POLICY IF EXISTS "Users manage own publications" ON strategy_publishers;
+CREATE POLICY "Users manage own publications"
+ON strategy_publishers FOR ALL
+USING (auth.uid() = user_id);
+
+-- User Sessions
+DROP POLICY IF EXISTS "Users view own sessions" ON user_sessions;
+CREATE POLICY "Users view own sessions"
+ON user_sessions FOR ALL
+USING (auth.uid() = user_id);
+
+-- User Activities
+DROP POLICY IF EXISTS "Users view own activities" ON user_activities;
+CREATE POLICY "Users view own activities"
+ON user_activities FOR SELECT
+USING (auth.uid() = user_id);
+
+-- User OAuth Connections
+DROP POLICY IF EXISTS "Users manage own oauth" ON user_oauth_connections;
+CREATE POLICY "Users manage own oauth"
+ON user_oauth_connections FOR ALL
+USING (auth.uid() = user_id);
+
+-- User Telegram Connections
+DROP POLICY IF EXISTS "Users manage own telegram" ON user_telegram_connections;
+CREATE POLICY "Users manage own telegram"
+ON user_telegram_connections FOR ALL
+USING (auth.uid() = user_id);
+
+-- User Strategy Access
+DROP POLICY IF EXISTS "Users view own strategy access" ON user_strategy_access;
+CREATE POLICY "Users view own strategy access"
+ON user_strategy_access FOR SELECT
+USING (auth.uid() = user_id);
+
+-- User Analytics
+DROP POLICY IF EXISTS "Users view own analytics" ON user_analytics;
+CREATE POLICY "Users view own analytics"
+ON user_analytics FOR SELECT
+USING (auth.uid() = user_id);
+
+-- Login History
+DROP POLICY IF EXISTS "Users view own login history" ON login_history;
+CREATE POLICY "Users view own login history"
+ON login_history FOR SELECT
+USING (auth.uid() = user_id);
+
+-- Chat Session Summaries
+DROP POLICY IF EXISTS "Users view own chat summaries" ON chat_session_summaries;
+CREATE POLICY "Users view own chat summaries"
+ON chat_session_summaries FOR SELECT
+USING (
+  auth.uid() IN (
+    SELECT user_id FROM chat_sessions WHERE id = chat_session_summaries.session_id
+  )
+);
+
+-- Risk Assessments
+DROP POLICY IF EXISTS "Users view own risk assessments" ON risk_assessments;
+CREATE POLICY "Users view own risk assessments"
+ON risk_assessments FOR SELECT
+USING (auth.uid() = user_id);
+
+-- Risk Metrics
+DROP POLICY IF EXISTS "Users view own risk metrics" ON risk_metrics;
+CREATE POLICY "Users view own risk metrics"
+ON risk_metrics FOR SELECT
+USING (auth.uid() = user_id);
+
+-- Performance Metrics
+DROP POLICY IF EXISTS "Users view own performance metrics" ON performance_metrics;
+CREATE POLICY "Users view own performance metrics"
+ON performance_metrics FOR SELECT
+USING (auth.uid() = user_id);
+
+-- AI Models (Public read for reference)
+DROP POLICY IF EXISTS "Anyone can view AI models" ON ai_models;
+CREATE POLICY "Anyone can view AI models"
+ON ai_models FOR SELECT
+USING (is_active = true);
+
+-- AI Signals
+DROP POLICY IF EXISTS "Users view own AI signals" ON ai_signals;
+CREATE POLICY "Users view own AI signals"
+ON ai_signals FOR SELECT
+USING (auth.uid() = user_id OR visibility = 'public');
+
+-- AI Consensus
+DROP POLICY IF EXISTS "Anyone can view AI consensus" ON ai_consensus;
+CREATE POLICY "Anyone can view AI consensus"
+ON ai_consensus FOR SELECT
+USING (true);
+
+-- AI Analysis Log
+DROP POLICY IF EXISTS "Users view own AI analysis" ON ai_analysis_log;
+CREATE POLICY "Users view own AI analysis"
+ON ai_analysis_log FOR SELECT
+USING (auth.uid() = user_id);
+
+-- Learning Data (service role only)
+DROP POLICY IF EXISTS "Service role manages learning data" ON learning_data;
+CREATE POLICY "Service role manages learning data"
+ON learning_data FOR ALL
+USING (auth.role() = 'service_role');
+
+-- Market Data Log (service role write, public read)
+DROP POLICY IF EXISTS "Anyone can view market data log" ON market_data_log;
+CREATE POLICY "Anyone can view market data log"
+ON market_data_log FOR SELECT
+USING (true);
+
+-- Market Data OHLCV (public read)
+DROP POLICY IF EXISTS "Anyone can view OHLCV data" ON market_data_ohlcv;
+CREATE POLICY "Anyone can view OHLCV data"
+ON market_data_ohlcv FOR SELECT
+USING (true);
+
+-- Technical Indicators (public read)
+DROP POLICY IF EXISTS "Anyone can view technical indicators" ON technical_indicators;
+CREATE POLICY "Anyone can view technical indicators"
+ON technical_indicators FOR SELECT
+USING (true);
+
+-- Orderbook Snapshots (public read)
+DROP POLICY IF EXISTS "Anyone can view orderbook" ON orderbook_snapshots;
+CREATE POLICY "Anyone can view orderbook"
+ON orderbook_snapshots FOR SELECT
+USING (true);
+
+-- Legacy Market Data (public read)
+DROP POLICY IF EXISTS "Anyone can view legacy market data" ON legacy_market_data;
+CREATE POLICY "Anyone can view legacy market data"
+ON legacy_market_data FOR SELECT
+USING (true);
+
+-- Market Indicators (public read)
+DROP POLICY IF EXISTS "Anyone can view market indicators" ON market_indicators;
+CREATE POLICY "Anyone can view market indicators"
+ON market_indicators FOR SELECT
+USING (true);
+
+-- Signal Channels (public read)
+DROP POLICY IF EXISTS "Anyone can view signal channels" ON signal_channels;
+CREATE POLICY "Anyone can view signal channels"
+ON signal_channels FOR SELECT
+USING (true);
+
+-- Signal Subscriptions
+DROP POLICY IF EXISTS "Users manage own subscriptions" ON signal_subscriptions;
+CREATE POLICY "Users manage own subscriptions"
+ON signal_subscriptions FOR ALL
+USING (auth.uid() = user_id);
+
+-- Signal Events (public read based on channel)
+DROP POLICY IF EXISTS "Users view subscribed signal events" ON signal_events;
+CREATE POLICY "Users view subscribed signal events"
+ON signal_events FOR SELECT
+USING (
+  channel_id IN (
+    SELECT channel_id FROM signal_subscriptions WHERE user_id = auth.uid()
+  )
+);
+
+-- Signal Delivery Logs
+DROP POLICY IF EXISTS "Users view own delivery logs" ON signal_delivery_logs;
+CREATE POLICY "Users view own delivery logs"
+ON signal_delivery_logs FOR SELECT
+USING (auth.uid() = user_id);
+
+-- Copy Trade Signals
+DROP POLICY IF EXISTS "Users view own copy signals" ON copy_trade_signals;
+CREATE POLICY "Users view own copy signals"
+ON copy_trade_signals FOR SELECT
+USING (auth.uid() = user_id OR visibility = 'public');
+
+-- System Configuration (service role only)
+DROP POLICY IF EXISTS "Service role manages config" ON system_configuration;
+CREATE POLICY "Service role manages config"
+ON system_configuration FOR ALL
+USING (auth.role() = 'service_role');
+
+-- Portfolio Optimization Log
+DROP POLICY IF EXISTS "Users view own optimization" ON portfolio_optimization_log;
+CREATE POLICY "Users view own optimization"
+ON portfolio_optimization_log FOR SELECT
+USING (auth.uid() = user_id);
+
+-- Tenants (multi-tenant isolation)
+DROP POLICY IF EXISTS "Users view own tenant" ON tenants;
+CREATE POLICY "Users view own tenant"
+ON tenants FOR SELECT
+USING (
+  id IN (
+    SELECT tenant_id FROM users WHERE id = auth.uid()
+  )
+);
+
+-- Tenant Settings
+DROP POLICY IF EXISTS "Users view own tenant settings" ON tenant_settings;
+CREATE POLICY "Users view own tenant settings"
+ON tenant_settings FOR SELECT
+USING (
+  tenant_id IN (
+    SELECT tenant_id FROM users WHERE id = auth.uid()
+  )
+);
+
+-- AB Tests (public read active tests)
+DROP POLICY IF EXISTS "Anyone can view active AB tests" ON ab_tests;
+CREATE POLICY "Anyone can view active AB tests"
+ON ab_tests FOR SELECT
+USING (status = 'active');
+
+-- AB Test Variants
+DROP POLICY IF EXISTS "Anyone can view active variants" ON ab_test_variants;
+CREATE POLICY "Anyone can view active variants"
+ON ab_test_variants FOR SELECT
+USING (status = 'active');
+
+-- AB Test Results
+DROP POLICY IF EXISTS "Admins view test results" ON ab_test_results;
+CREATE POLICY "Admins view test results"
+ON ab_test_results FOR SELECT
+USING (auth.jwt() ->> 'role' = 'admin');
+
+-- AB Test Participants
+DROP POLICY IF EXISTS "Users view own participation" ON ab_test_participants;
+CREATE POLICY "Users view own participation"
+ON ab_test_participants FOR SELECT
+USING (auth.uid() = user_id);
+
+-- AB Test Metrics
+DROP POLICY IF EXISTS "Admins view test metrics" ON ab_test_metrics;
+CREATE POLICY "Admins view test metrics"
+ON ab_test_metrics FOR SELECT
+USING (auth.jwt() ->> 'role' = 'admin');
+
+-- OAuth States (temporary, user-specific)
+DROP POLICY IF EXISTS "Users manage own oauth states" ON oauth_states;
+CREATE POLICY "Users manage own oauth states"
+ON oauth_states FOR ALL
+USING (auth.uid() = user_id);
+
+-- Background Tasks (service role only)
+DROP POLICY IF EXISTS "Service role manages tasks" ON background_tasks;
+CREATE POLICY "Service role manages tasks"
+ON background_tasks FOR ALL
+USING (auth.role() = 'service_role');
+
+-- Credit Accounts
+DROP POLICY IF EXISTS "Users view own credit account" ON credit_accounts;
+CREATE POLICY "Users view own credit account"
+ON credit_accounts FOR SELECT
+USING (auth.uid() = user_id);
+
+-- Strategy Scanning Policies
+DROP POLICY IF EXISTS "Users view own scanning policies" ON strategy_scanning_policies;
+CREATE POLICY "Users view own scanning policies"
+ON strategy_scanning_policies FOR SELECT
+USING (auth.uid() = user_id);
+
+-- Strategy Submissions
+DROP POLICY IF EXISTS "Users manage own submissions" ON strategy_submissions;
+CREATE POLICY "Users manage own submissions"
+ON strategy_submissions FOR ALL
+USING (auth.uid() = user_id);
+
+-- Live Strategy Performance (public for published strategies)
+DROP POLICY IF EXISTS "Users view accessible live performance" ON live_strategy_performance;
+CREATE POLICY "Users view accessible live performance"
+ON live_strategy_performance FOR SELECT
+USING (
+  strategy_id IN (
+    SELECT id FROM trading_strategies
+    WHERE user_id = auth.uid() OR visibility = 'public'
+  )
+);
+
+-- Telegram Messages
+DROP POLICY IF EXISTS "Users view own telegram messages" ON telegram_messages;
+CREATE POLICY "Users view own telegram messages"
+ON telegram_messages FOR SELECT
+USING (
+  auth.uid() IN (
+    SELECT user_id FROM user_telegram_connections
+    WHERE telegram_user_id = telegram_messages.telegram_user_id
+  )
+);
 
 COMMIT;
 

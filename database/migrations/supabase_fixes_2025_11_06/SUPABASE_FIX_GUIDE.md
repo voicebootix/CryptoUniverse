@@ -2,7 +2,7 @@
 
 ## 📋 Overview
 
-Inge idhu ungaloda CryptoUniverse project ku irukira **CRITICAL** security and performance issues-kaga complete fix guide!
+This is a complete fix guide for the **CRITICAL** security and performance issues in your CryptoUniverse project.
 
 ## 🚨 Critical Issues Found
 
@@ -19,11 +19,11 @@ Inge idhu ungaloda CryptoUniverse project ku irukira **CRITICAL** security and p
 
 ## 📁 Generated Files
 
-Naan 3 SQL files create panni irukken:
+Three SQL migration files have been created:
 
-1. **`supabase_security_fixes.sql`** - RLS & Policies
+1. **`supabase_security_fixes.sql`** - RLS enablement and policies
 2. **`supabase_performance_fixes.sql`** - Drop unused indexes
-3. **`supabase_function_fixes.sql`** - Fix functions & views
+3. **`supabase_function_fixes.sql`** - Fix functions and views
 
 ## 🎯 Step-by-Step Implementation Plan
 
@@ -161,7 +161,7 @@ SELECT * FROM users WHERE id != auth.uid();
 
 ### 1. Adjust RLS Policies
 
-Intha policies basic dhaan. Ungaloda business logic ku based on customize pannanum:
+The included policies are basic templates. You should customize them based on your business logic:
 
 ```sql
 -- Example: Allow admins to see all data
@@ -187,7 +187,7 @@ USING (
 
 ### 2. Recreate Security Definer Views
 
-Neenga original view definitions-a eduthu, proper security checks add pannanum:
+You must retrieve the original view definitions and add proper security checks:
 
 ```sql
 -- Example: portfolio_evolution with security
@@ -384,7 +384,7 @@ Before marking complete:
 
 ## 🎉 Done!
 
-Once everything is complete, ungaloda database super secure and fast aagirikkum! 🚀
+Once everything is complete, your database will be super secure and optimized for performance! 🚀
 
 ---
 

@@ -222,21 +222,16 @@ BEGIN;
 COMMIT;
 
 -- ========================================
--- PART 4: ANALYZE TABLES AFTER INDEX CHANGES
+-- PART 4: ANALYZE ALL TABLES AFTER INDEX CHANGES
 -- ========================================
 BEGIN;
 
--- Update statistics for query planner
-ANALYZE exchange_accounts;
-ANALYZE exchange_balances;
-ANALYZE market_data;
-ANALYZE trades;
-ANALYZE orders;
-ANALYZE subscriptions;
-ANALYZE billing_history;
-ANALYZE user_activities;
-ANALYZE trading_strategies;
-ANALYZE backtest_results;
+-- Update statistics for query planner across ALL public tables
+-- This is important after dropping 100+ indexes
+ANALYZE VERBOSE;
+
+-- Note: ANALYZE VERBOSE will show progress for each table
+-- This may take a few minutes depending on database size
 
 COMMIT;
 
