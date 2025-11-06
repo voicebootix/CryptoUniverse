@@ -153,6 +153,48 @@ END $$;
 \echo '✅ Indexes optimized!';
 \echo '';
 
+-- Checkpoint: Verify Phase 3 success
+DO $$
+DECLARE
+  index_count INTEGER;
+  unused_count INTEGER;
+BEGIN
+  -- Count remaining indexes (excluding primary keys)
+  SELECT COUNT(*) INTO index_count
+  FROM pg_indexes
+  WHERE schemaname = 'public'
+  AND indexname NOT LIKE '%_pkey';
+
+  -- Check for remaining unused indexes
+  SELECT COUNT(*) INTO unused_count
+  FROM pg_stat_user_indexes
+  WHERE schemaname = 'public'
+  AND idx_scan = 0
+  AND indexname NOT LIKE '%_pkey';
+
+  RAISE NOTICE '';
+  RAISE NOTICE '========================================';
+  RAISE NOTICE 'Phase 3 Verification';
+  RAISE NOTICE '========================================';
+  RAISE NOTICE 'Remaining indexes (non-PK): %', index_count;
+  RAISE NOTICE 'Unused indexes still present: %', unused_count;
+  RAISE NOTICE '';
+
+  IF index_count > 300 THEN
+    RAISE WARNING 'High index count detected (%). Review if more indexes should be dropped.', index_count;
+  END IF;
+
+  IF unused_count > 20 THEN
+    RAISE WARNING 'Still % unused indexes remaining. Some indexes may not have been dropped.', unused_count;
+  ELSE
+    RAISE NOTICE '✅ Phase 3 verification passed';
+  END IF;
+
+  RAISE NOTICE '';
+  RAISE NOTICE 'Proceeding to Phase 4...';
+  RAISE NOTICE '';
+END $$;
+
 -- ========================================
 -- PHASE 4: FUNCTION FIXES
 -- ========================================
@@ -166,6 +208,69 @@ END $$;
 \i supabase_function_fixes.sql
 \echo '⚠️  Views dropped - must be recreated!';
 \echo '';
+
+-- Checkpoint: Verify Phase 4 success
+DO $$
+DECLARE
+  func_fixed_count INTEGER;
+  views_exist_count INTEGER;
+  expected_dropped_views TEXT[] := ARRAY['portfolio_evolution', 'daily_performance', 'v_user_strategy_summary', 'ai_performance'];
+  view_name TEXT;
+  still_exists TEXT[] := ARRAY[]::TEXT[];
+BEGIN
+  RAISE NOTICE '';
+  RAISE NOTICE '========================================';
+  RAISE NOTICE 'Phase 4 Verification';
+  RAISE NOTICE '========================================';
+
+  -- Check if functions have correct search_path
+  SELECT COUNT(*) INTO func_fixed_count
+  FROM pg_proc p
+  JOIN pg_namespace n ON p.pronamespace = n.oid
+  WHERE n.nspname = 'public'
+  AND p.proname IN ('update_updated_at_column', 'match_documents')
+  AND 'public' = ANY(string_to_array(replace(replace(array_to_string(p.proconfig, ','), 'search_path=', ''), ' ', ''), ','));
+
+  RAISE NOTICE 'Functions with fixed search_path: %', func_fixed_count;
+
+  -- Check if security definer views were dropped
+  FOREACH view_name IN ARRAY expected_dropped_views
+  LOOP
+    IF EXISTS (
+      SELECT 1 FROM pg_views
+      WHERE schemaname = 'public'
+      AND viewname = view_name
+    ) THEN
+      still_exists := array_append(still_exists, view_name);
+    END IF;
+  END LOOP;
+
+  views_exist_count := array_length(still_exists, 1);
+
+  IF views_exist_count IS NULL THEN
+    views_exist_count := 0;
+  END IF;
+
+  IF views_exist_count > 0 THEN
+    RAISE WARNING 'Expected views were NOT dropped: %', array_to_string(still_exists, ', ');
+    RAISE WARNING 'Phase 4 may have failed. Views should be dropped.';
+  ELSE
+    RAISE NOTICE '✅ All 4 security definer views successfully dropped';
+  END IF;
+
+  IF func_fixed_count > 0 THEN
+    RAISE NOTICE '✅ Function search paths updated';
+  ELSE
+    RAISE NOTICE 'ℹ️  Functions may not exist or were already fixed';
+  END IF;
+
+  RAISE NOTICE '';
+  RAISE NOTICE '⚠️  CRITICAL: Views must be recreated before application restart!';
+  RAISE NOTICE '    See SUPABASE_FIX_GUIDE.md for recreation instructions';
+  RAISE NOTICE '';
+  RAISE NOTICE 'Proceeding to Phase 5...';
+  RAISE NOTICE '';
+END $$;
 
 -- ========================================
 -- PHASE 5: FINAL VERIFICATION

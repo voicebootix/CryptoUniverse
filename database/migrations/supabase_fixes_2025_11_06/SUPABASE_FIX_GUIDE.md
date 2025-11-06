@@ -95,6 +95,89 @@ pg_dump -h your-db-host -U postgres -d postgres > backup_$(date +%Y%m%d).sql
 - Recreate views with proper security
 - Test all views
 
+#### Recreating Dropped Views (CRITICAL!)
+
+The migration drops 4 security definer views. You **MUST** recreate them before application restart:
+
+**Dropped Views:**
+1. `portfolio_evolution`
+2. `daily_performance`
+3. `v_user_strategy_summary`
+4. `ai_performance`
+
+**Step-by-Step Recreation:**
+
+1. **Extract Original Definitions (BEFORE running migration):**
+   ```sql
+   -- Save this output to a file
+   SELECT
+     viewname,
+     definition
+   FROM pg_views
+   WHERE schemaname = 'public'
+   AND viewname IN ('portfolio_evolution', 'daily_performance', 'v_user_strategy_summary', 'ai_performance');
+   ```
+
+2. **Choose Security Model:**
+   - **Option A (Recommended):** Use `security_invoker` - runs with caller's permissions
+   - **Option B:** Add explicit `WHERE user_id = auth.uid()` checks
+   - **Option C:** Both (defense in depth)
+
+3. **Recreate Each View:**
+   ```sql
+   -- Example: portfolio_evolution with security_invoker
+   CREATE VIEW public.portfolio_evolution
+   WITH (security_invoker = true) AS
+   SELECT
+     p.user_id,
+     p.id as portfolio_id,
+     ps.timestamp,
+     ps.total_value,
+     ps.profit_loss
+   FROM portfolios p
+   JOIN portfolio_snapshots ps ON p.id = ps.portfolio_id
+   WHERE p.user_id = auth.uid()  -- Explicit security check
+   ORDER BY ps.timestamp DESC;
+   ```
+
+4. **Test Each View:**
+   ```sql
+   -- Test as regular user
+   SELECT * FROM portfolio_evolution LIMIT 10;
+
+   -- Verify only shows user's own data
+   SELECT DISTINCT user_id FROM portfolio_evolution;
+   -- Should only return current user's ID
+   ```
+
+5. **Verify Application Works:**
+   - Restart application
+   - Test features that use these views
+   - Check for any view-related errors in logs
+
+**Templates:**
+
+The migration file `supabase_function_fixes.sql` includes complete templates in PART 3.
+Uncomment and customize them with your actual view logic.
+
+**Where to Find Original Definitions:**
+- Your application repository (migration files)
+- Database backup taken before migration
+- Output from extraction query in Step 1 above
+- Supabase SQL Editor history
+
+**Security Best Practices:**
+- Always use `WITH (security_invoker = true)` for PostgreSQL 15+
+- Add `WHERE user_id = auth.uid()` for defense in depth
+- Never use `SECURITY DEFINER` without explicit security checks
+- Test with different user roles to verify security
+
+**Troubleshooting:**
+- **View not found error:** Recreate the view using templates
+- **Permission denied:** Check RLS policies on underlying tables
+- **No rows returned:** Verify `auth.uid()` matches user_id column
+- **Too many rows:** Add user_id filter to WHERE clause
+
 ### Step 6: Upgrade Database Version
 
 1. Go to Supabase Dashboard

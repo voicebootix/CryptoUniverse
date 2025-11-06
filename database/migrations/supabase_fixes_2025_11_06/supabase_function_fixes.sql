@@ -62,7 +62,45 @@ EXCEPTION
 END $$;
 
 -- ========================================
--- PART 2: FIX SECURITY DEFINER VIEWS
+-- PART 2: PRE-MIGRATION - EXTRACT VIEW DEFINITIONS
+-- ========================================
+
+-- ⚠️  RUN THIS FIRST - BEFORE DROPPING VIEWS!
+-- This query extracts and displays current view definitions.
+-- Save this output to a file for later recreation.
+--
+-- To save to file in psql:
+--   \o view_backup.sql
+--   <run query below>
+--   \o
+--
+-- Or save output manually and store in version control.
+
+DO $$
+BEGIN
+  RAISE NOTICE '';
+  RAISE NOTICE '========================================';
+  RAISE NOTICE 'EXTRACTING VIEW DEFINITIONS';
+  RAISE NOTICE '========================================';
+  RAISE NOTICE '';
+  RAISE NOTICE 'Copy the output from the following query and save to a file!';
+  RAISE NOTICE 'You will need these definitions to recreate the views.';
+  RAISE NOTICE '';
+END $$;
+
+-- Extract view definitions
+SELECT
+  '-- View: ' || viewname AS section,
+  'DROP VIEW IF EXISTS public.' || viewname || ' CASCADE;' AS drop_statement,
+  'CREATE VIEW public.' || viewname || ' AS' || E'\n' || definition AS create_statement,
+  '' AS separator
+FROM pg_views
+WHERE schemaname = 'public'
+AND viewname IN ('portfolio_evolution', 'daily_performance', 'v_user_strategy_summary', 'ai_performance')
+ORDER BY viewname;
+
+-- ========================================
+-- PART 3: FIX SECURITY DEFINER VIEWS
 -- ========================================
 
 -- ⚠️  CRITICAL WARNING:
@@ -169,39 +207,121 @@ COMMIT;
 -- PART 3: RECREATE VIEWS WITH PROPER SECURITY
 -- ========================================
 
+-- ⚠️ IMPORTANT: Replace the templates below with actual view definitions!
+-- Use the backup from Part 2 and add proper security.
+
+-- SECURITY MODEL: We recommend using security_invoker (PostgreSQL 15+)
+-- This runs views with the permissions of the calling user, respecting RLS policies.
+
 BEGIN;
 
--- ⚠️ IMPORTANT: You need to add the actual view definitions here!
--- The views above were dropped. Now recreate them properly.
+-- Template 1: portfolio_evolution
+-- Replace this with your actual view definition from backup
+/*
+CREATE VIEW public.portfolio_evolution
+WITH (security_invoker = true) AS
+SELECT
+  p.user_id,
+  p.id as portfolio_id,
+  ps.timestamp,
+  ps.total_value,
+  ps.total_equity,
+  ps.total_cash,
+  ps.profit_loss,
+  ps.profit_loss_percentage
+FROM portfolios p
+JOIN portfolio_snapshots ps ON p.id = ps.portfolio_id
+WHERE p.user_id = auth.uid()  -- Security: only user's own data
+ORDER BY ps.timestamp DESC;
+*/
 
--- Method 1: Use security_invoker (PostgreSQL 15+)
--- This runs the view with the permissions of the user calling it
+-- Template 2: daily_performance
+-- Replace this with your actual view definition from backup
+/*
+CREATE VIEW public.daily_performance
+WITH (security_invoker = true) AS
+SELECT
+  user_id,
+  DATE(created_at) as date,
+  COUNT(*) as trade_count,
+  SUM(profit_loss) as daily_profit,
+  AVG(profit_loss) as avg_profit_per_trade,
+  SUM(CASE WHEN profit_loss > 0 THEN 1 ELSE 0 END)::float / COUNT(*) as win_rate
+FROM trades
+WHERE user_id = auth.uid()  -- Security: only user's own trades
+  AND status = 'closed'
+GROUP BY user_id, DATE(created_at)
+ORDER BY date DESC;
+*/
 
--- Example:
--- CREATE VIEW public.portfolio_evolution
--- WITH (security_invoker = true) AS
--- SELECT ...your query...;
+-- Template 3: v_user_strategy_summary
+-- Replace this with your actual view definition from backup
+/*
+CREATE VIEW public.v_user_strategy_summary
+WITH (security_invoker = true) AS
+SELECT
+  ts.user_id,
+  ts.id as strategy_id,
+  ts.name,
+  ts.description,
+  ts.status,
+  ts.visibility,
+  COUNT(t.id) as total_trades,
+  SUM(t.profit_loss) as total_profit,
+  AVG(t.profit_loss) as avg_profit_per_trade,
+  SUM(CASE WHEN t.profit_loss > 0 THEN 1 ELSE 0 END)::float / NULLIF(COUNT(t.id), 0) as win_rate,
+  MAX(t.created_at) as last_trade_at
+FROM trading_strategies ts
+LEFT JOIN trades t ON ts.id = t.strategy_id AND t.status = 'closed'
+WHERE ts.user_id = auth.uid()  -- Security: only user's own strategies
+GROUP BY ts.user_id, ts.id, ts.name, ts.description, ts.status, ts.visibility;
+*/
 
--- Method 2: Add RLS checks within the view
--- This is safer and works with security_definer
+-- Template 4: ai_performance
+-- Replace this with your actual view definition from backup
+-- Note: This view may not need user restriction if it shows aggregate AI model stats
+/*
+CREATE VIEW public.ai_performance
+WITH (security_invoker = true) AS
+SELECT
+  am.id as model_id,
+  am.name as model_name,
+  am.provider,
+  COUNT(ais.id) as total_signals,
+  AVG(ais.confidence) as avg_confidence,
+  SUM(CASE WHEN ais.was_correct THEN 1 ELSE 0 END)::float / NULLIF(COUNT(ais.id), 0) as accuracy,
+  MAX(ais.created_at) as last_signal_at
+FROM ai_models am
+LEFT JOIN ai_signals ais ON am.id = ais.model_id
+WHERE am.is_active = true
+GROUP BY am.id, am.name, am.provider
+ORDER BY accuracy DESC NULLS LAST;
+*/
 
--- Example:
--- CREATE VIEW public.portfolio_evolution AS
--- SELECT ...
--- WHERE user_id = auth.uid() OR EXISTS (
---   SELECT 1 FROM user_roles
---   WHERE user_id = auth.uid() AND role = 'admin'
--- );
-
--- ⚠️ ACTION REQUIRED:
--- Get the actual view definitions from your application code
--- or from Supabase dashboard, then add them here with proper security
-
-RAISE NOTICE '⚠️  VIEWS HAVE BEEN DROPPED!';
-RAISE NOTICE '⚠️  YOU MUST RECREATE THEM WITH PROPER SECURITY!';
-RAISE NOTICE '';
-RAISE NOTICE 'To get view definitions, run:';
-RAISE NOTICE 'SELECT definition FROM pg_views WHERE schemaname = ''public'' AND viewname IN (''portfolio_evolution'', ''daily_performance'', ''v_user_strategy_summary'', ''ai_performance'');';
+DO $$
+BEGIN
+  RAISE NOTICE '';
+  RAISE NOTICE '========================================';
+  RAISE NOTICE '⚠️  ACTION REQUIRED: RECREATE VIEWS';
+  RAISE NOTICE '========================================';
+  RAISE NOTICE '';
+  RAISE NOTICE 'Views have been DROPPED but templates are commented out above.';
+  RAISE NOTICE '';
+  RAISE NOTICE 'TO COMPLETE THIS MIGRATION:';
+  RAISE NOTICE '1. Use the backup from Part 2 (view definitions)';
+  RAISE NOTICE '2. Uncomment and customize the templates in PART 3';
+  RAISE NOTICE '3. Add auth.uid() checks or use WITH (security_invoker = true)';
+  RAISE NOTICE '4. Test each view with SELECT * FROM view_name;';
+  RAISE NOTICE '5. Verify users can only see their own data';
+  RAISE NOTICE '';
+  RAISE NOTICE 'SECURITY OPTIONS:';
+  RAISE NOTICE '  Option A: WITH (security_invoker = true) - Recommended';
+  RAISE NOTICE '  Option B: WHERE user_id = auth.uid() - Explicit check';
+  RAISE NOTICE '  Option C: Both for defense in depth';
+  RAISE NOTICE '';
+  RAISE NOTICE 'See SUPABASE_FIX_GUIDE.md section "Recreating Dropped Views"';
+  RAISE NOTICE '';
+END $$;
 
 COMMIT;
 

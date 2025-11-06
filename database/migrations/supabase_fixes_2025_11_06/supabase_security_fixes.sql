@@ -267,6 +267,29 @@ ON trading_strategies FOR ALL
 USING (auth.uid() = user_id);
 
 -- ----------------------------------------
+-- TRADING SIGNALS POLICIES
+-- ----------------------------------------
+DROP POLICY IF EXISTS "Users can view own signals" ON trading_signals;
+CREATE POLICY "Users can view own signals"
+ON trading_signals FOR SELECT
+USING (auth.uid() = user_id OR visibility = 'public');
+
+DROP POLICY IF EXISTS "Users can create own signals" ON trading_signals;
+CREATE POLICY "Users can create own signals"
+ON trading_signals FOR INSERT
+WITH CHECK (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can update own signals" ON trading_signals;
+CREATE POLICY "Users can update own signals"
+ON trading_signals FOR UPDATE
+USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Service role can manage signals" ON trading_signals;
+CREATE POLICY "Service role can manage signals"
+ON trading_signals FOR ALL
+USING (auth.role() = 'service_role');
+
+-- ----------------------------------------
 -- ORDERS POLICIES
 -- ----------------------------------------
 DROP POLICY IF EXISTS "Users can view their own orders" ON orders;
@@ -299,6 +322,21 @@ DROP POLICY IF EXISTS "Users can view their own positions" ON positions;
 CREATE POLICY "Users can view their own positions"
 ON positions FOR SELECT
 USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can create their own positions" ON positions;
+CREATE POLICY "Users can create their own positions"
+ON positions FOR INSERT
+WITH CHECK (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Users can update their own positions" ON positions;
+CREATE POLICY "Users can update their own positions"
+ON positions FOR UPDATE
+USING (auth.uid() = user_id);
+
+DROP POLICY IF EXISTS "Service role can manage positions" ON positions;
+CREATE POLICY "Service role can manage positions"
+ON positions FOR ALL
+USING (auth.role() = 'service_role');
 
 -- ----------------------------------------
 -- PORTFOLIOS POLICIES
