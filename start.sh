@@ -116,7 +116,7 @@ if [ "$ENVIRONMENT" = "production" ]; then
 fi
 
 # Derive optimal runtime settings from configuration helper
-mapfile -t RUNTIME_HINTS < <(python - <<'PYTHON'
+RUNTIME_HINTS_RAW="$(python - <<'PYTHON'
 from app.core.config import settings
 
 print(settings.recommended_web_concurrency)
@@ -127,7 +127,11 @@ print(settings.GUNICORN_KEEPALIVE)
 print(settings.GUNICORN_MAX_REQUESTS)
 print(settings.GUNICORN_MAX_REQUESTS_JITTER)
 PYTHON
-)
+)" || {
+    echo "❌ Failed to derive runtime hints from app.core.config" >&2
+    exit 1
+}
+mapfile -t RUNTIME_HINTS <<<"$RUNTIME_HINTS_RAW"
 
 AUTO_WORKERS=${RUNTIME_HINTS[0]:-1}
 AUTO_MEMORY_LIMIT=${RUNTIME_HINTS[1]}
