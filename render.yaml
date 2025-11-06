@@ -7,7 +7,7 @@ services:
     plan: pro  # Professional tier for production workload
     region: oregon  # Choose region closest to your users
     buildCommand: chmod +x scripts/render_build.sh && ./scripts/render_build.sh
-    startCommand: gunicorn main:app -w ${WORKERS:-4} -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --timeout 180 --graceful-timeout 180 --access-logfile - --error-logfile - --log-level ${LOG_LEVEL:-info}
+    startCommand: ./start.sh
     envVars:
       - key: ENVIRONMENT
         value: production
@@ -33,8 +33,6 @@ services:
       # PORT is automatically provided by Render, don't override it
       # - key: PORT
       #   value: 8000
-      - key: WORKERS
-        value: 4
       - key: LOG_LEVEL
         value: INFO
       - key: PYTHONPATH

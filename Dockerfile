@@ -50,8 +50,8 @@ WORKDIR /app
 # Copy application code
 COPY --chown=appuser:appuser . .
 
-# Create logs directory
-RUN mkdir -p logs && chown -R appuser:appuser logs
+# Ensure start script is executable and logs directory exists
+RUN chmod +x start.sh && mkdir -p logs && chown -R appuser:appuser logs
 
 # Switch to non-root user
 USER appuser
@@ -63,5 +63,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/health || exit 1
 
-# Command to run the application - REVERT TO WORKING GUNICORN CONFIG
-CMD ["gunicorn", "main:app", "-w", "4", "-k", "uvicorn.workers.UvicornWorker", "--bind", "0.0.0.0:8000", "--access-logfile", "-", "--error-logfile", "-", "--log-level", "info"]
+# Command to run the application via the tuned start script
+CMD ["./start.sh"]
