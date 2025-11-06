@@ -1584,6 +1584,14 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         ),
                         timeout=recommendation_timeout,
                     )
+                    await self._track_debug_step(
+                        user_id,
+                        scan_id,
+                        7,
+                        "Generate strategy recommendations",
+                        "completed",
+                        recommendations_count=len(strategy_recommendations),
+                    )
                 except asyncio.TimeoutError:
                     self.logger.warning(
                         "Strategy recommendations generation timed out",
@@ -1622,15 +1630,6 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     if isinstance(rec_error, asyncio.CancelledError):
                         raise
                     strategy_recommendations = []
-                else:
-                    await self._track_debug_step(
-                        user_id,
-                        scan_id,
-                        7,
-                        "Generate strategy recommendations",
-                        "completed",
-                        recommendations_count=len(strategy_recommendations),
-                    )
 
             # STEP 8: Build comprehensive response with metrics
             try:
