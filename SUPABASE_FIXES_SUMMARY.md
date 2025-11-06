@@ -122,13 +122,13 @@ Comprehensive analysis and remediation of critical security vulnerabilities and 
 
 | File | Purpose | Priority | Tables | Estimated Time |
 |------|---------|----------|--------|----------------|
-| 001_security_fix_enable_rls_on_all_tables.sql | Enable RLS + policies on 80+ tables | CRITICAL | 80+ | 2-5 min |
-| 002_security_fix_auth_rls_initplan_optimization.sql | Optimize auth function calls | HIGH | 3 | <1 min |
-| 003_performance_fix_consolidate_permissive_policies.sql | Consolidate overlapping policies | HIGH | 3 | <1 min |
-| 004_security_fix_function_search_path.sql | Fix function search_path | MEDIUM | 2 functions | <1 min |
-| 005_security_fix_move_vector_extension.sql | Prepare vector extension move | MEDIUM | 1 extension | <1 min |
-| 006_security_fix_security_definer_views.sql | Convert SECURITY DEFINER views | HIGH | 4 views | 1-2 min |
-| 007_performance_fix_exchange_balances_upsert.sql | Optimize UPSERT operations | CRITICAL | 1 | 5-10 min |
+| supabase_001_security_fix_enable_rls_on_all_tables.sql | Enable RLS + policies on 80+ tables | CRITICAL | 80+ | 2-5 min |
+| supabase_002_security_fix_auth_rls_initplan_optimization.sql | Optimize auth function calls | HIGH | 3 | <1 min |
+| supabase_003_performance_fix_consolidate_permissive_policies.sql | Consolidate overlapping policies | HIGH | 3 | <1 min |
+| supabase_004_security_fix_function_search_path.sql | Fix function search_path | MEDIUM | 2 functions | <1 min |
+| supabase_005_security_fix_move_vector_extension.sql | Prepare vector extension move | MEDIUM | 1 extension | <1 min |
+| supabase_006_security_fix_security_definer_views.sql | Convert SECURITY DEFINER views | HIGH | 4 views | 1-2 min |
+| supabase_007_performance_fix_exchange_balances_upsert.sql | Optimize UPSERT operations | CRITICAL | 1 | 5-10 min |
 
 **Total Deployment Time:** ~15-20 minutes
 
@@ -167,21 +167,21 @@ Comprehensive analysis and remediation of critical security vulnerabilities and 
 ## Deployment Order (Recommended)
 
 ### Phase 1: Critical Security (Deploy Immediately)
-1. ✅ 001_security_fix_enable_rls_on_all_tables.sql
-2. ✅ 006_security_fix_security_definer_views.sql
+1. ✅ supabase_001_security_fix_enable_rls_on_all_tables.sql
+2. ✅ supabase_006_security_fix_security_definer_views.sql
 
 **Why First:** These fix critical data exposure vulnerabilities
 
 ### Phase 2: Performance Optimization (Deploy Immediately After)
-3. ✅ 002_security_fix_auth_rls_initplan_optimization.sql
-4. ✅ 003_performance_fix_consolidate_permissive_policies.sql
-5. ✅ 007_performance_fix_exchange_balances_upsert.sql
+3. ✅ supabase_002_security_fix_auth_rls_initplan_optimization.sql
+4. ✅ supabase_003_performance_fix_consolidate_permissive_policies.sql
+5. ✅ supabase_007_performance_fix_exchange_balances_upsert.sql
 
 **Why Second:** These fix query performance issues
 
 ### Phase 3: Security Hardening (Deploy Same Session)
-6. ✅ 004_security_fix_function_search_path.sql
-7. ✅ 005_security_fix_move_vector_extension.sql
+6. ✅ supabase_004_security_fix_function_search_path.sql
+7. ✅ supabase_005_security_fix_move_vector_extension.sql
 
 **Why Last:** Lower priority security improvements
 
@@ -312,13 +312,13 @@ All migrations are reversible:
 ## Files Created
 
 ### Migration Scripts
-- `migrations/001_security_fix_enable_rls_on_all_tables.sql` (342 lines)
-- `migrations/002_security_fix_auth_rls_initplan_optimization.sql` (92 lines)
-- `migrations/003_performance_fix_consolidate_permissive_policies.sql` (136 lines)
-- `migrations/004_security_fix_function_search_path.sql` (178 lines)
-- `migrations/005_security_fix_move_vector_extension.sql` (288 lines)
-- `migrations/006_security_fix_security_definer_views.sql` (384 lines)
-- `migrations/007_performance_fix_exchange_balances_upsert.sql` (374 lines)
+- `migrations/supabase_001_security_fix_enable_rls_on_all_tables.sql` (342 lines)
+- `migrations/supabase_002_security_fix_auth_rls_initplan_optimization.sql` (92 lines)
+- `migrations/supabase_003_performance_fix_consolidate_permissive_policies.sql` (136 lines)
+- `migrations/supabase_004_security_fix_function_search_path.sql` (178 lines)
+- `migrations/supabase_005_security_fix_move_vector_extension.sql` (288 lines)
+- `migrations/supabase_006_security_fix_security_definer_views.sql` (384 lines)
+- `migrations/supabase_007_performance_fix_exchange_balances_upsert.sql` (374 lines)
 
 ### Documentation
 - `SUPABASE_SECURITY_FIXES_DEPLOYMENT_GUIDE.md` - Detailed deployment instructions

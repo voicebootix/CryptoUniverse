@@ -20,7 +20,7 @@ This guide covers the deployment of **7 critical SQL migrations** that address m
 
 ## Migration Files Overview
 
-### 001_security_fix_enable_rls_on_all_tables.sql
+### supabase_001_security_fix_enable_rls_on_all_tables.sql
 **Purpose:** Enable Row Level Security on 80+ public tables
 **Severity:** CRITICAL
 **Estimated Time:** 2-5 minutes
@@ -43,7 +43,7 @@ This guide covers the deployment of **7 critical SQL migrations** that address m
 
 ---
 
-### 002_security_fix_auth_rls_initplan_optimization.sql
+### supabase_002_security_fix_auth_rls_initplan_optimization.sql
 **Purpose:** Optimize RLS policies that re-evaluate auth functions per row
 **Severity:** HIGH
 **Estimated Time:** <1 minute
@@ -58,7 +58,7 @@ This guide covers the deployment of **7 critical SQL migrations** that address m
 
 ---
 
-### 003_performance_fix_consolidate_permissive_policies.sql
+### supabase_003_performance_fix_consolidate_permissive_policies.sql
 **Purpose:** Consolidate overlapping RLS policies
 **Severity:** HIGH
 **Estimated Time:** <1 minute
@@ -73,7 +73,7 @@ This guide covers the deployment of **7 critical SQL migrations** that address m
 
 ---
 
-### 004_security_fix_function_search_path.sql
+### supabase_004_security_fix_function_search_path.sql
 **Purpose:** Prevent search_path hijacking in functions
 **Severity:** MEDIUM
 **Estimated Time:** <1 minute
@@ -87,7 +87,7 @@ This guide covers the deployment of **7 critical SQL migrations** that address m
 
 ---
 
-### 005_security_fix_move_vector_extension.sql
+### supabase_005_security_fix_move_vector_extension.sql
 **Purpose:** Improve extension schema organization
 **Severity:** MEDIUM
 **Estimated Time:** <1 minute
@@ -102,7 +102,7 @@ This guide covers the deployment of **7 critical SQL migrations** that address m
 
 ---
 
-### 006_security_fix_security_definer_views.sql
+### supabase_006_security_fix_security_definer_views.sql
 **Purpose:** Convert SECURITY DEFINER views to SECURITY INVOKER
 **Severity:** HIGH
 **Estimated Time:** 1-2 minutes
@@ -118,7 +118,7 @@ This guide covers the deployment of **7 critical SQL migrations** that address m
 
 ---
 
-### 007_performance_fix_exchange_balances_upsert.sql
+### supabase_007_performance_fix_exchange_balances_upsert.sql
 **Purpose:** Optimize slow UPSERT operations on exchange_balances
 **Severity:** CRITICAL
 **Estimated Time:** 5-10 minutes (index creation)
@@ -153,11 +153,11 @@ Execute in Supabase SQL Editor in this exact order:
 
 ```sql
 -- 1. Enable RLS on all tables (CRITICAL)
--- Copy and paste: migrations/001_security_fix_enable_rls_on_all_tables.sql
+-- Copy and paste: migrations/supabase_001_security_fix_enable_rls_on_all_tables.sql
 -- Expected time: 2-5 minutes
 
 -- 2. Fix SECURITY DEFINER views (HIGH)
--- Copy and paste: migrations/006_security_fix_security_definer_views.sql
+-- Copy and paste: migrations/supabase_006_security_fix_security_definer_views.sql
 -- Expected time: 1-2 minutes
 ```
 
@@ -185,15 +185,15 @@ WHERE viewname IN ('portfolio_evolution', 'daily_performance', 'v_user_strategy_
 
 ```sql
 -- 3. Optimize auth RLS policies (HIGH)
--- Copy and paste: migrations/002_security_fix_auth_rls_initplan_optimization.sql
+-- Copy and paste: migrations/supabase_002_security_fix_auth_rls_initplan_optimization.sql
 -- Expected time: <1 minute
 
 -- 4. Consolidate permissive policies (HIGH)
--- Copy and paste: migrations/003_performance_fix_consolidate_permissive_policies.sql
+-- Copy and paste: migrations/supabase_003_performance_fix_consolidate_permissive_policies.sql
 -- Expected time: <1 minute
 
 -- 5. Optimize exchange_balances UPSERT (CRITICAL PERFORMANCE)
--- Copy and paste: migrations/007_performance_fix_exchange_balances_upsert.sql
+-- Copy and paste: migrations/supabase_007_performance_fix_exchange_balances_upsert.sql
 -- Expected time: 5-10 minutes (indexes built with CONCURRENTLY)
 ```
 
@@ -221,11 +221,11 @@ ORDER BY indexname;
 
 ```sql
 -- 6. Fix function search_path (MEDIUM)
--- Copy and paste: migrations/004_security_fix_function_search_path.sql
+-- Copy and paste: migrations/supabase_004_security_fix_function_search_path.sql
 -- Expected time: <1 minute
 
 -- 7. Prepare for vector extension move (MEDIUM)
--- Copy and paste: migrations/005_security_fix_move_vector_extension.sql
+-- Copy and paste: migrations/supabase_005_security_fix_move_vector_extension.sql
 -- Expected time: <1 minute
 ```
 
