@@ -1113,6 +1113,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         """
         
         discovery_start_time = time.monotonic()
+        discovery_start_wall = time.time()
         scan_id = existing_scan_id or f"user_discovery_{user_id}_{int(time.time())}"
         cache_key = cache_key or self._build_scan_cache_key(
             user_id,
@@ -1132,13 +1133,21 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         force_refresh=force_refresh)
 
         # Track scan start
-        await self._track_scan_lifecycle(user_id, scan_id, "started", "in_progress",
-                                        force_refresh=force_refresh,
-                                        start_time=discovery_start_time)
+        await self._track_scan_lifecycle(
+            user_id,
+            scan_id,
+            "started",
+            "in_progress",
+            force_refresh=force_refresh,
+            start_time=discovery_start_wall,
+            start_time_monotonic=discovery_start_time,
+        )
 
         metrics: Dict[str, Any] = {
             "scan_id": scan_id,
-            "start_time": discovery_start_time,
+            "start_time": discovery_start_wall,
+            "start_time_monotonic": discovery_start_time,
+            "start_time_iso": datetime.fromtimestamp(discovery_start_wall, tz=timezone.utc).isoformat(),
             "portfolio_fetch_time": 0.0,
             "asset_discovery_time": 0.0,
             "strategy_scan_times": {},
@@ -1358,7 +1367,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
                 async with strategy_semaphore:
                     # Start time and debug tracking inside semaphore to measure pure execution time (not queue wait)
-                    strategy_start_time = time.monotonic()
+                    strategy_start_monotonic = time.monotonic()
+                    strategy_start_wall = time.time()
                     step_number = 100 + strategy_index  # 100-series reserved for per-strategy steps
                     await self._track_debug_step(
                         user_id, scan_id, step_number,
@@ -1366,7 +1376,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         "starting",
                         strategy_id=strategy_identifier,
                         strategy_index=strategy_index,
-                        started_at=datetime.fromtimestamp(strategy_start_time, tz=timezone.utc).isoformat()
+                        started_at=datetime.fromtimestamp(strategy_start_wall, tz=timezone.utc).isoformat()
                     )
 
                     try:
@@ -1378,11 +1388,11 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                             scan_id,
                             portfolio_result,
                             timeout_seconds=per_strategy_timeout_s,
-                            start_time=strategy_start_time,
+                            start_time=strategy_start_wall,
                         )
                     except asyncio.CancelledError as e:
                         # Track strategy cancellation (parent task cancelled)
-                        execution_time = (time.monotonic() - strategy_start_time) * 1000
+                        execution_time = (time.monotonic() - strategy_start_monotonic) * 1000
                         await self._track_debug_step(
                             user_id, scan_id, step_number,
                             f"Strategy: {strategy_name}",
@@ -1397,7 +1407,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         raise
                     except Exception as e:
                         # Track strategy failure (timeout or other)
-                        execution_time = (time.monotonic() - strategy_start_time) * 1000
+                        execution_time = (time.monotonic() - strategy_start_monotonic) * 1000
                         error_type = type(e).__name__
                         is_timeout = isinstance(e, asyncio.TimeoutError)
 
@@ -1415,7 +1425,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         raise
                     else:
                         # Track strategy completion (only if no exception)
-                        execution_time = (time.time() - start_time) * 1000
+                        execution_time = (time.monotonic() - strategy_start_monotonic) * 1000
                         await self._track_debug_step(
                             user_id, scan_id, step_number,
                             f"Strategy: {strategy_name}",
@@ -1427,7 +1437,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         )
                         return result
                     finally:
-                        strategy_timings[strategy_identifier] = time.time() - start_time
+                        strategy_timings[strategy_identifier] = time.monotonic() - strategy_start_monotonic
 
             # Run all strategy scans concurrently
             self.logger.info("?? STARTING CONCURRENT STRATEGY SCANS",
@@ -1705,7 +1715,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             return final_response
 
         except Exception as e:
-            execution_time = (time.time() - discovery_start_time) * 1000
+            execution_time = (time.monotonic() - discovery_start_time) * 1000
             error_type = type(e).__name__
             is_timeout = "Timeout" in error_type or "timeout" in str(e).lower()
 
