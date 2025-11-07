@@ -79,11 +79,11 @@ BEGIN
   IF has_column('exchange_api_keys', 'account_id') THEN
     DROP POLICY IF EXISTS "Users can view their own API keys" ON exchange_api_keys;
     CREATE POLICY "Users can view their own API keys" ON exchange_api_keys FOR SELECT
-    USING (EXISTS (SELECT 1 FROM exchange_accounts WHERE id = exchange_api_keys.account_id AND user_id = auth.uid()));
+    USING (EXISTS (SELECT 1 FROM exchange_accounts WHERE exchange_accounts.id = exchange_api_keys.account_id AND exchange_accounts.user_id = auth.uid()));
 
     DROP POLICY IF EXISTS "Users can manage their own API keys" ON exchange_api_keys;
     CREATE POLICY "Users can manage their own API keys" ON exchange_api_keys FOR ALL
-    USING (EXISTS (SELECT 1 FROM exchange_accounts WHERE id = exchange_api_keys.account_id AND user_id = auth.uid()));
+    USING (EXISTS (SELECT 1 FROM exchange_accounts WHERE exchange_accounts.id = exchange_api_keys.account_id AND exchange_accounts.user_id = auth.uid()));
 
     RAISE NOTICE '✅ exchange_api_keys';
   END IF;
@@ -95,7 +95,7 @@ BEGIN
   IF has_column('exchange_balances', 'account_id') THEN
     DROP POLICY IF EXISTS "Users can view their own balances" ON exchange_balances;
     CREATE POLICY "Users can view their own balances" ON exchange_balances FOR SELECT
-    USING (EXISTS (SELECT 1 FROM exchange_accounts WHERE id = exchange_balances.account_id AND user_id = auth.uid()));
+    USING (EXISTS (SELECT 1 FROM exchange_accounts WHERE exchange_accounts.id = exchange_balances.account_id AND exchange_accounts.user_id = auth.uid()));
 
     RAISE NOTICE '✅ exchange_balances';
   END IF;
@@ -283,11 +283,11 @@ BEGIN
   IF has_column('chat_messages', 'session_id') THEN
     DROP POLICY IF EXISTS "Users can view their own chat messages" ON chat_messages;
     CREATE POLICY "Users can view their own chat messages" ON chat_messages FOR SELECT
-    USING (EXISTS (SELECT 1 FROM chat_sessions WHERE id = chat_messages.session_id AND user_id = auth.uid()));
+    USING (EXISTS (SELECT 1 FROM chat_sessions WHERE chat_sessions.id = chat_messages.session_id AND chat_sessions.user_id = auth.uid()));
 
     DROP POLICY IF EXISTS "Users can create their own chat messages" ON chat_messages;
     CREATE POLICY "Users can create their own chat messages" ON chat_messages FOR INSERT
-    WITH CHECK (EXISTS (SELECT 1 FROM chat_sessions WHERE id = chat_messages.session_id AND user_id = auth.uid()));
+    WITH CHECK (EXISTS (SELECT 1 FROM chat_sessions WHERE chat_sessions.id = chat_messages.session_id AND chat_sessions.user_id = auth.uid()));
 
     RAISE NOTICE '✅ chat_messages';
   END IF;
