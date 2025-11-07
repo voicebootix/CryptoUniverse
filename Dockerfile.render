@@ -26,8 +26,10 @@ RUN pip install --no-cache-dir gunicorn==21.2.0
 # Copy the entire application
 COPY . .
 
-# Create a non-root user
-RUN useradd -m -u 1000 appuser && chown -R appuser:appuser /app
+# Ensure start script is executable and create a non-root user
+RUN chmod +x start.sh \
+    && useradd -m -u 1000 appuser \
+    && chown -R appuser:appuser /app
 USER appuser
 
 # Expose port
@@ -37,5 +39,5 @@ EXPOSE 10000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
     CMD curl -f http://0.0.0.0:$PORT/health || curl -f http://localhost:$PORT/health || curl -f http://0.0.0.0:$PORT/api/v1/status || exit 1
 
-# Run startup script then the application with Gunicorn
-CMD ["sh", "-c", "python startup.py && exec gunicorn main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:$PORT --access-logfile - --error-logfile - --log-level info"]
+# Run the tuned start script that manages readiness and Gunicorn configuration
+CMD ["./start.sh"]

@@ -7,6 +7,7 @@ deployment environments (development, staging, production).
 
 import os
 from functools import lru_cache
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from pydantic import Field, field_validator, model_validator, computed_field
@@ -35,6 +36,20 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = Field(default="https://cryptouniverse-frontend.onrender.com", description="Frontend URL for redirects")
     ALLOWED_HOSTS: str = Field(default="localhost,127.0.0.1", env="ALLOWED_HOSTS", description="Allowed hosts for the application (comma-separated or JSON list)")
     ADMIN_LOG_BUFFER_SIZE: int = Field(default=500, env="ADMIN_LOG_BUFFER_SIZE", description="Number of log entries to retain in memory for diagnostics")
+
+    # Gunicorn and worker configuration
+    WEB_CONCURRENCY: Optional[int] = Field(default=None, env="WEB_CONCURRENCY", description="Explicit web worker override")
+    WORKERS: Optional[int] = Field(default=None, env="WORKERS", description="Legacy worker override for Render compatibility")
+    GUNICORN_WORKERS: Optional[int] = Field(default=None, env="GUNICORN_WORKERS", description="Alternate gunicorn worker override")
+    WORKER_MULTIPLIER: float = Field(default=2.0, env="WORKER_MULTIPLIER", description="Multiplier applied to CPU count when auto-calculating workers")
+    WORKER_MIN: int = Field(default=1, env="WORKER_MIN", description="Minimum number of gunicorn workers when auto-calculating concurrency")
+    WORKER_MAX: int = Field(default=8, env="WORKER_MAX", description="Maximum number of gunicorn workers when auto-calculating concurrency")
+    WORKER_MEMORY_FOOTPRINT_MB: int = Field(default=512, env="WORKER_MEMORY_FOOTPRINT_MB", description="Estimated memory footprint per gunicorn worker in megabytes")
+    GUNICORN_TIMEOUT: int = Field(default=180, env="GUNICORN_TIMEOUT", description="Gunicorn worker timeout in seconds")
+    GUNICORN_GRACEFUL_TIMEOUT: int = Field(default=180, env="GUNICORN_GRACEFUL_TIMEOUT", description="Gunicorn graceful timeout in seconds")
+    GUNICORN_KEEPALIVE: int = Field(default=2, env="GUNICORN_KEEPALIVE", description="Gunicorn keep-alive in seconds")
+    GUNICORN_MAX_REQUESTS: int = Field(default=1000, env="GUNICORN_MAX_REQUESTS", description="Number of requests before a worker is recycled")
+    GUNICORN_MAX_REQUESTS_JITTER: int = Field(default=100, env="GUNICORN_MAX_REQUESTS_JITTER", description="Jitter to apply to max requests for worker recycling")
     
     # Security settings
     SECRET_KEY: str = Field(..., env="SECRET_KEY", description="Secret key for JWT")
@@ -140,6 +155,80 @@ class Settings(BaseSettings):
             except Exception:
                 pass
         return hosts
+
+    @staticmethod
+    def _read_cgroup_memory_limit_bytes() -> Optional[int]:
+        """Best-effort detection of the container memory limit in bytes."""
+
+        candidates = (
+            Path("/sys/fs/cgroup/memory.max"),
+            Path("/sys/fs/cgroup/memory/memory.limit_in_bytes"),
+            Path("/sys/fs/cgroup/memory.limit_in_bytes"),
+        )
+
+        for path in candidates:
+            try:
+                value = path.read_text(encoding="utf-8").strip()
+            except (FileNotFoundError, OSError):
+                continue
+
+            if not value or value.lower() == "max":
+                continue
+
+            try:
+                parsed = int(value)
+            except ValueError:
+                continue
+
+            # Ignore obviously invalid values (e.g., unlimited or negative)
+            if parsed <= 0 or parsed >= 1 << 60:
+                continue
+
+            return parsed
+
+        return None
+
+    @computed_field
+    @property
+    def memory_limit_mb(self) -> Optional[int]:
+        """Return the detected memory limit in megabytes if running in a cgroup."""
+
+        raw = self._read_cgroup_memory_limit_bytes()
+        if raw is None:
+            return None
+
+        return max(1, raw // (1024 * 1024))
+
+    @computed_field
+    @property
+    def recommended_web_concurrency(self) -> int:
+        """Compute the optimal number of gunicorn workers for the current environment."""
+
+        for explicit in (self.WEB_CONCURRENCY, self.WORKERS, self.GUNICORN_WORKERS):
+            if explicit is not None and explicit > 0:
+                return explicit
+
+        cpu_count = os.cpu_count() or 1
+        multiplier = self.WORKER_MULTIPLIER if self.WORKER_MULTIPLIER > 0 else 1.0
+        cpu_based = max(
+            self.WORKER_MIN,
+            min(int(round(cpu_count * multiplier)), self.WORKER_MAX),
+        )
+
+        memory_limit = self.memory_limit_mb
+        if memory_limit is not None and self.WORKER_MEMORY_FOOTPRINT_MB > 0:
+            memory_based = max(
+                self.WORKER_MIN,
+                min(
+                    self.WORKER_MAX,
+                    max(1, memory_limit // self.WORKER_MEMORY_FOOTPRINT_MB),
+                ),
+            )
+            recommended = min(cpu_based, memory_based)
+        else:
+            recommended = cpu_based
+
+        return max(1, recommended)
     
     # Supabase settings
     SUPABASE_URL: Optional[str] = Field(default=None, env="SUPABASE_URL", description="Supabase project URL")
