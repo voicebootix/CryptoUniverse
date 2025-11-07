@@ -76,7 +76,9 @@ END $$;
 -- Exchange API Keys (uses account_id)
 DO $$
 BEGIN
-  IF has_column('exchange_api_keys', 'account_id') THEN
+  IF has_column('exchange_api_keys', 'account_id')
+     AND has_column('exchange_accounts', 'id')
+     AND has_column('exchange_accounts', 'user_id') THEN
     DROP POLICY IF EXISTS "Users can view their own API keys" ON exchange_api_keys;
     CREATE POLICY "Users can view their own API keys" ON exchange_api_keys FOR SELECT
     USING (EXISTS (SELECT 1 FROM exchange_accounts WHERE exchange_accounts.id = exchange_api_keys.account_id AND exchange_accounts.user_id = auth.uid()));
@@ -92,7 +94,9 @@ END $$;
 -- Exchange Balances (uses account_id)
 DO $$
 BEGIN
-  IF has_column('exchange_balances', 'account_id') THEN
+  IF has_column('exchange_balances', 'account_id')
+     AND has_column('exchange_accounts', 'id')
+     AND has_column('exchange_accounts', 'user_id') THEN
     DROP POLICY IF EXISTS "Users can view their own balances" ON exchange_balances;
     CREATE POLICY "Users can view their own balances" ON exchange_balances FOR SELECT
     USING (EXISTS (SELECT 1 FROM exchange_accounts WHERE exchange_accounts.id = exchange_balances.account_id AND exchange_accounts.user_id = auth.uid()));
@@ -280,7 +284,9 @@ END $$;
 -- Chat Messages (uses session_id)
 DO $$
 BEGIN
-  IF has_column('chat_messages', 'session_id') THEN
+  IF has_column('chat_messages', 'session_id')
+     AND has_column('chat_sessions', 'id')
+     AND has_column('chat_sessions', 'user_id') THEN
     DROP POLICY IF EXISTS "Users can view their own chat messages" ON chat_messages;
     CREATE POLICY "Users can view their own chat messages" ON chat_messages FOR SELECT
     USING (EXISTS (SELECT 1 FROM chat_sessions WHERE chat_sessions.id = chat_messages.session_id AND chat_sessions.user_id = auth.uid()));
