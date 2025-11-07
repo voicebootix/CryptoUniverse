@@ -5,10 +5,6 @@
 -- No "column does not exist" errors!
 -- ========================================
 
-BEGIN;
-
-RAISE NOTICE 'Creating RLS policies with column existence checks...';
-
 -- ========================================
 -- TABLES WITH user_id COLUMN
 -- ========================================
@@ -328,9 +324,6 @@ END $$;
 -- PUBLIC READ TABLES (NO user_id column)
 -- ========================================
 
-RAISE NOTICE '';
-RAISE NOTICE 'Creating policies for public data tables...';
-
 -- Market Data Tables
 DO $$
 DECLARE
@@ -431,8 +424,6 @@ END $$;
 
 -- Drop helper function
 DROP FUNCTION IF EXISTS has_column(text, text);
-
-COMMIT;
 
 -- Final Summary
 DO $$
