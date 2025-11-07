@@ -1495,7 +1495,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     return_exceptions=True,
                 )
 
-                for task, outcome in zip(pending_list, cancellation_outcomes):
+                for task, outcome in zip(pending_list, cancellation_outcomes, strict=True):
                     idx = task_index_map.get(task)
                     strategy_info = active_strategies[idx] if idx is not None else {}
                     timeout_results[idx] = {
