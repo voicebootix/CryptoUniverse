@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Sequence
 
 from sqlalchemy import select
@@ -38,8 +38,8 @@ def _ensure_tenant(session: Session) -> Tenant:
                 "ai_chat",
             ],
             custom_features={},
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
         )
         session.add(tenant)
 
@@ -54,6 +54,7 @@ def _ensure_tenant(session: Session) -> Tenant:
         session.add(settings)
     else:
         tenant.status = TenantStatus.ACTIVE
+        tenant.updated_at = datetime.now(timezone.utc)
         tenant.features_enabled = _merge_feature_list(
             tenant.features_enabled or [],
             ["opportunity_discovery", "portfolio_management", "ai_chat"],
@@ -82,8 +83,8 @@ def _ensure_admin_user(session: Session, tenant: Tenant | None) -> None:
             is_active=True,
             is_verified=True,
             tenant_id=tenant.id if tenant else None,
-            created_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
             simulation_mode=True,
             simulation_balance=100000,
         )
@@ -95,6 +96,7 @@ def _ensure_admin_user(session: Session, tenant: Tenant | None) -> None:
         user.status = UserStatus.ACTIVE
         user.is_active = True
         user.is_verified = True
+        user.updated_at = datetime.now(timezone.utc)
         if tenant:
             user.tenant_id = tenant.id
 
