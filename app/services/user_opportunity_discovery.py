@@ -1503,10 +1503,33 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     task.cancel()
 
                 # Wait for cancellation to propagate so per-strategy cleanup hooks run.
-                cancellation_outcomes = await asyncio.gather(
-                    *pending_list,
-                    return_exceptions=True,
-                )
+                # Use bounded timeout to avoid hanging if tasks ignore cancellation.
+                cancellation_timeout = 5.0  # seconds to wait for cleanup
+                try:
+                    cancellation_outcomes = await asyncio.wait_for(
+                        asyncio.gather(*pending_list, return_exceptions=True),
+                        timeout=cancellation_timeout,
+                    )
+                except asyncio.TimeoutError:
+                    self.logger.warning(
+                        "Cancellation cleanup timed out; some tasks may not have completed cleanup",
+                        scan_id=scan_id,
+                        pending_tasks=len(pending_list),
+                        timeout_seconds=cancellation_timeout,
+                    )
+                    # Force-cancel remaining tasks and don't wait
+                    cancellation_outcomes = []
+                    for task in pending_list:
+                        if not task.done():
+                            task.cancel()
+                        # Collect outcomes for completed tasks, use placeholder for non-completed
+                        if task.done():
+                            try:
+                                cancellation_outcomes.append(task.result())
+                            except Exception as e:
+                                cancellation_outcomes.append(e)
+                        else:
+                            cancellation_outcomes.append(asyncio.TimeoutError("Cleanup timeout"))
 
                 for task, outcome in zip(pending_list, cancellation_outcomes, strict=True):
                     idx = task_index_map.get(task)
