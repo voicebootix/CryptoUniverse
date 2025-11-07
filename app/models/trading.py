@@ -382,6 +382,7 @@ class Position(Base):
         Index("idx_position_status", "status"),
         Index("idx_position_opened", "opened_at"),
         Index("idx_position_portfolio", "portfolio_id", "status"),
+        Index("idx_positions_portfolio_symbol_status", "portfolio_id", "status", "symbol"),
     )
     
     def __repr__(self) -> str:

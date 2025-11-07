@@ -103,11 +103,12 @@ engine_kwargs = {
 # we explicitly disable pooling via NullPool to avoid stale connections.
 if "postgresql" in async_db_url:
     engine_kwargs.update({
-        "pool_size": 20,          # Base number of connections
-        "max_overflow": 10,       # Additional connections when needed
-        "pool_timeout": 30,       # Timeout for getting connection
+        "pool_size": settings.DATABASE_POOL_SIZE,          # Base number of connections
+        "max_overflow": settings.DATABASE_MAX_OVERFLOW,    # Additional connections when needed
+        "pool_timeout": settings.DATABASE_POOL_TIMEOUT,    # Timeout for getting connection
         "pool_pre_ping": True,    # ENTERPRISE: Health check connections
-        "pool_recycle": 3600,     # PRODUCTION: Recycle connections (1 hour)
+        "pool_recycle": settings.DATABASE_POOL_RECYCLE,     # PRODUCTION: Recycle connections
+        "pool_use_lifo": settings.DATABASE_POOL_USE_LIFO,
     })
 else:
     engine_kwargs["poolclass"] = NullPool
@@ -334,6 +335,24 @@ class DatabaseManager:
     def reset_performance_stats(self):
         """Reset query performance statistics."""
         self._query_times.clear()
+
+    def get_pool_metrics(self) -> Dict[str, Any]:
+        """Return current connection pool utilization metrics."""
+        sync_engine = getattr(self._engine, "sync_engine", None)
+        pool = getattr(sync_engine, "pool", None) if sync_engine else None
+        if not pool or not hasattr(pool, "checkedout"):
+            return {}
+
+        try:
+            return {
+                "checked_out": pool.checkedout(),
+                "checked_in": pool.checkedin() if hasattr(pool, "checkedin") else None,
+                "overflow": pool.overflow() if hasattr(pool, "overflow") else None,
+                "pool_size": pool.size() if hasattr(pool, "size") else None,
+                "max_overflow": getattr(pool, "_max_overflow", None),
+            }
+        except Exception:
+            return {}
 
 
 # Database manager instance

@@ -483,7 +483,7 @@ class ExchangeConnector(LoggerMixin):
         
         # ENTERPRISE KRAKEN NONCE MANAGEMENT - Import and use global nonce manager
         from app.api.v1.endpoints.exchanges import kraken_nonce_manager
-        nonce = await kraken_nonce_manager.get_nonce()  # CRITICAL: Add missing await
+        nonce = await kraken_nonce_manager.get_nonce(config.get("api_key"))  # CRITICAL: Add missing await
         params = {
             "nonce": str(nonce),
             "pair": order_params["symbol"].replace("/", ""),

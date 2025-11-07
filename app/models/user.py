@@ -147,6 +147,7 @@ class User(Base):
     __table_args__ = (
         Index("idx_user_email_active", "email", "is_active"),
         Index("idx_users_auth_lookup", "email", "status", "is_active", "is_verified"),
+        Index("idx_users_tenant_email", "tenant_id", "email"),
         Index("idx_user_tenant_role", "tenant_id", "role"),
         Index("idx_user_status", "status"),
         Index("idx_user_created", "created_at"),

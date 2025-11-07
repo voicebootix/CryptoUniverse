@@ -54,6 +54,11 @@ class Settings(BaseSettings):
     # Database settings
     DATABASE_URL: str = Field(..., env="DATABASE_URL", description="Database connection URL")
     DATABASE_QUERY_TIMEOUT: int = Field(default=10, env="DATABASE_QUERY_TIMEOUT", description="Database query timeout in seconds")
+    DATABASE_POOL_SIZE: int = Field(default=20, env="DATABASE_POOL_SIZE", description="Primary connection pool size")
+    DATABASE_MAX_OVERFLOW: int = Field(default=10, env="DATABASE_MAX_OVERFLOW", description="Additional connections allowed above the pool size")
+    DATABASE_POOL_TIMEOUT: int = Field(default=30, env="DATABASE_POOL_TIMEOUT", description="Seconds to wait for a connection from the pool")
+    DATABASE_POOL_RECYCLE: int = Field(default=3600, env="DATABASE_POOL_RECYCLE", description="Seconds before recycling pooled connections")
+    DATABASE_POOL_USE_LIFO: bool = Field(default=True, env="DATABASE_POOL_USE_LIFO", description="Use LIFO strategy for the connection pool queue")
 
     # Database SSL settings
     DATABASE_SSL_REQUIRE: bool = Field(default=False, env="DATABASE_SSL_REQUIRE", description="Force SSL connection to database")

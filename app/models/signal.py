@@ -213,4 +213,5 @@ class SignalDeliveryLog(Base):
         Index("idx_signal_delivery_channel", "delivery_channel", "status"),
         Index("idx_signal_delivery_time", "delivered_at"),
         Index("idx_signal_delivery_credit", "credit_transaction_id"),
+        Index("idx_signal_delivery_subscription_status", "subscription_id", "status", "delivered_at"),
     )

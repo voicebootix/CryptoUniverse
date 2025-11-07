@@ -7,6 +7,7 @@ for the AI money manager platform with encrypted storage and security.
 
 import asyncio
 import base64
+import hashlib
 import threading
 import time
 from datetime import datetime, timedelta
@@ -18,6 +19,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 from cryptography.fernet import Fernet, InvalidToken
+from sqlalchemy import text
 
 from app.core.config import get_settings
 from app.core.database import get_database
@@ -78,19 +80,24 @@ class KrakenNonceManager:
     
     def __init__(self):
         self.logger = structlog.get_logger(__name__)
-        self._local_call_count = 0
+        self._local_call_counts: Dict[str, int] = {}
         self._server_time_offset = 0
         self._last_time_sync = 0
         self._redis = None
-        self._fallback_nonce = 0
+        self._fallback_nonce_cache: Dict[str, int] = {}
         self._node_id = None
+        self._node_hash = None
         self._lock = None  # Will be initialized as asyncio.Lock in async context
-        self._nonce_key = "kraken:global_nonce"
+        self._nonce_key_prefix = "kraken:nonce:"
+        self._redis_ttl_seconds = 3600
+        self._nonce_buffer_ms = 500
+        self._nonce_step = 3
         self._force_resync = False  # Flag to force immediate time resync on nonce errors
         self._health_metrics = {
             "total_nonces_generated": 0,
             "redis_failures": 0,
             "fallback_uses": 0,
+            "db_fallback_uses": 0,
             "time_sync_failures": 0,
             "last_health_check": None
         }
@@ -106,15 +113,24 @@ class KrakenNonceManager:
                 import uuid
                 import socket
                 self._node_id = f"{socket.gethostname()}_{uuid.uuid4().hex[:8]}"
-                
+                self._node_hash = abs(hash(self._node_id)) % 1000
+
                 logger.info("Distributed Kraken nonce manager initialized", node_id=self._node_id)
             except Exception as e:
                 logger.warning("Redis unavailable for nonce coordination", error=str(e))
-        
+
         # Initialize asyncio.Lock if not already done
         if self._lock is None:
             self._lock = asyncio.Lock()
-    
+
+    def _storage_key(self, api_key: Optional[str]) -> str:
+        if not api_key:
+            return "global"
+        return hashlib.sha256(api_key.encode("utf-8")).hexdigest()
+
+    def _redis_key(self, storage_key: str) -> str:
+        return f"{self._nonce_key_prefix}{storage_key}"
+
     async def _sync_server_time(self, force_fresh: bool = False) -> bool:
         """
         ENTERPRISE: Distributed server time sync with Redis caching.
@@ -183,7 +199,61 @@ class KrakenNonceManager:
             logger.warning("Server time sync failed", error=str(e))
             return False
     
-    async def get_nonce(self) -> int:
+    async def _get_db_managed_nonce(self, storage_key: str, base_time_ms: int) -> Optional[int]:
+        try:
+            from app.core.database import engine
+
+            async with engine.begin() as conn:
+                result = await conn.execute(
+                    text(
+                        """
+                        INSERT INTO kraken_nonce_counters (key_hash, last_nonce, updated_at)
+                        VALUES (:key_hash, :candidate, NOW())
+                        ON CONFLICT (key_hash) DO UPDATE
+                        SET last_nonce = GREATEST(kraken_nonce_counters.last_nonce + :step, :candidate),
+                            updated_at = NOW()
+                        RETURNING last_nonce
+                        """
+                    ),
+                    {
+                        "key_hash": storage_key,
+                        "candidate": base_time_ms + self._nonce_buffer_ms,
+                        "step": self._nonce_step,
+                    },
+                )
+                row = result.first()
+                if row:
+                    nonce = int(row[0])
+                    self._health_metrics["db_fallback_uses"] += 1
+                    return nonce
+        except Exception as db_error:
+            self.logger.warning("Database nonce coordination unavailable", error=str(db_error))
+        return None
+
+    def _record_fallback_nonce(self, storage_key: str, nonce: int) -> int:
+        last = self._fallback_nonce_cache.get(storage_key, 0)
+        if nonce <= last:
+            nonce = last + self._nonce_buffer_ms
+        self._fallback_nonce_cache[storage_key] = nonce
+        return nonce
+
+    def _next_local_counter(self, storage_key: str) -> int:
+        current = self._local_call_counts.get(storage_key, 0) + 1
+        self._local_call_counts[storage_key] = current
+        return current
+
+    async def clear_key_state(self, api_key: Optional[str]) -> None:
+        storage_key = self._storage_key(api_key)
+        self._fallback_nonce_cache.pop(storage_key, None)
+        self._local_call_counts.pop(storage_key, None)
+
+        if self._redis:
+            try:
+                await self._redis.delete(self._redis_key(storage_key))
+            except Exception:
+                pass
+
+    async def get_nonce(self, api_key: Optional[str] = None) -> int:
         """
         Generate a unique nonce for Kraken API calls with enterprise-grade reliability.
         
@@ -213,6 +283,9 @@ class KrakenNonceManager:
                     if success:
                         self._force_resync = False
                 
+                storage_key = self._storage_key(api_key)
+                redis_key = self._redis_key(storage_key)
+
                 # Primary: Redis-based distributed nonce coordination with atomic operation
                 if self._redis:
                     try:
@@ -234,21 +307,23 @@ class KrakenNonceManager:
                         new_nonce = await self._redis.eval(
                             lua_script,
                             1,  # number of keys provided to the script
-                            self._nonce_key,
+                            redis_key,
                             str(current_time_ms),
-                            "3600",
+                            str(self._redis_ttl_seconds),
                         )
                         new_nonce = int(new_nonce)
-                        
+
                         self.logger.debug(
-                            "Generated atomic Redis nonce", 
+                            "Generated atomic Redis nonce",
                             nonce=new_nonce,
                             server_time_offset=self._server_time_offset,
                             node_id=self._node_id,
-                            atomic=True
+                            atomic=True,
+                            storage_key=storage_key,
                         )
+                        self._fallback_nonce_cache[storage_key] = new_nonce
                         return new_nonce
-                        
+
                     except (ConnectionError, TimeoutError, Exception) as redis_err:
                         self._health_metrics["redis_failures"] += 1
                         self.logger.warning(
@@ -257,42 +332,52 @@ class KrakenNonceManager:
                             failure_count=self._health_metrics["redis_failures"]
                         )
                         # Fall through to fallback mechanism
-                
+
                 # Enterprise Fallback: Multi-layer nonce generation
                 self._health_metrics["fallback_uses"] += 1
-                
+
                 # Layer 1: Server time with offset
                 server_time = time.time() + self._server_time_offset
                 base_time_ms = int(server_time * 1000)
-                
+
+                # Try coordinated database fallback before local generation
+                db_nonce = await self._get_db_managed_nonce(storage_key, base_time_ms)
+                if db_nonce is not None:
+                    coordinated_nonce = self._record_fallback_nonce(storage_key, db_nonce)
+                    self.logger.info(
+                        "Database fallback nonce generated",
+                        nonce=coordinated_nonce,
+                        storage_key=storage_key,
+                    )
+                    return coordinated_nonce
+
                 # Layer 2: Node-specific offset to prevent conflicts
-                if self._node_id:
-                    node_hash = hash(self._node_id) % 1000  # 0-999 range
+                if self._node_hash is not None:
+                    node_hash = self._node_hash
                 else:
-                    node_hash = hash(str(threading.current_thread().ident)) % 1000
-                
+                    node_hash = abs(hash(str(threading.current_thread().ident))) % 1000
+
                 # Layer 3: Local counter increment
-                self._local_call_count += 1
-                
+                local_counter = self._next_local_counter(storage_key)
+
                 # Layer 4: Fallback nonce tracking with increased buffer
                 # Add 500ms buffer (same as Redis path) to prevent collisions
-                fallback_nonce = base_time_ms + node_hash + self._local_call_count + 500
+                fallback_nonce = (
+                    base_time_ms + node_hash + local_counter + self._nonce_buffer_ms
+                )
 
-                # Ensure it's always greater than previous fallback
-                if fallback_nonce <= self._fallback_nonce:
-                    fallback_nonce = self._fallback_nonce + 500
-                    
-                self._fallback_nonce = fallback_nonce
-                
+                fallback_nonce = self._record_fallback_nonce(storage_key, fallback_nonce)
+
                 self.logger.info(
-                    "Enterprise fallback nonce generated", 
+                    "Enterprise fallback nonce generated",
                     nonce=fallback_nonce,
                     base_time_ms=base_time_ms,
                     node_hash=node_hash,
-                    local_count=self._local_call_count,
-                    fallback_uses=self._health_metrics["fallback_uses"]
+                    local_count=local_counter,
+                    fallback_uses=self._health_metrics["fallback_uses"],
+                    storage_key=storage_key,
                 )
-                
+
                 return fallback_nonce
                 
             except Exception as e:
@@ -1294,7 +1379,7 @@ async def fetch_kraken_balances(api_key: str, api_secret: str) -> List[Dict[str,
     await kraken_nonce_manager._init_redis()
 
     async def _perform_request() -> Dict[str, Any]:
-        nonce = await kraken_nonce_manager.get_nonce()
+        nonce = await kraken_nonce_manager.get_nonce(api_key)
         post_data = urllib.parse.urlencode({"nonce": str(nonce)})
 
         encoded_endpoint = endpoint.encode()
@@ -1324,7 +1409,10 @@ async def fetch_kraken_balances(api_key: str, api_secret: str) -> List[Dict[str,
                 data = await response.json()
                 errors = data.get("error") or []
                 if errors:
-                    raise ExchangeAPIError("kraken", ", ".join(errors))
+                    error_message = ", ".join(errors)
+                    if any("invalid nonce" in err.lower() for err in errors):
+                        await kraken_nonce_manager.clear_key_state(api_key)
+                    raise ExchangeAPIError("kraken", error_message)
                 return data
 
     try:

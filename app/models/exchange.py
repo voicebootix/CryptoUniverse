@@ -138,6 +138,7 @@ class ExchangeAccount(Base):
         Index('idx_exchange_accounts_status_trading', 'status', 'trading_enabled'),
         Index('idx_exchange_accounts_user_trading', 'user_id', 'trading_enabled'),
         Index('idx_exchange_accounts_status_trading_user', 'status', 'trading_enabled', 'user_id'),
+        Index('idx_exchange_accounts_user_default', 'user_id', 'is_default', 'status'),
         Index("idx_exchange_name_status", "exchange_name", "status"),
         Index("idx_exchange_default", "is_default"),
     )
@@ -329,6 +330,7 @@ class ExchangeBalance(Base):
     __table_args__ = (
         UniqueConstraint("account_id", "symbol", name="unique_account_symbol_balance"),
         Index("idx_balance_account_symbol", "account_id", "symbol"),
+        Index("idx_balance_account_active", "account_id", "is_active", "symbol"),
         Index("idx_balance_symbol_usd", "symbol", "usd_value"),
         Index("idx_balance_updated", "updated_at"),
     )
