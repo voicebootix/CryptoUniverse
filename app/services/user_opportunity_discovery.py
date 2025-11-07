@@ -1523,7 +1523,6 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 idx = task_index_map[task]
                 if idx in timeout_results:
                     strategy_scan_results[idx] = timeout_results[idx]
-                    metrics['timeouts'] += 1
                     continue
 
                 if task.cancelled():
