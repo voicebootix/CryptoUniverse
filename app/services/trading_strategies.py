@@ -4570,12 +4570,20 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
                     # avoid an additional round-trip to the portfolio service for each scan.
                     self.logger.debug(
                         "Using preloaded portfolio snapshot for optimization",
-                        user_id=user_id,
                         source="preloaded_portfolio",
                     )
-                    provided_snapshot = preloaded_snapshot
-                    portfolio_result = {"success": True, "portfolio": provided_snapshot}
-                else:
+                    provided_snapshot = await self._build_portfolio_snapshot_from_parameters(
+                        preloaded_snapshot
+                    )
+                    if provided_snapshot:
+                        portfolio_result = {"success": True, "portfolio": provided_snapshot}
+                    else:
+                        self.logger.warning(
+                            "Preloaded portfolio snapshot invalid; refetching",
+                            source="preloaded_portfolio",
+                        )
+
+                if provided_snapshot is None:
                     # Add timeout to prevent hanging
                     try:
                         portfolio_result = await asyncio.wait_for(
