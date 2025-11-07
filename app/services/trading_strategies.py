@@ -2391,6 +2391,7 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
         simulation_mode: bool = True,
         timeout_seconds: Optional[float] = None,
         start_time: Optional[float] = None,
+        preloaded_portfolio: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Main strategy execution router - handles all 25+ functions."""
 
@@ -2514,7 +2515,12 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
             elif function in ["position_management", "portfolio_optimization"]:
                 strategy_result, aborted = await _await_with_guard(
                     self._execute_management_function(
-                        function, symbol, strategy_params, user_id, parameter_dict
+                        function,
+                        symbol,
+                        strategy_params,
+                        user_id,
+                        parameter_dict,
+                        preloaded_portfolio=preloaded_portfolio,
                     ),
                     "management_dispatch",
                 )
@@ -4514,11 +4520,12 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
         parameters: StrategyParameters,
         user_id: str,
         raw_parameters: Optional[Dict[str, Any]] = None,
+        preloaded_portfolio: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Execute position/risk management functions."""
 
         raw_parameters = raw_parameters or {}
-        
+
         if function == "portfolio_optimization":
             # Import the portfolio risk service
             from app.services.portfolio_risk_core import portfolio_risk_service
@@ -4541,33 +4548,52 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
             if not portfolio_snapshot_param and raw_parameters.get("positions"):
                 portfolio_snapshot_param = {"positions": raw_parameters.get("positions")}
 
+            def _extract_snapshot(candidate: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+                if not isinstance(candidate, dict):
+                    return None
+                if "positions" in candidate:
+                    return candidate
+                nested = candidate.get("portfolio") if isinstance(candidate.get("portfolio"), dict) else None
+                if nested and isinstance(nested, dict) and "positions" in nested:
+                    return nested
+                return None
+
             if portfolio_snapshot_param:
                 provided_snapshot = await self._build_portfolio_snapshot_from_parameters(
                     portfolio_snapshot_param
                 )
                 portfolio_result = {"success": True, "portfolio": provided_snapshot}
             else:
-                # Add timeout to prevent hanging
-                try:
-                    portfolio_result = await asyncio.wait_for(
-                        portfolio_risk_service.get_portfolio(user_id),
-                        timeout=5.0  # Reduced timeout
+                preloaded_snapshot = _extract_snapshot(preloaded_portfolio)
+                if preloaded_snapshot:
+                    self.logger.debug(
+                        "Using preloaded portfolio snapshot for optimization",
+                        user_id=user_id,
+                        source="preloaded_portfolio",
                     )
-                    provided_snapshot = portfolio_result.get("portfolio") if portfolio_result.get("success") else None
-                except asyncio.TimeoutError:
-                    self.logger.warning("Portfolio service timeout, using fallback data")
-                    portfolio_result = {"success": False, "error": "Portfolio service timeout"}
-                    provided_snapshot = None
+                    provided_snapshot = preloaded_snapshot
+                    portfolio_result = {"success": True, "portfolio": provided_snapshot}
+                else:
+                    # Add timeout to prevent hanging
+                    try:
+                        portfolio_result = await asyncio.wait_for(
+                            portfolio_risk_service.get_portfolio(user_id),
+                            timeout=5.0  # Reduced timeout
+                        )
+                        provided_snapshot = portfolio_result.get("portfolio") if portfolio_result.get("success") else None
+                    except asyncio.TimeoutError:
+                        self.logger.warning("Portfolio service timeout, using fallback data")
+                        portfolio_result = {"success": False, "error": "Portfolio service timeout"}
+                        provided_snapshot = None
 
             current_positions = []
             if provided_snapshot:
                 current_positions = provided_snapshot.get("positions", [])
 
-            # Run each optimization strategy
-            for strategy in optimization_strategies:
+            async def run_optimizer(strategy: str) -> Tuple[str, Dict[str, Any]]:
                 try:
                     if provided_snapshot and provided_snapshot.get("positions"):
-                        opt_result = await asyncio.wait_for(
+                        result = await asyncio.wait_for(
                             portfolio_risk_service.optimize_allocation_with_portfolio_data(
                                 user_id=user_id or "system",
                                 portfolio_data=provided_snapshot,
@@ -4578,60 +4604,76 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
                                     "max_positions": 15,
                                 },
                             ),
-                            timeout=3.0  # Reduced timeout
+                            timeout=3.0,
                         )
                     else:
-                        opt_result = await asyncio.wait_for(
+                        result = await asyncio.wait_for(
                             portfolio_risk_service.optimize_allocation(
                                 user_id=user_id,
                                 strategy=strategy,
                                 constraints={
-                                    "min_position_size": 0.02,  # 2% minimum
-                                    "max_position_size": 0.25,  # 25% maximum
+                                    "min_position_size": 0.02,
+                                    "max_position_size": 0.25,
                                     "max_positions": 15,
                                 },
                             ),
-                            timeout=3.0  # Reduced timeout
+                            timeout=3.0,
                         )
-                    
-                    if opt_result.get("success") and opt_result.get("optimization_result"):
-                        opt_data = opt_result["optimization_result"]
-                        
-                        # Calculate profit potential for this strategy
-                        expected_return = opt_data.get("expected_return", 0)
-                        risk_level = opt_data.get("risk_metrics", {}).get("portfolio_volatility", 0)
-                        sharpe = opt_data.get("expected_sharpe", 0)
-                        
-                        # Store strategy result
-                        strategy_results[strategy] = {
-                            "expected_return": expected_return,
-                            "risk_level": risk_level,
-                            "sharpe_ratio": sharpe,
-                            "weights": opt_data.get("weights", {}),
-                            "rebalancing_needed": opt_data.get("rebalancing_needed", False)
-                        }
-                        
-                        # Create recommendations if rebalancing needed
-                        if opt_data.get("rebalancing_needed"):
-                            suggested_trades = opt_data.get("suggested_trades", [])
-                            for trade in suggested_trades:
-                                all_recommendations.append({
-                                    "strategy": strategy.upper(),
-                                    "symbol": trade.get("symbol", ""),
-                                    "action": trade.get("action", ""),
-                                    "amount": trade.get("amount", 0),
-                                    "rationale": f"{strategy.replace('_', ' ').title()} optimization suggests this trade",
-                                    "improvement_potential": expected_return,
-                                    "risk_reduction": trade.get("risk_reduction", 0),
-                                    "urgency": "HIGH" if abs(trade.get("amount", 0)) > 0.1 else "MEDIUM"
-                                })
-                        
-                except Exception as e:
-                    self.logger.warning(f"Failed to run {strategy} optimization", error=str(e))
+                    return strategy, result
+                except asyncio.TimeoutError:
+                    self.logger.warning(
+                        "Portfolio optimization strategy timed out",
+                        user_id=user_id,
+                        strategy=strategy,
+                    )
+                    return strategy, {"success": False, "error": "optimization_timeout"}
+                except Exception as exc:
+                    self.logger.warning(
+                        f"Failed to run {strategy} optimization",
+                        error=str(exc),
+                    )
+                    return strategy, {"success": False, "error": str(exc)}
+
+            optimization_tasks = [run_optimizer(strategy) for strategy in optimization_strategies]
+            results = await asyncio.gather(*optimization_tasks)
+
+            for strategy, opt_result in results:
+                if opt_result.get("success") and opt_result.get("optimization_result"):
+                    opt_data = opt_result["optimization_result"]
+
+                    # Calculate profit potential for this strategy
+                    expected_return = opt_data.get("expected_return", 0)
+                    risk_level = opt_data.get("risk_metrics", {}).get("portfolio_volatility", 0)
+                    sharpe = opt_data.get("expected_sharpe", 0)
+
+                    # Store strategy result
                     strategy_results[strategy] = {
-                        "error": str(e),
+                        "expected_return": expected_return,
+                        "risk_level": risk_level,
+                        "sharpe_ratio": sharpe,
+                        "weights": opt_data.get("weights", {}),
+                        "rebalancing_needed": opt_data.get("rebalancing_needed", False)
+                    }
+
+                    # Create recommendations if rebalancing needed
+                    if opt_data.get("rebalancing_needed"):
+                        suggested_trades = opt_data.get("suggested_trades", [])
+                        for trade in suggested_trades:
+                            all_recommendations.append({
+                                "strategy": strategy.upper(),
+                                "symbol": trade.get("symbol", ""),
+                                "action": trade.get("action", ""),
+                                "amount": trade.get("amount", 0),
+                                "rationale": f"{strategy.replace('_', ' ').title()} optimization suggests this trade",
+                                "improvement_potential": expected_return,
+                                "risk_reduction": trade.get("risk_reduction", 0),
+                                "urgency": "HIGH" if abs(trade.get("amount", 0)) > 0.1 else "MEDIUM"
+                            })
+                else:
+                    strategy_results[strategy] = {
+                        "error": opt_result.get("error", "unknown_error"),
                         "expected_return": 0,
-                        "risk_level": 0
+                        "risk_level": 0,
                     }
             
             # If no positions exist, suggest initial allocation
@@ -8067,7 +8109,7 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
                 return closing_prices
 
             # Attempt a shorter window if no candles returned
-            fallback_timeframe, fallback_limit = "1d", 120
+            fallback_timeframe, fallback_limit = "1d", 14
             if (timeframe, limit) != (fallback_timeframe, fallback_limit):
                 fallback_candles = await real_market_data_service.get_historical_ohlcv(
                     symbol=trading_pair,

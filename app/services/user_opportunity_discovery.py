@@ -2981,7 +2981,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             optimization_result = await trading_strategies_service.execute_strategy(
                 function="portfolio_optimization",
                 user_id=user_profile.user_id,
-                simulation_mode=True  # Use simulation mode for opportunity scanning
+                simulation_mode=True,  # Use simulation mode for opportunity scanning
+                preloaded_portfolio=portfolio_result,
             )
             
             if optimization_result.get("success"):
