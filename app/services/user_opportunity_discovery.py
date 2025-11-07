@@ -1314,6 +1314,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                            total_assets=sum(len(assets) for assets in discovered_assets.values()),
                                            duration_ms=metrics["asset_discovery_time"] * 1000)
 
+            # Preload shared price data so downstream strategies reuse cached responses
+            # instead of issuing redundant exchange requests during the scan stage.
             await self._preload_price_universe(discovered_assets, user_profile, scan_id)
 
             # STEP 5: Run opportunity discovery across all user's strategies

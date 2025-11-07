@@ -4566,6 +4566,8 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
             else:
                 preloaded_snapshot = _extract_snapshot(preloaded_portfolio)
                 if preloaded_snapshot:
+                    # Reuse the portfolio snapshot fetched by the discovery pipeline so we
+                    # avoid an additional round-trip to the portfolio service for each scan.
                     self.logger.debug(
                         "Using preloaded portfolio snapshot for optimization",
                         user_id=user_id,
