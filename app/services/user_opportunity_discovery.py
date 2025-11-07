@@ -1469,7 +1469,14 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 0.0,
                 self._scan_response_budget - (time.monotonic() - discovery_start_time),
             )
-            strategy_stage_timeout = max(5.0, min(stage_remaining_budget + 15.0, 210.0))
+            gunicorn_timeout = getattr(settings, "GUNICORN_TIMEOUT", None)
+            if not isinstance(gunicorn_timeout, (int, float)) or gunicorn_timeout <= 0:
+                gunicorn_timeout = 180
+            stage_timeout_cap = max(5.0, float(gunicorn_timeout) - 20.0)
+            strategy_stage_timeout = max(
+                5.0,
+                min(stage_remaining_budget + 15.0, stage_timeout_cap),
+            )
 
             _done, pending = await asyncio.wait(
                 strategy_tasks,
@@ -1534,10 +1541,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         "strategy_name": strategy_info.get("name", "Unknown"),
                         "opportunities": [],
                         "success": False,
-                        "error": "strategy_cancelled",
+                        "error": "strategy_stage_timeout",
                         "partial": True,
                     }
-                    metrics['timeouts'] += 1
                     continue
 
                 try:
