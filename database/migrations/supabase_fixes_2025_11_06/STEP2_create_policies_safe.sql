@@ -146,8 +146,16 @@ DO $$
 BEGIN
   IF has_column('trading_strategies', 'user_id') THEN
     DROP POLICY IF EXISTS "Users can view their own strategies" ON trading_strategies;
-    CREATE POLICY "Users can view their own strategies" ON trading_strategies FOR SELECT
-    USING (auth.uid() = user_id OR visibility = 'public');
+
+    -- Check if visibility column exists
+    IF has_column('trading_strategies', 'visibility') THEN
+      CREATE POLICY "Users can view their own strategies" ON trading_strategies FOR SELECT
+      USING (auth.uid() = user_id OR visibility = 'public');
+    ELSE
+      -- No visibility column, just check user_id
+      CREATE POLICY "Users can view their own strategies" ON trading_strategies FOR SELECT
+      USING (auth.uid() = user_id);
+    END IF;
 
     DROP POLICY IF EXISTS "Users can manage their own strategies" ON trading_strategies;
     CREATE POLICY "Users can manage their own strategies" ON trading_strategies FOR ALL
@@ -162,8 +170,16 @@ DO $$
 BEGIN
   IF has_column('trading_signals', 'user_id') THEN
     DROP POLICY IF EXISTS "Users can view own signals" ON trading_signals;
-    CREATE POLICY "Users can view own signals" ON trading_signals FOR SELECT
-    USING (auth.uid() = user_id OR visibility = 'public');
+
+    -- Check if visibility column exists
+    IF has_column('trading_signals', 'visibility') THEN
+      CREATE POLICY "Users can view own signals" ON trading_signals FOR SELECT
+      USING (auth.uid() = user_id OR visibility = 'public');
+    ELSE
+      -- No visibility column, just check user_id
+      CREATE POLICY "Users can view own signals" ON trading_signals FOR SELECT
+      USING (auth.uid() = user_id);
+    END IF;
 
     DROP POLICY IF EXISTS "Users can create own signals" ON trading_signals;
     CREATE POLICY "Users can create own signals" ON trading_signals FOR INSERT
