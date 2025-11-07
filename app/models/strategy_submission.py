@@ -146,21 +146,27 @@ class StrategySubmission(Base):
 
     def to_dict(self):
         """Convert model to dictionary for API responses."""
+        # Helper function to safely get enum value or return string as-is
+        def get_enum_value(field, default):
+            if not field:
+                return default
+            return field.value if hasattr(field, 'value') else field
+
         return {
             "id": self.id,
             "name": self.name,
             "description": self.description,
             "category": self.category,
-            "risk_level": self.risk_level.value if self.risk_level else "medium",
+            "risk_level": get_enum_value(self.risk_level, "medium"),
             "expected_return_range": [
                 float(self.expected_return_min or 0),
                 float(self.expected_return_max or 0)
             ],
             "required_capital": float(self.required_capital or 1000),
-            "pricing_model": self.pricing_model.value if self.pricing_model else "free",
+            "pricing_model": get_enum_value(self.pricing_model, "free"),
             "price_amount": float(self.price_amount) if self.price_amount else None,
             "profit_share_percentage": self.profit_share_percentage,
-            "status": self.status.value if self.status else "draft",
+            "status": get_enum_value(self.status, "draft"),
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "submitted_at": self.submitted_at.isoformat() if self.submitted_at else None,
             "reviewed_at": self.reviewed_at.isoformat() if self.reviewed_at else None,
@@ -171,9 +177,9 @@ class StrategySubmission(Base):
             "validation_results": self.validation_results or {},
             "tags": self.tags or [],
             "target_audience": self.target_audience or [],
-            "complexity_level": self.complexity_level.value if self.complexity_level else "intermediate",
+            "complexity_level": get_enum_value(self.complexity_level, "intermediate"),
             "documentation_quality": self.documentation_quality or 0,
-            "support_level": self.support_level.value if self.support_level else "standard",
+            "support_level": get_enum_value(self.support_level, "standard"),
             "total_subscribers": self.total_subscribers or 0,
             "total_revenue": float(self.total_revenue or 0),
             "average_rating": self.average_rating or 0,
