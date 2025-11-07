@@ -308,15 +308,27 @@ def run_production():
         def load(self):
             return self.application
     
+    worker_count = settings.recommended_web_concurrency
+    memory_limit = settings.memory_limit_mb
+
+    logger.info(
+        "🚀 Launching Gunicorn with %s workers | timeout=%ss | graceful-timeout=%ss | memory-limit=%s",
+        worker_count,
+        settings.GUNICORN_TIMEOUT,
+        settings.GUNICORN_GRACEFUL_TIMEOUT,
+        f"{memory_limit}MB" if memory_limit is not None else "unknown",
+    )
+
     options = {
         'bind': f"{settings.HOST}:{settings.PORT}",
-        'workers': settings.WORKERS or 4,
+        'workers': worker_count,
         'worker_class': 'uvicorn.workers.UvicornWorker',
         'worker_connections': 1000,
-        'max_requests': 1000,
-        'max_requests_jitter': 100,
-        'timeout': 30,
-        'keepalive': 2,
+        'max_requests': settings.GUNICORN_MAX_REQUESTS,
+        'max_requests_jitter': settings.GUNICORN_MAX_REQUESTS_JITTER,
+        'timeout': settings.GUNICORN_TIMEOUT,
+        'graceful_timeout': settings.GUNICORN_GRACEFUL_TIMEOUT,
+        'keepalive': settings.GUNICORN_KEEPALIVE,
         'preload_app': True,
     }
     
