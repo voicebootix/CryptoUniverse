@@ -1113,6 +1113,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         """
         
         discovery_start_time = time.monotonic()
+        discovery_start_wall = time.time()
         scan_id = existing_scan_id or f"user_discovery_{user_id}_{int(time.time())}"
         cache_key = cache_key or self._build_scan_cache_key(
             user_id,
@@ -1132,13 +1133,21 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         force_refresh=force_refresh)
 
         # Track scan start
-        await self._track_scan_lifecycle(user_id, scan_id, "started", "in_progress",
-                                        force_refresh=force_refresh,
-                                        start_time=discovery_start_time)
+        await self._track_scan_lifecycle(
+            user_id,
+            scan_id,
+            "started",
+            "in_progress",
+            force_refresh=force_refresh,
+            start_time=discovery_start_wall,
+            start_time_monotonic=discovery_start_time,
+        )
 
         metrics: Dict[str, Any] = {
             "scan_id": scan_id,
-            "start_time": discovery_start_time,
+            "start_time": discovery_start_wall,
+            "start_time_monotonic": discovery_start_time,
+            "start_time_iso": datetime.fromtimestamp(discovery_start_wall, tz=timezone.utc).isoformat(),
             "portfolio_fetch_time": 0.0,
             "asset_discovery_time": 0.0,
             "strategy_scan_times": {},
@@ -1358,7 +1367,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
                 async with strategy_semaphore:
                     # Start time and debug tracking inside semaphore to measure pure execution time (not queue wait)
-                    strategy_start_time = time.monotonic()
+                    strategy_start_monotonic = time.monotonic()
+                    strategy_start_wall = time.time()
                     step_number = 100 + strategy_index  # 100-series reserved for per-strategy steps
                     await self._track_debug_step(
                         user_id, scan_id, step_number,
@@ -1366,7 +1376,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         "starting",
                         strategy_id=strategy_identifier,
                         strategy_index=strategy_index,
-                        started_at=datetime.fromtimestamp(strategy_start_time, tz=timezone.utc).isoformat()
+                        started_at=datetime.fromtimestamp(strategy_start_wall, tz=timezone.utc).isoformat()
                     )
 
                     try:
@@ -1378,11 +1388,11 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                             scan_id,
                             portfolio_result,
                             timeout_seconds=per_strategy_timeout_s,
-                            start_time=strategy_start_time,
+                            start_time=strategy_start_wall,
                         )
                     except asyncio.CancelledError as e:
                         # Track strategy cancellation (parent task cancelled)
-                        execution_time = (time.monotonic() - strategy_start_time) * 1000
+                        execution_time = (time.monotonic() - strategy_start_monotonic) * 1000
                         await self._track_debug_step(
                             user_id, scan_id, step_number,
                             f"Strategy: {strategy_name}",
@@ -1397,7 +1407,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         raise
                     except Exception as e:
                         # Track strategy failure (timeout or other)
-                        execution_time = (time.monotonic() - strategy_start_time) * 1000
+                        execution_time = (time.monotonic() - strategy_start_monotonic) * 1000
                         error_type = type(e).__name__
                         is_timeout = isinstance(e, asyncio.TimeoutError)
 
@@ -1415,7 +1425,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         raise
                     else:
                         # Track strategy completion (only if no exception)
-                        execution_time = (time.time() - start_time) * 1000
+                        execution_time = (time.monotonic() - strategy_start_monotonic) * 1000
                         await self._track_debug_step(
                             user_id, scan_id, step_number,
                             f"Strategy: {strategy_name}",
@@ -1427,7 +1437,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         )
                         return result
                     finally:
-                        strategy_timings[strategy_identifier] = time.time() - start_time
+                        strategy_timings[strategy_identifier] = time.monotonic() - strategy_start_monotonic
 
             # Run all strategy scans concurrently
             self.logger.info("?? STARTING CONCURRENT STRATEGY SCANS",
@@ -1435,12 +1445,104 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                            total_strategies=total_strategies,
                            concurrency_limit=15)
 
-            strategy_tasks = [
-                scan_strategy_with_semaphore(strategy, idx)
-                for idx, strategy in enumerate(active_strategies)
-            ]
+            # Launch strategy scans as tasks so we can enforce a global timeout for the
+            # entire strategy phase. This protects against a handful of strategies
+            # running right up to their individual budget and collectively stalling
+            # the overall scan long enough for the frontend to observe a 404.
+            strategy_tasks: List[asyncio.Task] = []
+            task_index_map: Dict[asyncio.Task, int] = {}
+            for idx, strategy in enumerate(active_strategies):
+                task = asyncio.create_task(
+                    scan_strategy_with_semaphore(strategy, idx),
+                    name=f"strategy-scan:{scan_id}:{idx}",
+                )
+                strategy_tasks.append(task)
+                task_index_map[task] = idx
 
-            strategy_scan_results = await asyncio.gather(*strategy_tasks, return_exceptions=True)
+            # Allow a small grace window beyond the remaining scan budget so we can
+            # collect trailing results without cancelling tasks that are about to
+            # finish. When the window expires we cancel whatever is left and mark
+            # them as timed out so aggregation can continue with partial data.
+            stage_remaining_budget = max(
+                0.0,
+                self._scan_response_budget - (time.monotonic() - discovery_start_time),
+            )
+            strategy_stage_timeout = max(5.0, min(stage_remaining_budget + 15.0, 210.0))
+
+            _done, pending = await asyncio.wait(
+                strategy_tasks,
+                timeout=strategy_stage_timeout,
+                return_when=asyncio.ALL_COMPLETED,
+            )
+
+            timeout_results: Dict[int, Dict[str, Any]] = {}
+
+            if pending:
+                self.logger.warning(
+                    "Strategy scans exceeded stage timeout; cancelling pending tasks",
+                    scan_id=scan_id,
+                    pending_tasks=len(pending),
+                    stage_timeout_seconds=strategy_stage_timeout,
+                )
+
+                pending_list = list(pending)
+                for task in pending_list:
+                    task.cancel()
+
+                # Wait for cancellation to propagate so per-strategy cleanup hooks run.
+                cancellation_outcomes = await asyncio.gather(
+                    *pending_list,
+                    return_exceptions=True,
+                )
+
+                for task, outcome in zip(pending_list, cancellation_outcomes):
+                    idx = task_index_map.get(task)
+                    strategy_info = active_strategies[idx] if idx is not None else {}
+                    timeout_results[idx] = {
+                        "strategy_id": strategy_info.get("strategy_id", ""),
+                        "strategy_name": strategy_info.get("name", "Unknown"),
+                        "opportunities": [],
+                        "success": False,
+                        "error": "strategy_stage_timeout",
+                        "partial": True,
+                    }
+
+                    if isinstance(outcome, Exception) and not isinstance(
+                        outcome, asyncio.CancelledError
+                    ):
+                        self.logger.warning(
+                            "Strategy task returned error after cancellation",
+                            scan_id=scan_id,
+                            strategy_id=timeout_results[idx]["strategy_id"],
+                            error=str(outcome),
+                        )
+
+            strategy_scan_results: List[Any] = [None] * total_strategies
+
+            for task in strategy_tasks:
+                idx = task_index_map[task]
+                if idx in timeout_results:
+                    strategy_scan_results[idx] = timeout_results[idx]
+                    metrics['timeouts'] += 1
+                    continue
+
+                if task.cancelled():
+                    strategy_info = active_strategies[idx]
+                    strategy_scan_results[idx] = {
+                        "strategy_id": strategy_info.get("strategy_id", ""),
+                        "strategy_name": strategy_info.get("name", "Unknown"),
+                        "opportunities": [],
+                        "success": False,
+                        "error": "strategy_cancelled",
+                        "partial": True,
+                    }
+                    metrics['timeouts'] += 1
+                    continue
+
+                try:
+                    strategy_scan_results[idx] = task.result()
+                except Exception as exc:  # noqa: BLE001 - propagate diagnostic details
+                    strategy_scan_results[idx] = exc
 
             self.logger.info("? ALL STRATEGY SCANS COMPLETED",
                            scan_id=scan_id,
@@ -1492,6 +1594,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
                         all_opportunities.extend(opportunities)
                     elif isinstance(result, dict):
+                        if result.get("partial") and isinstance(result.get("error"), str):
+                            if "timeout" in result["error"].lower():
+                                metrics['timeouts'] += 1
                         self.logger.warning("? STRATEGY RETURNED EMPTY OPPORTUNITIES",
                                           scan_id=scan_id,
                                           strategy_name=strategy_name,
@@ -1705,7 +1810,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             return final_response
 
         except Exception as e:
-            execution_time = (time.time() - discovery_start_time) * 1000
+            execution_time = (time.monotonic() - discovery_start_time) * 1000
             error_type = type(e).__name__
             is_timeout = "Timeout" in error_type or "timeout" in str(e).lower()
 
@@ -1969,10 +2074,19 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             scanner_method = self.strategy_scanners[strategy_func]
             if _timeout_exceeded(0.95):
                 return _timeout_response("timeout_before_execution")
-            opportunities = await scanner_method(
-                discovered_assets, user_profile, scan_id, portfolio_result
-            )
-            
+
+            remaining_budget = max(0.0, timeout_seconds - (time.time() - start_time))
+            if remaining_budget <= 0:
+                return _timeout_response("timeout_no_budget")
+
+            try:
+                opportunities = await asyncio.wait_for(
+                    scanner_method(discovered_assets, user_profile, scan_id, portfolio_result),
+                    timeout=remaining_budget,
+                )
+            except asyncio.TimeoutError:
+                return _timeout_response("timeout_during_execution")
+
             self.logger.info("? Strategy scan completed",
                            scan_id=scan_id,
                            strategy=strategy_name,
