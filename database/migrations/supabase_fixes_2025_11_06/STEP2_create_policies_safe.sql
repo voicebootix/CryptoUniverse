@@ -347,7 +347,7 @@ BEGIN
       EXECUTE format('DROP POLICY IF EXISTS "Public can read %I" ON %I', tbl, tbl);
       EXECUTE format('CREATE POLICY "Public can read %I" ON %I FOR SELECT USING (true)', tbl, tbl);
 
-      DROP POLICY IF EXISTS format('Service role manages %I', tbl) ON tbl;
+      EXECUTE format('DROP POLICY IF EXISTS "Service role manages %I" ON %I', tbl, tbl);
       EXECUTE format('CREATE POLICY "Service role manages %I" ON %I FOR ALL USING (auth.role() = ''service_role'')', tbl, tbl);
 
       RAISE NOTICE '✅ % (public read)', tbl;

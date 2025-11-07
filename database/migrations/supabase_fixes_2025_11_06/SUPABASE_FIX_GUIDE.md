@@ -67,9 +67,9 @@ pg_dump -h your-db-host -U postgres -d postgres > backup_$(date +%Y%m%d).sql
 
 ### Step 3: Run Security Fixes (PRIORITY 1)
 
-**✨ Recommended: Use Two-Step Approach**
+#### ✨ Recommended: Use Two-Step Approach
 
-**Step 3A: Enable RLS First**
+#### Step 3A: Enable RLS First
 
 Open Supabase SQL Editor and run:
 
@@ -86,7 +86,7 @@ WHERE schemaname = 'public' AND rowsecurity = true;
 -- Should show 80+ tables
 ```
 
-**Step 3B: Create Policies**
+#### Step 3B: Create Policies
 
 Then run:
 
@@ -96,7 +96,7 @@ Then run:
 -- Will skip tables that don't have the required columns
 ```
 
-**Alternative: Single File Approach**
+#### Alternative: Single File Approach
 
 If you're experienced and prefer single file:
 
