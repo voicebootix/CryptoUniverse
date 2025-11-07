@@ -4,6 +4,21 @@
 -- This script ONLY enables RLS on tables
 -- No policies are created, so no "column does not exist" errors
 -- Run this first, then run STEP2
+--
+-- ⚠️  NOTE: This file uses BEGIN/COMMIT transaction wrapper
+--
+-- WHEN TO USE THIS FILE vs STEP1_SIMPLE.sql:
+-- - Use STEP1_SIMPLE.sql: For Supabase SQL Editor (RECOMMENDED)
+--   * No transaction wrapper (Supabase manages transactions)
+--   * Simpler, more compatible
+--   * Less risk of syntax errors
+--
+-- - Use STEP1_enable_rls_only.sql: For direct psql/postgres CLI
+--   * Has BEGIN/COMMIT transaction wrapper
+--   * Includes verification checks with RAISE NOTICE
+--   * Atomic - all changes roll back on error
+--
+-- 💡 RECOMMENDED: Use STEP1_SIMPLE.sql for Supabase SQL Editor!
 -- ========================================
 
 -- Starting RLS enablement on all tables...

@@ -19,22 +19,39 @@ This is a complete fix guide for the **CRITICAL** security and performance issue
 
 ## 📁 Generated Files
 
+### 🚀 Orchestration Script (Automated Execution)
+
+**`run_all_fixes.sql`** - Master script that runs all fixes in correct order
+- Uses the two-step approach for maximum safety
+- Includes validation checkpoints between phases
+- Automatically runs: STEP1_SIMPLE.sql → STEP2_create_policies_safe.sql → performance fixes → function fixes
+- **Use this if**: You want automated execution with built-in verification
+- **Requires**: psql or direct database CLI access (NOT Supabase SQL Editor)
+
 ### ✨ Recommended Two-Step Approach (SAFER & TESTED!)
 
-For maximum safety and avoiding errors, use the two-step approach:
+For maximum safety and manual control, use the two-step approach:
 
 1. **`STEP1_SIMPLE.sql`** - Enable RLS only (guaranteed to work!)
 2. **`STEP2_create_policies_safe.sql`** - Create policies with column checks
 3. **`supabase_performance_fixes.sql`** - Drop unused indexes
 4. **`supabase_function_fixes.sql`** - Fix functions and views
 
-### Alternative Single-File Approach
+**Use this if**: Running manually in Supabase SQL Editor (most common)
 
-If you prefer single files (advanced users only):
+### 📋 Supporting Files
 
-1. **`supabase_security_fixes.sql`** - RLS enablement and policies (all-in-one)
-2. **`supabase_performance_fixes.sql`** - Drop unused indexes
-3. **`supabase_function_fixes.sql`** - Fix functions and views
+- **`STEP1_enable_rls_only.sql`** - Alternative to STEP1_SIMPLE.sql with transaction wrapper
+  - Use for psql/CLI instead of Supabase SQL Editor
+  - Includes BEGIN/COMMIT and verification checks
+  - More verbose output
+
+### ⚠️ Legacy Single-File Approach (Not Recommended)
+
+**`supabase_security_fixes.sql`** - RLS enablement and policies (all-in-one)
+- May fail with "column does not exist" errors on some tables
+- Kept for backward compatibility only
+- **Recommendation**: Use two-step approach instead
 
 **Why use two-step approach?**
 - ✅ Avoids "column does not exist" errors
@@ -64,6 +81,48 @@ pg_dump -h your-db-host -U postgres -d postgres > backup_$(date +%Y%m%d).sql
 2. Restore a copy of production data
 3. Test all scripts
 4. Verify application functionality
+
+### Step 2.5: Choose Your Approach 🎯
+
+You have two options for running the fixes:
+
+#### Option A: Automated with Orchestration Script (Advanced)
+
+**Use `run_all_fixes.sql`** - Runs all fixes automatically with validation checkpoints
+
+```bash
+# Requires psql or direct CLI access
+psql -h your-db-host -U postgres -d postgres -f run_all_fixes.sql
+```
+
+**Pros:**
+- ✅ Automated execution in correct order
+- ✅ Built-in validation checkpoints between phases
+- ✅ 10-second safety pause before starting
+- ✅ Comprehensive error checking
+
+**Cons:**
+- ❌ Requires psql/CLI access (not Supabase SQL Editor)
+- ❌ Less control over individual steps
+- ❌ Harder to debug if issues occur
+
+#### Option B: Manual Step-by-Step (Recommended for Most Users)
+
+**Use individual SQL files** - Run each file manually in Supabase SQL Editor
+
+**Pros:**
+- ✅ Works in Supabase SQL Editor (no CLI needed)
+- ✅ Full control over each step
+- ✅ Easy to verify results between steps
+- ✅ Can stop and fix issues before continuing
+
+**Cons:**
+- ❌ More manual work
+- ❌ Need to remember correct order
+
+**💡 Our Recommendation:** If you're using Supabase SQL Editor, follow the manual approach below (Steps 3-5).
+
+---
 
 ### Step 3: Run Security Fixes (PRIORITY 1)
 

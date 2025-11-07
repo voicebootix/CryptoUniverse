@@ -25,10 +25,11 @@ BEGIN
   RAISE NOTICE 'PRE-FLIGHT CHECKS';
   RAISE NOTICE '========================================';
   RAISE NOTICE '';
-  RAISE NOTICE 'Required migration files:';
-  RAISE NOTICE '  ✓ supabase_security_fixes.sql';
-  RAISE NOTICE '  ✓ supabase_performance_fixes.sql';
-  RAISE NOTICE '  ✓ supabase_function_fixes.sql';
+  RAISE NOTICE 'Required migration files (TWO-STEP APPROACH):';
+  RAISE NOTICE '  ✓ STEP1_SIMPLE.sql - Enable RLS';
+  RAISE NOTICE '  ✓ STEP2_create_policies_safe.sql - Create policies';
+  RAISE NOTICE '  ✓ supabase_performance_fixes.sql - Drop indexes';
+  RAISE NOTICE '  ✓ supabase_function_fixes.sql - Fix functions';
   RAISE NOTICE '';
   RAISE NOTICE 'If any file is missing, this script will fail.';
   RAISE NOTICE 'Ensure all files are in the same directory as this script.';
@@ -71,13 +72,18 @@ END $$;
 -- ========================================
 
 \echo '========================================';
-\echo 'PHASE 1: SECURITY FIXES';
+\echo 'PHASE 1: SECURITY FIXES (TWO-STEP APPROACH)';
 \echo '========================================';
 \echo '';
 
 \echo 'Step 1.1: Enabling RLS on all tables...';
-\i supabase_security_fixes.sql
-\echo '✅ RLS enabled!';
+\i STEP1_SIMPLE.sql
+\echo '✅ RLS enabled on all tables!';
+\echo '';
+
+\echo 'Step 1.2: Creating RLS policies with column checks...';
+\i STEP2_create_policies_safe.sql
+\echo '✅ RLS policies created!';
 \echo '';
 
 -- ========================================
