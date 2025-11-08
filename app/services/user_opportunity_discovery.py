@@ -183,7 +183,52 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             self._normalize_strategy_identifier("ai volatility trading"): "volatility_trading",
             self._normalize_strategy_identifier("ai news sentiment"): "news_sentiment",
         }
-        
+
+    def _calculate_strategy_stage_timeout(
+        self,
+        stage_remaining_budget: float,
+        discovery_start_time: float
+    ) -> float:
+        """Bound the strategy stage timeout beneath the REMAINING worker budget.
+
+        CRITICAL: Accounts for time already elapsed (portfolio fetch + asset discovery)
+        to prevent worker kills from budget overruns.
+        """
+
+        try:
+            remaining = float(stage_remaining_budget)
+        except (TypeError, ValueError):
+            remaining = 0.0
+
+        if remaining < 0:
+            remaining = 0.0
+
+        # Get worker timeout
+        gunicorn_timeout = getattr(settings, "GUNICORN_TIMEOUT", None)
+        if not isinstance(gunicorn_timeout, (int, float)):
+            try:
+                gunicorn_timeout = float(gunicorn_timeout)
+            except (TypeError, ValueError):
+                gunicorn_timeout = 180.0
+        gunicorn_timeout = float(gunicorn_timeout)
+
+        # CRITICAL FIX: Calculate how much time has already elapsed
+        elapsed_total = time.monotonic() - discovery_start_time
+        worker_budget_remaining = max(0.0, gunicorn_timeout - elapsed_total)
+
+        # Cap strategy stage timeout to remaining worker budget with dynamic safety buffer
+        # Use 20s buffer when plenty of time left, scale down to min 5s when running low
+        reserve_buffer = 20.0 if worker_budget_remaining > 25.0 else min(worker_budget_remaining, 5.0)
+        stage_timeout_cap = max(
+            0.0,
+            worker_budget_remaining - reserve_buffer,
+        )
+
+        return max(
+            0.0,
+            min(remaining + 15.0, stage_timeout_cap),
+        )
+
         # User tier configurations - Enterprise-grade with dynamic limits
         self.tier_configs = {
             "basic": {
@@ -1473,13 +1518,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 0.0,
                 self._scan_response_budget - (time.monotonic() - discovery_start_time),
             )
-            gunicorn_timeout = getattr(settings, "GUNICORN_TIMEOUT", None)
-            if not isinstance(gunicorn_timeout, (int, float)) or gunicorn_timeout <= 0:
-                gunicorn_timeout = 180
-            stage_timeout_cap = max(5.0, float(gunicorn_timeout) - 20.0)
-            strategy_stage_timeout = max(
-                5.0,
-                min(stage_remaining_budget + 15.0, stage_timeout_cap),
+            strategy_stage_timeout = self._calculate_strategy_stage_timeout(
+                stage_remaining_budget,
+                discovery_start_time
             )
 
             _done, pending = await asyncio.wait(

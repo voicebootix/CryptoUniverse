@@ -853,7 +853,7 @@ class MarketAnalysisService(LoggerMixin):
                 if price_info:
                     await self._record_exchange_success(exchange)
                     return {"exchange": exchange, **price_info}
-                await self._record_exchange_failure(exchange)
+                # Symbol not listed on exchange - this is normal, not a failure
                 return None
             except asyncio.TimeoutError:
                 await self._record_exchange_failure(exchange)
