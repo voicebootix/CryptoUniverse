@@ -203,7 +203,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             }
         }
 
-        self._policy_refresh_lock = asyncio.Lock()
+        self._policy_refresh_lock: Optional[asyncio.Lock] = None
         self._policy_cache_expiry: float = 0.0
         self._base_strategy_symbol_policies: Dict[str, Dict[str, Any]] = (
             build_strategy_policy_baseline()
@@ -5113,6 +5113,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         now = time.monotonic()
         if not force and now < self._policy_cache_expiry:
             return
+
+        if self._policy_refresh_lock is None:
+            self._policy_refresh_lock = asyncio.Lock()
 
         async with self._policy_refresh_lock:
             if not force and time.monotonic() < self._policy_cache_expiry:
