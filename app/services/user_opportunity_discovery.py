@@ -1416,6 +1416,10 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     # Start time and debug tracking inside semaphore to measure pure execution time (not queue wait)
                     strategy_start_monotonic = time.monotonic()
                     strategy_start_wall = time.time()
+                    # Helper to compute elapsed durations consistently using the monotonic clock
+                    def _strategy_elapsed_seconds() -> float:
+                        return time.monotonic() - strategy_start_monotonic
+
                     step_number = 100 + strategy_index  # 100-series reserved for per-strategy steps
                     await self._track_debug_step(
                         user_id, scan_id, step_number,
@@ -1439,7 +1443,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         )
                     except asyncio.CancelledError as e:
                         # Track strategy cancellation (parent task cancelled)
-                        execution_time = (time.monotonic() - strategy_start_monotonic) * 1000
+                        execution_time = _strategy_elapsed_seconds() * 1000
                         await self._track_debug_step(
                             user_id, scan_id, step_number,
                             f"Strategy: {strategy_name}",
@@ -1454,7 +1458,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         raise
                     except Exception as e:
                         # Track strategy failure (timeout or other)
-                        execution_time = (time.monotonic() - strategy_start_monotonic) * 1000
+                        execution_time = _strategy_elapsed_seconds() * 1000
                         error_type = type(e).__name__
                         is_timeout = isinstance(e, asyncio.TimeoutError)
 
@@ -1472,7 +1476,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         raise
                     else:
                         # Track strategy completion (only if no exception)
-                        execution_time = (time.monotonic() - strategy_start_monotonic) * 1000
+                        execution_time = _strategy_elapsed_seconds() * 1000
                         await self._track_debug_step(
                             user_id, scan_id, step_number,
                             f"Strategy: {strategy_name}",
@@ -1484,7 +1488,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         )
                         return result
                     finally:
-                        strategy_timings[strategy_identifier] = time.monotonic() - strategy_start_monotonic
+                        strategy_timings[strategy_identifier] = _strategy_elapsed_seconds()
 
             # Run all strategy scans concurrently
             self.logger.info("?? STARTING CONCURRENT STRATEGY SCANS",
@@ -1540,10 +1544,33 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     task.cancel()
 
                 # Wait for cancellation to propagate so per-strategy cleanup hooks run.
-                cancellation_outcomes = await asyncio.gather(
-                    *pending_list,
-                    return_exceptions=True,
-                )
+                # Use bounded timeout to avoid hanging if tasks ignore cancellation.
+                cancellation_timeout = 5.0  # seconds to wait for cleanup
+                try:
+                    cancellation_outcomes = await asyncio.wait_for(
+                        asyncio.gather(*pending_list, return_exceptions=True),
+                        timeout=cancellation_timeout,
+                    )
+                except asyncio.TimeoutError:
+                    self.logger.warning(
+                        "Cancellation cleanup timed out; some tasks may not have completed cleanup",
+                        scan_id=scan_id,
+                        pending_tasks=len(pending_list),
+                        timeout_seconds=cancellation_timeout,
+                    )
+                    # Force-cancel remaining tasks and don't wait
+                    cancellation_outcomes = []
+                    for task in pending_list:
+                        if not task.done():
+                            task.cancel()
+                        # Collect outcomes for completed tasks, use placeholder for non-completed
+                        if task.done():
+                            try:
+                                cancellation_outcomes.append(task.result())
+                            except Exception as e:
+                                cancellation_outcomes.append(e)
+                        else:
+                            cancellation_outcomes.append(asyncio.TimeoutError("Cleanup timeout"))
 
                 for task, outcome in zip(pending_list, cancellation_outcomes, strict=True):
                     idx = task_index_map.get(task)
@@ -1711,19 +1738,73 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             # STEP 7: Add strategy recommendations if requested
             strategy_recommendations = []
             if include_strategy_recommendations:
+                await self._track_debug_step(
+                    user_id,
+                    scan_id,
+                    7,
+                    "Generate strategy recommendations",
+                    "starting",
+                )
+
+                recommendation_timeout = 6.0
                 try:
-                    await self._track_debug_step(user_id, scan_id, 7, "Generate strategy recommendations", "starting")
-
-                    strategy_recommendations = await self._generate_strategy_recommendations(
-                        user_id, user_profile, len(ranked_opportunities), portfolio_result
+                    strategy_recommendations = await asyncio.wait_for(
+                        self._generate_strategy_recommendations(
+                            user_id,
+                            user_profile,
+                            len(ranked_opportunities),
+                            portfolio_result,
+                            scan_id=scan_id,
+                            timeout_seconds=recommendation_timeout,
+                        ),
+                        timeout=recommendation_timeout,
                     )
-
-                    await self._track_debug_step(user_id, scan_id, 7, "Generate strategy recommendations",
-                                                "completed", recommendations_count=len(strategy_recommendations))
-                except Exception as rec_error:
-                    await self._track_debug_step(user_id, scan_id, 7, "Generate strategy recommendations",
-                                                "failed", error=str(rec_error))
+                    await self._track_debug_step(
+                        user_id,
+                        scan_id,
+                        7,
+                        "Generate strategy recommendations",
+                        "completed",
+                        recommendations_count=len(strategy_recommendations),
+                    )
+                except asyncio.TimeoutError:
+                    self.logger.warning(
+                        "Strategy recommendations generation timed out",
+                        user_id=user_id,
+                        scan_id=scan_id,
+                        timeout_seconds=recommendation_timeout,
+                    )
+                    strategy_recommendations = []
+                    await self._track_debug_step(
+                        user_id,
+                        scan_id,
+                        7,
+                        "Generate strategy recommendations",
+                        "failed",
+                        error=f"timeout after {recommendation_timeout}s",
+                    )
+                except asyncio.CancelledError:
+                    await self._track_debug_step(
+                        user_id,
+                        scan_id,
+                        7,
+                        "Generate strategy recommendations",
+                        "failed",
+                        error="cancelled",
+                    )
                     raise
+                except Exception as rec_error:
+                    await self._track_debug_step(
+                        user_id,
+                        scan_id,
+                        7,
+                        "Generate strategy recommendations",
+                        "failed",
+                        error=str(rec_error),
+                    )
+                    if isinstance(rec_error, asyncio.CancelledError):
+                        raise
+                    strategy_recommendations = []
 
             # STEP 8: Build comprehensive response with metrics
             try:
@@ -1795,9 +1876,22 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
                 await self._track_debug_step(user_id, scan_id, 10, "Cache opportunities", "completed")
             except Exception as cache_opp_error:
-                await self._track_debug_step(user_id, scan_id, 10, "Cache opportunities",
-                                            "failed", error=str(cache_opp_error))
-                raise
+                await self._track_debug_step(
+                    user_id,
+                    scan_id,
+                    10,
+                    "Cache opportunities",
+                    "failed",
+                    error=str(cache_opp_error),
+                )
+                if isinstance(cache_opp_error, asyncio.CancelledError):
+                    raise
+                self.logger.warning(
+                    "Opportunity cache update failed",
+                    scan_id=scan_id,
+                    user_id=user_id,
+                    error=str(cache_opp_error),
+                )
 
             # STEP 11: Track strategies completion
             try:
@@ -1809,9 +1903,22 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
                 await self._track_debug_step(user_id, scan_id, 11, "Track strategies completion lifecycle", "completed")
             except Exception as lifecycle_error:
-                await self._track_debug_step(user_id, scan_id, 11, "Track strategies completion lifecycle",
-                                            "failed", error=str(lifecycle_error))
-                raise
+                await self._track_debug_step(
+                    user_id,
+                    scan_id,
+                    11,
+                    "Track strategies completion lifecycle",
+                    "failed",
+                    error=str(lifecycle_error),
+                )
+                if isinstance(lifecycle_error, asyncio.CancelledError):
+                    raise
+                self.logger.warning(
+                    "Strategy completion lifecycle tracking failed",
+                    scan_id=scan_id,
+                    user_id=user_id,
+                    error=str(lifecycle_error),
+                )
 
             # STEP 12: Track metrics for diagnostic monitoring
             try:
@@ -1830,9 +1937,22 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
                 await self._track_debug_step(user_id, scan_id, 12, "Track scan metrics for diagnostics", "completed")
             except Exception as metrics_error:
-                await self._track_debug_step(user_id, scan_id, 12, "Track scan metrics for diagnostics",
-                                            "failed", error=str(metrics_error))
-                raise
+                await self._track_debug_step(
+                    user_id,
+                    scan_id,
+                    12,
+                    "Track scan metrics for diagnostics",
+                    "failed",
+                    error=str(metrics_error),
+                )
+                if isinstance(metrics_error, asyncio.CancelledError):
+                    raise
+                self.logger.warning(
+                    "Scan metrics tracking failed",
+                    scan_id=scan_id,
+                    user_id=user_id,
+                    error=str(metrics_error),
+                )
 
             # STEP 13: Track final completion
             try:
@@ -1844,9 +1964,22 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
                 await self._track_debug_step(user_id, scan_id, 13, "Track final completion lifecycle", "completed")
             except Exception as final_lifecycle_error:
-                await self._track_debug_step(user_id, scan_id, 13, "Track final completion lifecycle",
-                                            "failed", error=str(final_lifecycle_error))
-                raise
+                await self._track_debug_step(
+                    user_id,
+                    scan_id,
+                    13,
+                    "Track final completion lifecycle",
+                    "failed",
+                    error=str(final_lifecycle_error),
+                )
+                if isinstance(final_lifecycle_error, asyncio.CancelledError):
+                    raise
+                self.logger.warning(
+                    "Final scan lifecycle tracking failed",
+                    scan_id=scan_id,
+                    user_id=user_id,
+                    error=str(final_lifecycle_error),
+                )
 
             self.logger.info("? ENTERPRISE User Opportunity Discovery Completed",
                            scan_id=scan_id,
@@ -5407,7 +5540,10 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         user_id: str,
         user_profile: UserOpportunityProfile,
         current_opportunities_count: int,
-        portfolio_result: Dict[str, Any]
+        portfolio_result: Dict[str, Any],
+        *,
+        scan_id: Optional[str] = None,
+        timeout_seconds: float = 5.0,
     ) -> List[Dict[str, Any]]:
         """Generate strategy purchase recommendations to increase opportunities."""
         
@@ -5417,12 +5553,36 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             # If user has few opportunities, recommend more strategies
             if current_opportunities_count < 10:
                 # Get marketplace to see what strategies user doesn't have
-                marketplace_result = await strategy_marketplace_service.get_marketplace_strategies(
-                    user_id=user_id,
-                    include_ai_strategies=True,
-                    include_community_strategies=False
-                )
-                
+                marketplace_timeout = max(1.0, float(timeout_seconds))
+                try:
+                    marketplace_result = await asyncio.wait_for(
+                        strategy_marketplace_service.get_marketplace_strategies(
+                            user_id=user_id,
+                            include_ai_strategies=True,
+                            include_community_strategies=False,
+                        ),
+                        timeout=marketplace_timeout,
+                    )
+                except asyncio.TimeoutError:
+                    self.logger.warning(
+                        "Strategy recommendations marketplace lookup timed out",
+                        user_id=user_id,
+                        scan_id=scan_id,
+                        timeout_seconds=marketplace_timeout,
+                    )
+                    marketplace_result = {"success": False, "error": "timeout"}
+                except asyncio.CancelledError:
+                    raise
+                except Exception as marketplace_error:  # pragma: no cover - defensive logging
+                    self.logger.warning(
+                        "Strategy recommendations marketplace lookup failed",
+                        user_id=user_id,
+                        scan_id=scan_id,
+                        error=str(marketplace_error),
+                        error_type=type(marketplace_error).__name__,
+                    )
+                    marketplace_result = {"success": False, "error": str(marketplace_error)}
+
                 if marketplace_result.get("success"):
                     # Use passed portfolio result instead of N+1 query
                     user_portfolio = portfolio_result
@@ -5464,6 +5624,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     "type": "tier_upgrade"
                 })
             
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
             self.logger.error("Failed to generate strategy recommendations", error=str(e))
         
