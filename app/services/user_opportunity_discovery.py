@@ -1473,12 +1473,31 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 0.0,
                 self._scan_response_budget - (time.monotonic() - discovery_start_time),
             )
+
+            # CRITICAL FIX: Calculate timeout based on REMAINING worker budget, not static cap
+            # This prevents worker kills when portfolio fetch + asset discovery consume time
             gunicorn_timeout = getattr(settings, "GUNICORN_TIMEOUT", None)
-            if not isinstance(gunicorn_timeout, (int, float)) or gunicorn_timeout <= 0:
-                gunicorn_timeout = 180
-            stage_timeout_cap = max(5.0, float(gunicorn_timeout) - 20.0)
+            if not isinstance(gunicorn_timeout, (int, float)):
+                try:
+                    gunicorn_timeout = float(gunicorn_timeout)
+                except (TypeError, ValueError):
+                    gunicorn_timeout = 180.0
+            gunicorn_timeout = float(gunicorn_timeout)
+
+            # Calculate how much time has already elapsed
+            elapsed_total = time.monotonic() - discovery_start_time
+            worker_budget_remaining = max(0.0, gunicorn_timeout - elapsed_total)
+
+            # Cap strategy stage timeout to remaining worker budget with dynamic safety buffer
+            # Use 20s buffer when plenty of time left, scale down to min 5s when running low
+            reserve_buffer = 20.0 if worker_budget_remaining > 25.0 else min(worker_budget_remaining, 5.0)
+            stage_timeout_cap = max(
+                0.0,
+                worker_budget_remaining - reserve_buffer,
+            )
+
             strategy_stage_timeout = max(
-                5.0,
+                0.0,
                 min(stage_remaining_budget + 15.0, stage_timeout_cap),
             )
 
