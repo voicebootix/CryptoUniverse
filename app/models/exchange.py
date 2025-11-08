@@ -329,7 +329,6 @@ class ExchangeBalance(Base):
     # Constraints
     __table_args__ = (
         UniqueConstraint("account_id", "symbol", name="unique_account_symbol_balance"),
-        Index("idx_balance_account_symbol", "account_id", "symbol"),
         Index("idx_balance_account_active", "account_id", "is_active", "symbol"),
         Index("idx_balance_symbol_usd", "symbol", "usd_value"),
         Index("idx_balance_updated", "updated_at"),

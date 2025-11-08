@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 from alembic import op
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.models import Base  # noqa: F401 ensures all models are registered
-from app.db.seeds import seed_core_data
+from app.db.seeds import ADMIN_USER_ID, DEFAULT_TENANT_ID, seed_core_data
 
 revision = "20240930_seed_core_data"
 down_revision = None
@@ -33,6 +34,25 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    """Drop all tables managed by SQLAlchemy metadata."""
+    """Remove seed data without modifying the schema."""
     bind = op.get_bind()
-    Base.metadata.drop_all(bind=bind, checkfirst=True)
+    session = Session(bind=bind)
+    try:
+        session.execute(
+            text("DELETE FROM users WHERE id = :admin_id"),
+            {"admin_id": str(ADMIN_USER_ID)},
+        )
+        session.execute(
+            text("DELETE FROM tenant_settings WHERE tenant_id = :tenant_id"),
+            {"tenant_id": str(DEFAULT_TENANT_ID)},
+        )
+        session.execute(
+            text("DELETE FROM tenants WHERE id = :tenant_id"),
+            {"tenant_id": str(DEFAULT_TENANT_ID)},
+        )
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    finally:
+        session.close()
