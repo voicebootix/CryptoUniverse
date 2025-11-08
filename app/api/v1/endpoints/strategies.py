@@ -236,7 +236,14 @@ async def get_user_strategies(
 
         if active_strategies:
             for strategy in active_strategies:
-                strategy_id = strategy.get("strategy_id") or strategy.get("id") or str(uuid.uuid4())
+                strategy_id = strategy.get("strategy_id") or strategy.get("id")
+                if not strategy_id:
+                    logger.warning(
+                        "Skipping strategy without valid ID in portfolio data",
+                        user_id=user_id_str,
+                        strategy_data=strategy
+                    )
+                    continue
                 status = strategy.get("status")
                 is_active = bool(strategy.get("is_active", True if status is None else status == "active"))
                 total_trades = int(strategy.get("total_trades") or 0)
