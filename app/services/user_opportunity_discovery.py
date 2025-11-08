@@ -1488,20 +1488,18 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             elapsed_total = time.monotonic() - discovery_start_time
             worker_budget_remaining = max(0.0, gunicorn_timeout - elapsed_total)
 
-            # Cap strategy stage timeout to remaining worker budget (leave 20s buffer)
+            # Cap strategy stage timeout to remaining worker budget with dynamic safety buffer
+            # Use 20s buffer when plenty of time left, scale down to min 5s when running low
+            reserve_buffer = 20.0 if worker_budget_remaining > 25.0 else min(worker_budget_remaining, 5.0)
             stage_timeout_cap = max(
                 0.0,
-                worker_budget_remaining - 20.0,
+                worker_budget_remaining - reserve_buffer,
             )
-            if stage_timeout_cap == 0.0:
-                stage_timeout_cap = worker_budget_remaining
 
             strategy_stage_timeout = max(
                 0.0,
                 min(stage_remaining_budget + 15.0, stage_timeout_cap),
             )
-            if strategy_stage_timeout <= 0.0:
-                strategy_stage_timeout = worker_budget_remaining
 
             _done, pending = await asyncio.wait(
                 strategy_tasks,
