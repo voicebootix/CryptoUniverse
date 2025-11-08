@@ -4595,6 +4595,10 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
                         self.logger.warning("Portfolio service timeout, using fallback data")
                         portfolio_result = {"success": False, "error": "Portfolio service timeout"}
                         provided_snapshot = None
+                    except asyncio.CancelledError:
+                        self.logger.warning("Portfolio service cancelled; treating as timeout")
+                        portfolio_result = {"success": False, "error": "Portfolio service cancelled"}
+                        provided_snapshot = None
 
             current_positions = []
             if provided_snapshot:
