@@ -10,7 +10,7 @@ Real strategy execution with user exchange integration - no mock data.
 
 import asyncio
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Any
 from decimal import Decimal
 import uuid
@@ -203,17 +203,80 @@ async def get_user_strategies(
         user_id=str(current_user.id)
     )
     
+    def _coerce_decimal(value: Any) -> Decimal:
+        if isinstance(value, Decimal):
+            return value
+        if value is None:
+            return Decimal("0")
+        try:
+            return Decimal(str(value))
+        except Exception:
+            return Decimal("0")
+
+    def _parse_datetime(value: Any) -> datetime:
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, str):
+            try:
+                cleaned = value.replace("Z", "+00:00") if value.endswith("Z") else value
+                return datetime.fromisoformat(cleaned)
+            except ValueError:
+                pass
+        return datetime.now(timezone.utc)
+
     try:
-        # Get user's trading strategies from database
+        user_id_str = str(current_user.id)
+        portfolio_result = await strategy_marketplace_service.get_user_strategy_portfolio(user_id_str)
+        active_strategies: List[Dict[str, Any]] = []
+
+        if portfolio_result.get("success") and portfolio_result.get("active_strategies"):
+            active_strategies = list(portfolio_result.get("active_strategies", []))
+
+        strategy_list: List[StrategyResponse] = []
+
+        if active_strategies:
+            for strategy in active_strategies:
+                strategy_id = strategy.get("strategy_id") or strategy.get("id")
+                if not strategy_id:
+                    logger.warning(
+                        "Skipping strategy without valid ID in portfolio data",
+                        user_id=user_id_str,
+                        strategy_data=strategy
+                    )
+                    continue
+                status = strategy.get("status")
+                is_active = bool(strategy.get("is_active", True if status is None else status == "active"))
+                total_trades = int(strategy.get("total_trades") or 0)
+                winning_trades = int(strategy.get("winning_trades") or 0)
+                win_rate = float(strategy.get("win_rate") or strategy.get("win_rate_percentage") or 0.0)
+                total_pnl = strategy.get("total_pnl") or strategy.get("total_pnl_usd") or 0
+                sharpe_ratio = strategy.get("sharpe_ratio")
+                created_at = strategy.get("created_at") or strategy.get("activated_at")
+                last_executed_at = strategy.get("last_executed_at")
+
+                strategy_list.append(StrategyResponse(
+                    strategy_id=str(strategy_id),
+                    name=strategy.get("name", "Unknown Strategy"),
+                    status="active" if is_active else "inactive",
+                    is_active=is_active,
+                    total_trades=total_trades,
+                    winning_trades=winning_trades,
+                    win_rate=win_rate,
+                    total_pnl=_coerce_decimal(total_pnl),
+                    sharpe_ratio=float(sharpe_ratio) if sharpe_ratio is not None else None,
+                    created_at=_parse_datetime(created_at),
+                    last_executed_at=_parse_datetime(last_executed_at) if last_executed_at else None
+                ))
+
+            return strategy_list
+
         stmt = select(TradingStrategy).where(
             TradingStrategy.user_id == current_user.id
         ).order_by(desc(TradingStrategy.created_at))
-        
+
         result = await db.execute(stmt)
         strategies = result.scalars().all()
-        
-        # Transform to response format
-        strategy_list = []
+
         for strategy in strategies:
             strategy_list.append(StrategyResponse(
                 strategy_id=str(strategy.id),
@@ -228,7 +291,7 @@ async def get_user_strategies(
                 created_at=strategy.created_at,
                 last_executed_at=strategy.last_executed_at
             ))
-        
+
         return strategy_list
         
     except Exception as e:
