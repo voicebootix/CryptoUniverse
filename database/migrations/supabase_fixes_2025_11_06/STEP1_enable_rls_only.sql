@@ -1,0 +1,154 @@
+-- ========================================
+-- STEP 1: ENABLE RLS ONLY (NO POLICIES YET)
+-- ========================================
+-- This script ONLY enables RLS on tables
+-- No policies are created, so no "column does not exist" errors
+-- Run this first, then run STEP2
+--
+-- ⚠️  NOTE: This file uses BEGIN/COMMIT transaction wrapper
+--
+-- WHEN TO USE THIS FILE vs STEP1_SIMPLE.sql:
+-- - Use STEP1_SIMPLE.sql: For Supabase SQL Editor (RECOMMENDED)
+--   * No transaction wrapper (Supabase manages transactions)
+--   * Simpler, more compatible
+--   * Less risk of syntax errors
+--
+-- - Use STEP1_enable_rls_only.sql: For direct psql/postgres CLI
+--   * Has BEGIN/COMMIT transaction wrapper
+--   * Includes verification checks with RAISE NOTICE
+--   * Atomic - all changes roll back on error
+--
+-- 💡 RECOMMENDED: Use STEP1_SIMPLE.sql for Supabase SQL Editor!
+-- ========================================
+
+-- Starting RLS enablement on all tables...
+
+BEGIN;
+
+-- User & Authentication Tables
+ALTER TABLE IF EXISTS users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS user_profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS user_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS user_activities ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS user_oauth_connections ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS user_telegram_connections ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS user_strategy_access ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS user_analytics ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS login_history ENABLE ROW LEVEL SECURITY;
+
+-- Exchange & Trading Accounts
+ALTER TABLE IF EXISTS exchange_accounts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS exchange_api_keys ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS exchange_balances ENABLE ROW LEVEL SECURITY;
+
+-- Financial & Billing Tables
+ALTER TABLE IF EXISTS credit_accounts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS credit_packs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS credit_transactions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS billing_history ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS subscriptions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS subscription_plans ENABLE ROW LEVEL SECURITY;
+
+-- Trading & Strategy Tables
+ALTER TABLE IF EXISTS trading_strategies ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS trading_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS trading_signals ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS strategy_performance ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS strategy_performance_history ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS strategy_followers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS strategy_publishers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS strategy_submissions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS strategy_scanning_policies ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS live_strategy_performance ENABLE ROW LEVEL SECURITY;
+
+-- Portfolio & Position Tables
+ALTER TABLE IF EXISTS portfolios ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS portfolio_snapshots ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS positions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS orders ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS trades ENABLE ROW LEVEL SECURITY;
+
+-- Chat & Communication
+ALTER TABLE IF EXISTS chat_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS chat_messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS chat_session_summaries ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS telegram_messages ENABLE ROW LEVEL SECURITY;
+
+-- Backtest & Analysis
+ALTER TABLE IF EXISTS backtest_results ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS risk_assessments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS risk_metrics ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS performance_metrics ENABLE ROW LEVEL SECURITY;
+
+-- AI & ML Tables
+ALTER TABLE IF EXISTS ai_models ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS ai_signals ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS ai_consensus ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS ai_analysis_log ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS learning_data ENABLE ROW LEVEL SECURITY;
+
+-- Market Data Tables
+ALTER TABLE IF EXISTS market_data ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS market_data_log ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS market_data_ohlcv ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS market_tickers ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS market_indicators ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS symbols ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS technical_indicators ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS orderbook_snapshots ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS legacy_market_data ENABLE ROW LEVEL SECURITY;
+
+-- Signal & Copy Trading
+ALTER TABLE IF EXISTS signal_channels ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS signal_subscriptions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS signal_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS signal_delivery_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS copy_trade_signals ENABLE ROW LEVEL SECURITY;
+
+-- System & Admin Tables
+ALTER TABLE IF EXISTS audit_logs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS system_health ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS system_configuration ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS background_tasks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS documents ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS portfolio_optimization_log ENABLE ROW LEVEL SECURITY;
+
+-- Multi-tenant Tables
+ALTER TABLE IF EXISTS tenants ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS tenant_settings ENABLE ROW LEVEL SECURITY;
+
+-- A/B Testing
+ALTER TABLE IF EXISTS ab_tests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS ab_test_variants ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS ab_test_results ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS ab_test_participants ENABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS ab_test_metrics ENABLE ROW LEVEL SECURITY;
+
+-- OAuth
+ALTER TABLE IF EXISTS oauth_states ENABLE ROW LEVEL SECURITY;
+
+COMMIT;
+
+-- Check results
+DO $$
+DECLARE
+  rls_count INTEGER;
+BEGIN
+  SELECT COUNT(*) INTO rls_count
+  FROM pg_tables
+  WHERE schemaname = 'public'
+  AND rowsecurity = true;
+
+  RAISE NOTICE '';
+  RAISE NOTICE '========================================';
+  RAISE NOTICE '✅ STEP 1 COMPLETE';
+  RAISE NOTICE '========================================';
+  RAISE NOTICE 'RLS enabled on % tables', rls_count;
+  RAISE NOTICE '';
+  RAISE NOTICE '⚠️  IMPORTANT: Tables now have RLS but NO POLICIES';
+  RAISE NOTICE '   This means ALL ACCESS IS DENIED by default';
+  RAISE NOTICE '';
+  RAISE NOTICE 'Next step: Run STEP2_create_policies_safe.sql';
+  RAISE NOTICE '========================================';
+  RAISE NOTICE '';
+END $$;
