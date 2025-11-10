@@ -232,6 +232,28 @@ async def get_user_strategies(
         if portfolio_result.get("success") and portfolio_result.get("active_strategies"):
             active_strategies = list(portfolio_result.get("active_strategies", []))
 
+        if current_user.role == UserRole.ADMIN:
+            expected_catalog = len(strategy_marketplace_service.ai_strategy_catalog)
+            degraded = bool(portfolio_result.get("degraded"))
+            missing_strategies = expected_catalog and len(active_strategies) < expected_catalog
+            if degraded or missing_strategies or not active_strategies:
+                admin_snapshot = await strategy_marketplace_service.get_admin_portfolio_snapshot(user_id_str)
+                if admin_snapshot and admin_snapshot.get("active_strategies"):
+                    logger.info(
+                        "Using admin portfolio snapshot for strategy listing",
+                        user_id=user_id_str,
+                        returned=len(admin_snapshot.get("active_strategies", [])),
+                        expected=expected_catalog,
+                        degraded=degraded,
+                    )
+                    active_strategies = list(admin_snapshot.get("active_strategies", []))
+                else:
+                    logger.warning(
+                        "Admin portfolio snapshot unavailable; continuing with fetched strategies",
+                        user_id=user_id_str,
+                        expected=expected_catalog,
+                    )
+
         strategy_list: List[StrategyResponse] = []
 
         if active_strategies:
