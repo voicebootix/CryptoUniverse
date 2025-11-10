@@ -232,6 +232,35 @@ async def discover_opportunities(
             scan_id,
         )
 
+        # Create placeholder cache entry synchronously so status endpoint works immediately
+        # This fixes the race condition where status endpoint returns "not_found"
+        # because cache entry doesn't exist until background task creates it
+        placeholder_payload = {
+            "success": True,
+            "scan_id": scan_id,
+            "user_id": user_id_str,
+            "opportunities": [],
+            "total_opportunities": 0,
+            "metadata": {
+                "scan_state": "initiated",
+                "message": "Scan initiated, processing in background...",
+                "strategies_completed": 0,
+                "total_strategies": 14,
+                "elapsed_seconds": 0
+            },
+            "user_profile": {},
+            "strategy_performance": {},
+            "asset_discovery": {},
+            "strategy_recommendations": [],
+            "execution_time_ms": 0,
+            "last_updated": datetime.utcnow().isoformat()
+        }
+        await user_opportunity_discovery._update_cached_scan_result(
+            cache_key,
+            placeholder_payload,
+            partial=True,
+        )
+
         # Start background scan (don't await!)
         async def run_discovery_background():
             try:
