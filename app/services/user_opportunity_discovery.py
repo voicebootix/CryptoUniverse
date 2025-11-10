@@ -184,6 +184,34 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             self._normalize_strategy_identifier("ai news sentiment"): "news_sentiment",
         }
 
+        # User tier configurations - Enterprise-grade with dynamic limits
+        self.tier_configs = {
+            "basic": {
+                "max_asset_tier": "tier_retail",
+                "scan_limit": None,  # No hard limit - scan all available opportunities
+                "max_strategies": None  # No hard limit - user can purchase unlimited strategies
+            },
+            "pro": {
+                "max_asset_tier": "tier_professional",
+                "scan_limit": None,  # No hard limit
+                "max_strategies": None  # No hard limit
+            },
+            "enterprise": {
+                "max_asset_tier": "tier_institutional",
+                "scan_limit": None,  # No hard limit
+                "max_strategies": None  # No hard limit
+            }
+        }
+
+        self._policy_refresh_lock: Optional[asyncio.Lock] = None
+        self._policy_cache_expiry: float = 0.0
+        self._base_strategy_symbol_policies: Dict[str, Dict[str, Any]] = (
+            build_strategy_policy_baseline()
+        )
+        self.strategy_symbol_policies: Dict[str, Dict[str, Any]] = copy.deepcopy(
+            self._base_strategy_symbol_policies
+        )
+
     def _calculate_strategy_stage_timeout(
         self,
         stage_remaining_budget: float,
@@ -227,34 +255,6 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         return max(
             0.0,
             min(remaining + 15.0, stage_timeout_cap),
-        )
-
-        # User tier configurations - Enterprise-grade with dynamic limits
-        self.tier_configs = {
-            "basic": {
-                "max_asset_tier": "tier_retail",
-                "scan_limit": None,  # No hard limit - scan all available opportunities
-                "max_strategies": None  # No hard limit - user can purchase unlimited strategies
-            },
-            "pro": {
-                "max_asset_tier": "tier_professional",
-                "scan_limit": None,  # No hard limit
-                "max_strategies": None  # No hard limit
-            },
-            "enterprise": {
-                "max_asset_tier": "tier_institutional",
-                "scan_limit": None,  # No hard limit
-                "max_strategies": None  # No hard limit
-            }
-        }
-
-        self._policy_refresh_lock = asyncio.Lock()
-        self._policy_cache_expiry: float = 0.0
-        self._base_strategy_symbol_policies: Dict[str, Dict[str, Any]] = (
-            build_strategy_policy_baseline()
-        )
-        self.strategy_symbol_policies: Dict[str, Dict[str, Any]] = copy.deepcopy(
-            self._base_strategy_symbol_policies
         )
 
     async def _get_cached_scan_entry(
@@ -5107,6 +5107,14 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     # UTILITY METHODS
     # ================================================================================
 
+    def _ensure_policy_refresh_lock(self) -> asyncio.Lock:
+        """Create the policy refresh lock when running inside an event loop."""
+
+        if self._policy_refresh_lock is None:
+            self._policy_refresh_lock = asyncio.Lock()
+
+        return self._policy_refresh_lock
+
     async def _refresh_strategy_symbol_policies(self, force: bool = False) -> None:
         """Reload symbol policy overrides from the database."""
 
@@ -5114,7 +5122,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         if not force and now < self._policy_cache_expiry:
             return
 
-        async with self._policy_refresh_lock:
+        async with self._ensure_policy_refresh_lock():
             if not force and time.monotonic() < self._policy_cache_expiry:
                 return
 

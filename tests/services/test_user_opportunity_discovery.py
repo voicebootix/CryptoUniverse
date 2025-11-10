@@ -396,21 +396,23 @@ async def test_discover_opportunities_returns_partial_then_final(monkeypatch):
         include_strategy_recommendations: bool = True,
         *,
         existing_scan_id: Optional[str] = None,
+        **kwargs,
     ):
         await asyncio.sleep(0.005)
+        cache_key = kwargs["cache_key"]
         partial_payload = {
             "success": True,
             "opportunities": [],
             "metadata": {"scan_state": "partial"},
         }
-        await service._update_cached_scan_result(user_id, partial_payload, partial=True)
+        await service._update_cached_scan_result(cache_key, partial_payload, partial=True)
         await asyncio.sleep(0.05)
         final_payload = {
             "success": True,
             "opportunities": ["complete"],
             "metadata": {"scan_state": "complete"},
         }
-        await service._update_cached_scan_result(user_id, final_payload, partial=False)
+        await service._update_cached_scan_result(cache_key, final_payload, partial=False)
         return final_payload
 
     monkeypatch.setattr(service, "_execute_opportunity_discovery", fake_execute)
@@ -464,4 +466,4 @@ async def test_admin_snapshot_used_when_portfolio_empty(monkeypatch):
     assert profile.active_strategy_count == 1
     assert profile.total_monthly_strategy_cost == 45
     admin_mock.assert_awaited_once()
-    primary_mock.assert_awaited_once()
+    primary_mock.assert_not_awaited()
