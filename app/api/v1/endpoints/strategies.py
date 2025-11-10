@@ -10,7 +10,7 @@ Real strategy execution with user exchange integration - no mock data.
 
 import asyncio
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 from decimal import Decimal
 import uuid
@@ -176,7 +176,7 @@ class StrategyResponse(BaseModel):
     win_rate: float
     total_pnl: Decimal
     sharpe_ratio: Optional[float]
-    created_at: datetime
+    created_at: Optional[datetime]
     last_executed_at: Optional[datetime]
 
 
@@ -213,7 +213,7 @@ async def get_user_strategies(
         except Exception:
             return Decimal("0")
 
-    def _parse_datetime(value: Any) -> datetime:
+    def _parse_datetime(value: Any) -> Optional[datetime]:
         if isinstance(value, datetime):
             return value
         if isinstance(value, str):
@@ -222,7 +222,7 @@ async def get_user_strategies(
                 return datetime.fromisoformat(cleaned)
             except ValueError:
                 pass
-        return datetime.now(timezone.utc)
+        return None
 
     try:
         user_id_str = str(current_user.id)
@@ -274,7 +274,17 @@ async def get_user_strategies(
                 total_pnl = strategy.get("total_pnl") or strategy.get("total_pnl_usd") or 0
                 sharpe_ratio = strategy.get("sharpe_ratio")
                 created_at = strategy.get("created_at") or strategy.get("activated_at")
+                parsed_created_at = _parse_datetime(created_at)
+                if parsed_created_at is None:
+                    logger.warning(
+                        "Skipping strategy with malformed created_at timestamp",
+                        user_id=user_id_str,
+                        strategy_id=str(strategy_id),
+                    )
+                    continue
+
                 last_executed_at = strategy.get("last_executed_at")
+                parsed_last_executed_at = _parse_datetime(last_executed_at)
 
                 strategy_list.append(StrategyResponse(
                     strategy_id=str(strategy_id),
@@ -286,8 +296,8 @@ async def get_user_strategies(
                     win_rate=win_rate,
                     total_pnl=_coerce_decimal(total_pnl),
                     sharpe_ratio=float(sharpe_ratio) if sharpe_ratio is not None else None,
-                    created_at=_parse_datetime(created_at),
-                    last_executed_at=_parse_datetime(last_executed_at) if last_executed_at else None
+                    created_at=parsed_created_at,
+                    last_executed_at=parsed_last_executed_at,
                 ))
 
             return strategy_list

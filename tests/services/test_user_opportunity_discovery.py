@@ -399,6 +399,8 @@ async def test_discover_opportunities_returns_partial_then_final(monkeypatch):
         **kwargs,
     ):
         await asyncio.sleep(0.005)
+        if "cache_key" not in kwargs:
+            raise AssertionError("cache_key is required in kwargs for this test helper")
         cache_key = kwargs["cache_key"]
         partial_payload = {
             "success": True,

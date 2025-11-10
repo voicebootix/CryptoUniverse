@@ -95,7 +95,7 @@ class UserOpportunityProfile:
     total_monthly_strategy_cost: int
     user_tier: str  # basic, pro, enterprise
     max_asset_tier: str  # tier_retail, tier_professional, etc
-    opportunity_scan_limit: int
+    opportunity_scan_limit: Optional[int]  # None indicates unlimited scans
     last_scan_time: Optional[datetime]
     strategy_fingerprint: str
 
@@ -204,6 +204,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         }
 
         self._policy_refresh_lock: Optional[asyncio.Lock] = None
+        self._policy_lock_loop: Optional[asyncio.AbstractEventLoop] = None
         self._policy_cache_expiry: float = 0.0
         self._base_strategy_symbol_policies: Dict[str, Dict[str, Any]] = (
             build_strategy_policy_baseline()
@@ -5108,10 +5109,16 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     # ================================================================================
 
     def _ensure_policy_refresh_lock(self) -> asyncio.Lock:
-        """Create the policy refresh lock when running inside an event loop."""
+        """Create the policy refresh lock bound to the current event loop."""
 
-        if self._policy_refresh_lock is None:
+        current_loop = asyncio.get_running_loop()
+        if (
+            self._policy_refresh_lock is None
+            or self._policy_lock_loop is None
+            or self._policy_lock_loop is not current_loop
+        ):
             self._policy_refresh_lock = asyncio.Lock()
+            self._policy_lock_loop = current_loop
 
         return self._policy_refresh_lock
 
