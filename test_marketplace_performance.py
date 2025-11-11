@@ -1,10 +1,19 @@
+import os
 import requests
 import time
 import json
 
-BASE_URL = "https://cryptouniverse.onrender.com"
-EMAIL = "admin@cryptouniverse.com"
-PASSWORD = "AdminPass123!"
+# Load credentials from environment variables for security
+BASE_URL = os.environ.get("MARKETPLACE_BASE_URL", "https://cryptouniverse.onrender.com")
+EMAIL = os.environ.get("MARKETPLACE_TEST_EMAIL")
+PASSWORD = os.environ.get("MARKETPLACE_TEST_PASSWORD")
+
+# Validate required environment variables
+if not EMAIL or not PASSWORD:
+    raise ValueError(
+        "Missing required environment variables: MARKETPLACE_TEST_EMAIL and MARKETPLACE_TEST_PASSWORD. "
+        "Please set these before running the test."
+    )
 
 def login():
     """Login and get auth token"""

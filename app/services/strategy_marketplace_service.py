@@ -911,7 +911,15 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
             try:
                 from app.core.redis import get_redis_client
                 redis_client = await get_redis_client()
-                cached_result = await redis_client.get(cache_key)
+                cached_result = None
+                if redis_client is not None:
+                    cached_result = await redis_client.get(cache_key)
+                else:
+                    self.logger.debug(
+                        "Redis unavailable for backtest cache lookup",
+                        strategy=strategy_func,
+                    )
+                
                 if cached_result:
                     try:
                         if isinstance(cached_result, bytes):
@@ -966,11 +974,17 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                             try:
                                 from app.core.redis import get_redis_client
                                 redis_client = await get_redis_client()
-                                await redis_client.setex(
-                                    cache_key,
-                                    86400,  # 24 hours
-                                    json.dumps(result_data, default=str)
-                                )
+                                if redis_client is not None:
+                                    await redis_client.setex(
+                                        cache_key,
+                                        86400,  # 24 hours
+                                        json.dumps(result_data, default=str)
+                                    )
+                                else:
+                                    self.logger.debug(
+                                        "Redis unavailable; skipping backtest cache write",
+                                        strategy=strategy_func,
+                                    )
                             except Exception as cache_err:
                                 self.logger.warning(f"Failed to cache backtest results for {strategy_func}", error=str(cache_err))
                         
