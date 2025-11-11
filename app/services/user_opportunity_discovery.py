@@ -407,15 +407,20 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 }
                 ttl_seconds = int(ttl)
                 await self.redis.setex(redis_key, ttl_seconds, json.dumps(scan_data))
-                self.logger.debug("Scan result persisted to Redis",
-                                cache_key=cache_key,
-                                scan_id=cached_payload.get("scan_id"),
-                                partial=partial,
-                                ttl=ttl_seconds)
+                await self._refresh_scan_activity(cache_key)
+                self.logger.info(
+                    "Scan result persisted to Redis",
+                    cache_key=cache_key,
+                    scan_id=cached_payload.get("scan_id"),
+                    partial=partial,
+                    ttl=ttl_seconds,
+                )
             except Exception as redis_error:
-                self.logger.warning("Failed to persist scan result to Redis",
-                                  error=str(redis_error),
-                                  cache_key=cache_key)
+                self.logger.warning(
+                    "Failed to persist scan result to Redis",
+                    error=str(redis_error),
+                    cache_key=cache_key,
+                )
 
     def _schedule_scan_cleanup(self, cache_key: str, task: asyncio.Task) -> None:
         user_id_hint = cache_key.split(":", 1)[0] if cache_key else None
@@ -430,6 +435,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 scan_id_value = getattr(task, "scan_id", None)
                 if scan_id_value:
                     await self._unregister_scan_lookup(scan_id_value)
+
+                await self._clear_scan_activity(cache_key)
 
                 if done.cancelled():
                     return
@@ -447,14 +454,86 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
         task.add_done_callback(_cleanup)
 
+    async def _mark_scan_active(self, cache_key: str, scan_id: str) -> None:
+        if not self.redis:
+            return
+
+        ttl_seconds = max(int(self._scan_response_budget) + 60, self._partial_cache_ttl)
+        redis_key = f"opportunity_scan_active:{cache_key}"
+
+        try:
+            await self.redis.setex(redis_key, ttl_seconds, scan_id)
+            self.logger.info(
+                "Scan activity registered in Redis",
+                cache_key=cache_key,
+                scan_id=scan_id,
+                ttl=ttl_seconds,
+            )
+        except Exception as redis_error:
+            self.logger.warning(
+                "Failed to mark scan as active in Redis",
+                error=str(redis_error),
+                cache_key=cache_key,
+                scan_id=scan_id,
+            )
+
+    async def _refresh_scan_activity(self, cache_key: str) -> None:
+        if not self.redis:
+            return
+
+        ttl_seconds = max(int(self._scan_response_budget) + 60, self._partial_cache_ttl)
+        redis_key = f"opportunity_scan_active:{cache_key}"
+
+        try:
+            # expire returns False if the key was missing; that's safe to ignore.
+            await self.redis.expire(redis_key, ttl_seconds)
+        except Exception as redis_error:
+            self.logger.warning(
+                "Failed to refresh scan activity TTL in Redis",
+                error=str(redis_error),
+                cache_key=cache_key,
+            )
+
+    async def _clear_scan_activity(self, cache_key: str) -> None:
+        if not self.redis:
+            return
+
+        redis_key = f"opportunity_scan_active:{cache_key}"
+        try:
+            await self.redis.delete(redis_key)
+            self.logger.info(
+                "Cleared scan activity flag in Redis",
+                cache_key=cache_key,
+            )
+        except Exception as redis_error:
+            self.logger.warning(
+                "Failed to clear scan activity flag in Redis",
+                error=str(redis_error),
+                cache_key=cache_key,
+            )
+
     async def has_active_scan_task(self, cache_key: str) -> bool:
         """Check if a scan task is still active for the given cache key."""
 
         async with self._scan_tasks_lock:
             task = self._scan_tasks.get(cache_key)
-            if not task:
-                return False
-            return not task.done()
+            if task and not task.done():
+                return True
+
+        if self.redis:
+            try:
+                redis_key = f"opportunity_scan_active:{cache_key}"
+                exists = await self.redis.exists(redis_key)
+                if exists:
+                    return True
+            except Exception as redis_error:
+                self.logger.warning(
+                    "Failed to check Redis for active scan",
+                    error=str(redis_error),
+                    cache_key=cache_key,
+                )
+
+        return False
 
     async def _register_scan_lookup(self, user_id: str, cache_key: str, scan_id: str) -> None:
         async with self._scan_lookup_lock:
@@ -471,14 +550,20 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 await self.redis.setex(redis_lookup_key, ttl_seconds, cache_key)
                 await self.redis.setex(redis_user_key, ttl_seconds, cache_key)
 
-                self.logger.debug("Scan lookup persisted to Redis",
-                                scan_id=scan_id,
-                                cache_key=cache_key,
-                                user_id=user_id)
+                await self._mark_scan_active(cache_key, scan_id)
+
+                self.logger.info(
+                    "Scan lookup persisted to Redis",
+                    scan_id=scan_id,
+                    cache_key=cache_key,
+                    user_id=user_id,
+                )
             except Exception as redis_error:
-                self.logger.warning("Failed to persist scan lookup to Redis",
-                                  error=str(redis_error),
-                                  scan_id=scan_id)
+                self.logger.warning(
+                    "Failed to persist scan lookup to Redis",
+                    error=str(redis_error),
+                    scan_id=scan_id,
+                )
 
     async def _unregister_scan_lookup(self, scan_id: str) -> None:
         """Unregister scan lookup only if cache entry has expired.
