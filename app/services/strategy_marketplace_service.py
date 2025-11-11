@@ -710,6 +710,13 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
                                             error=str(cache_err)
                                         )
                                 return normalized_metrics
+                    
+                    # No usable data produced; fall back to neutral defaults
+                    # This handles cases where:
+                    # - strategy_performance() returned success=False
+                    # - normalized_metrics is None or empty
+                    # - No data available yet for this strategy
+                    return self._get_default_performance_data(strategy_id)
                                 
             except (asyncio.TimeoutError, TimeoutError):
                 # Performance query timed out - use fallback immediately
