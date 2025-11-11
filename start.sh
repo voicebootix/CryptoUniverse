@@ -12,40 +12,116 @@ echo "Port: $PORT"
 # Function to wait for database
 wait_for_db() {
     echo "⏳ Waiting for database connection..."
-    python -c "
+    python - <<'PYTHON'
 import asyncio
 import asyncpg
 import os
+import random
 import time
+import traceback
+from typing import Optional
 from urllib.parse import urlparse
 
-async def wait_for_db():
-    database_url = os.getenv('DATABASE_URL')
-    if not database_url:
-        print('❌ DATABASE_URL not set')
+from app.core.config import get_settings
+from app.core.database import create_ssl_context
+
+
+def parse_bool(value: Optional[str]) -> bool:
+    if value is None:
         return False
-    
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+async def wait_for_db() -> bool:
+    settings = get_settings()
+    database_url = (settings.DATABASE_URL or os.getenv("DATABASE_URL") or "").strip()
+    if not database_url:
+        print("❌ DATABASE_URL not set")
+        return False
+
     parsed = urlparse(database_url)
-    max_attempts = 30
-    attempt = 0
-    
-    while attempt < max_attempts:
+
+    ssl_required = (
+        parse_bool(os.getenv("DATABASE_SSL_REQUIRE"))
+        or getattr(settings, "DATABASE_SSL_REQUIRE", False)
+        or getattr(settings, "DATABASE_SSL_ROOT_CERT", None) is not None
+        or "sslmode=require" in database_url
+        or "supabase" in database_url.lower()
+    )
+
+    ssl_context = None
+    if ssl_required:
         try:
-            conn = await asyncpg.connect(database_url)
-            await conn.execute('SELECT 1')
+            ssl_context = create_ssl_context()
+            print("🔐 SSL context initialized for database connection")
+        except Exception as ssl_error:
+            print(f"❌ Failed to create SSL context: {ssl_error}")
+            traceback.print_exc()
+            return False
+    else:
+        print("ℹ️ Database SSL not required by configuration")
+
+    max_attempts = int(os.getenv("DB_MAX_ATTEMPTS", "15"))
+    base_connect_timeout = float(os.getenv("DB_CONNECT_TIMEOUT", "10"))
+    max_connect_timeout = float(os.getenv("DB_MAX_CONNECT_TIMEOUT", "30"))
+    command_timeout = float(os.getenv("DB_COMMAND_TIMEOUT", "30"))
+    max_retry_delay = float(os.getenv("DB_MAX_RETRY_DELAY", "30"))
+
+    target_details = {
+        "host": parsed.hostname or "(unknown)",
+        "port": parsed.port or 5432,
+        "database": (parsed.path.lstrip("/") or "(default)") if parsed.path else "(default)",
+        "ssl": "enabled" if ssl_context else "disabled",
+    }
+    print(
+        "🔎 Database target:",
+        ", ".join(f"{key}={value}" for key, value in target_details.items()),
+    )
+
+    for attempt in range(1, max_attempts + 1):
+        connect_timeout = min(base_connect_timeout + (attempt - 1) * 5, max_connect_timeout)
+        start_time = time.monotonic()
+        try:
+            conn = await asyncpg.connect(
+                database_url,
+                ssl=ssl_context,
+                timeout=connect_timeout,
+                command_timeout=command_timeout,
+                server_settings={"application_name": "cryptouniverse_startup"},
+            )
+            await conn.execute("SELECT 1")
             await conn.close()
-            print('✅ Database connection successful')
+            elapsed = time.monotonic() - start_time
+            print(
+                f"✅ Database connection successful after {elapsed:.2f}s "
+                f"(attempt {attempt}/{max_attempts})"
+            )
             return True
-        except Exception as e:
-            attempt += 1
-            print(f'🔄 Database connection attempt {attempt}/{max_attempts} failed: {e}')
-            await asyncio.sleep(2)
-    
-    print('❌ Failed to connect to database after all attempts')
+        except Exception as exc:
+            elapsed = time.monotonic() - start_time
+            error_type = type(exc).__name__
+            module = type(exc).__module__
+            if module and module != "builtins":
+                error_type = f"{module}.{error_type}"
+            error_message = str(exc) or repr(exc)
+            print(
+                f"🔄 Database connection attempt {attempt}/{max_attempts} failed "
+                f"({elapsed:.2f}s): {error_type}: {error_message}"
+            )
+            if attempt == max_attempts:
+                break
+
+            delay = min(max_retry_delay, (2 ** (attempt - 1)) + random.uniform(0, 1))
+            await asyncio.sleep(delay)
+
+    print("❌ Failed to connect to database after all attempts")
     return False
 
-asyncio.run(wait_for_db())
-"
+
+if __name__ == "__main__":
+    success = asyncio.run(wait_for_db())
+    raise SystemExit(0 if success else 1)
+PYTHON
     if [ $? -ne 0 ]; then
         echo "❌ Database connection failed"
         exit 1
