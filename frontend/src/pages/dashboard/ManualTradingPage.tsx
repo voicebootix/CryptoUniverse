@@ -49,6 +49,7 @@ import { useUser } from '@/store/authStore';
 import { UserRole } from '@/types/auth';
 import { useExchanges } from '@/hooks/useExchanges';
 import { useStrategies } from '@/hooks/useStrategies';
+import type { TradingStrategy } from '@/hooks/useStrategies';
 import { usePortfolioStore } from '@/hooks/usePortfolio';
 import { useAIConsensus } from '@/hooks/useAIConsensus';
 import { useCredits } from '@/hooks/useCredits';
@@ -208,7 +209,50 @@ const ManualTradingPage: React.FC = () => {
     );
   }
   const { exchanges, aggregatedStats } = useExchanges();
-  const { strategies, availableStrategies, actions: strategyActions, executing: strategyExecuting } = useStrategies();
+  const {
+    strategies,
+    portfolioStrategies,
+    availableStrategies,
+    actions: strategyActions,
+    executing: strategyExecuting
+  } = useStrategies();
+  const strategyOptions = useMemo<TradingStrategy[]>(() => {
+    const options = new Map<string, TradingStrategy>();
+
+    portfolioStrategies.forEach((strategy) => {
+      options.set(strategy.strategy_id, strategy);
+    });
+
+    strategies.forEach((strategy) => {
+      options.set(strategy.strategy_id, strategy);
+    });
+
+    Object.entries(availableStrategies).forEach(([strategyId, metadata]) => {
+      const existing = options.get(strategyId);
+      const fallbackName = metadata.name || strategyId.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
+
+      if (existing) {
+        if (existing.name !== fallbackName) {
+          options.set(strategyId, { ...existing, name: fallbackName });
+        }
+        return;
+      }
+
+      options.set(strategyId, {
+        strategy_id: strategyId,
+        name: fallbackName,
+        status: 'available',
+        is_active: false,
+        total_trades: 0,
+        winning_trades: 0,
+        win_rate: 0,
+        total_pnl: 0,
+        created_at: '1970-01-01T00:00:00.000Z',
+      });
+    });
+
+    return Array.from(options.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [portfolioStrategies, strategies, availableStrategies]);
   const {
     totalValue,
     availableBalance,
@@ -449,14 +493,14 @@ const ManualTradingPage: React.FC = () => {
   }, []);
 
   const selectAllStrategies = useCallback(() => {
-    if (!strategies.length) {
+    if (!strategyOptions.length) {
       return;
     }
     setScanFilters((prev) => {
-      const combined = new Set([...prev.strategyIds, ...strategies.map((strategy) => strategy.strategy_id)]);
+      const combined = new Set([...prev.strategyIds, ...strategyOptions.map((strategy) => strategy.strategy_id)]);
       return { ...prev, strategyIds: Array.from(combined) };
     });
-  }, [strategies]);
+  }, [strategyOptions]);
 
   const clearStrategies = useCallback(() => {
     setScanFilters((prev) => ({ ...prev, strategyIds: [] }));
@@ -2350,7 +2394,7 @@ const ManualTradingPage: React.FC = () => {
                           variant="ghost"
                           size="sm"
                           onClick={selectAllStrategies}
-                          disabled={!strategies.length}
+                          disabled={!strategyOptions.length}
                         >
                           Select all
                         </Button>
@@ -2367,10 +2411,10 @@ const ManualTradingPage: React.FC = () => {
                     </div>
                     <ScrollArea className="max-h-48 rounded-md border">
                       <div className="space-y-2 p-3">
-                        {strategies.length === 0 ? (
-                          <p className="text-sm text-muted-foreground">No active strategies available.</p>
+                        {strategyOptions.length === 0 ? (
+                          <p className="text-sm text-muted-foreground">No strategies available.</p>
                         ) : (
-                          strategies.map((strategy) => (
+                          strategyOptions.map((strategy) => (
                             <label
                               key={strategy.strategy_id}
                               className="flex items-start gap-3 rounded-md p-2 transition-colors hover:bg-muted/60"
