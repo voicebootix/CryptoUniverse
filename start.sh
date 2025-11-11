@@ -19,7 +19,7 @@ import os
 import random
 import time
 import traceback
-from typing import Optional
+from typing import Optional, Tuple
 from urllib.parse import urlparse
 
 from app.core.config import get_settings
@@ -30,6 +30,22 @@ def parse_bool(value: Optional[str]) -> bool:
     if value is None:
         return False
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+async def tcp_probe(host: str, port: int, timeout: float) -> Tuple[bool, Optional[BaseException]]:
+    try:
+        _reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port), timeout=timeout
+        )
+    except BaseException as exc:  # noqa: BLE001 - surface any failure
+        return False, exc
+
+    writer.close()
+    try:
+        await writer.wait_closed()
+    except Exception:  # noqa: BLE001 - ignore close errors during probe
+        pass
+    return True, None
 
 
 async def wait_for_db() -> bool:
@@ -66,10 +82,16 @@ async def wait_for_db() -> bool:
     max_connect_timeout = float(os.getenv("DB_MAX_CONNECT_TIMEOUT", "30"))
     command_timeout = float(os.getenv("DB_COMMAND_TIMEOUT", "30"))
     max_retry_delay = float(os.getenv("DB_MAX_RETRY_DELAY", "30"))
+    tcp_probe_timeout = float(os.getenv("DB_TCP_TIMEOUT", "3"))
+    warm_pool = parse_bool(os.getenv("DB_WARM_POOL", "true"))
+    pool_min_size = int(os.getenv("DB_POOL_MIN_SIZE", "1"))
+    pool_max_size = int(os.getenv("DB_POOL_MAX_SIZE", "5"))
 
+    host = parsed.hostname or "localhost"
+    port = parsed.port or 5432
     target_details = {
-        "host": parsed.hostname or "(unknown)",
-        "port": parsed.port or 5432,
+        "host": host,
+        "port": port,
         "database": (parsed.path.lstrip("/") or "(default)") if parsed.path else "(default)",
         "ssl": "enabled" if ssl_context else "disabled",
     }
@@ -81,6 +103,19 @@ async def wait_for_db() -> bool:
     for attempt in range(1, max_attempts + 1):
         connect_timeout = min(base_connect_timeout + (attempt - 1) * 5, max_connect_timeout)
         start_time = time.monotonic()
+        tcp_ok, tcp_error = await tcp_probe(host, port, tcp_probe_timeout)
+        if not tcp_ok:
+            elapsed = time.monotonic() - start_time
+            print(
+                f"🚫 Database port probe failed ({elapsed:.2f}s) on attempt "
+                f"{attempt}/{max_attempts}: {type(tcp_error).__name__}: {tcp_error}"
+            )
+            if attempt == max_attempts:
+                break
+
+            delay = min(max_retry_delay, (2 ** (attempt - 1)) + random.uniform(0, 1))
+            await asyncio.sleep(delay)
+            continue
         try:
             conn = await asyncpg.connect(
                 database_url,
@@ -91,6 +126,33 @@ async def wait_for_db() -> bool:
             )
             await conn.execute("SELECT 1")
             await conn.close()
+            if warm_pool:
+                pool = None
+                try:
+                    pool = await asyncpg.create_pool(
+                        database_url,
+                        ssl=ssl_context,
+                        min_size=pool_min_size,
+                        max_size=pool_max_size,
+                        command_timeout=command_timeout,
+                        timeout=connect_timeout,
+                        server_settings={"application_name": "cryptouniverse_startup_pool"},
+                    )
+                    async with pool.acquire() as pooled_conn:
+                        await pooled_conn.execute("SELECT 1")
+                except Exception as pool_exc:  # noqa: BLE001
+                    print(
+                        "⚠️ Database pool warm-up failed: "
+                        f"{type(pool_exc).__name__}: {pool_exc}"
+                    )
+                else:
+                    print(
+                        "💠 Database pool warm-up successful "
+                        f"(min_size={pool_min_size}, max_size={pool_max_size})"
+                    )
+                finally:
+                    if pool is not None:
+                        await pool.close()
             elapsed = time.monotonic() - start_time
             print(
                 f"✅ Database connection successful after {elapsed:.2f}s "
@@ -124,8 +186,10 @@ if __name__ == "__main__":
 PYTHON
     if [ $? -ne 0 ]; then
         echo "❌ Database connection failed"
-        exit 1
+        return 1
     fi
+
+    return 0
 }
 
 # Function to wait for Redis
@@ -164,8 +228,10 @@ wait_for_redis()
 "
     if [ $? -ne 0 ]; then
         echo "❌ Redis connection failed"
-        exit 1
+        return 1
     fi
+
+    return 0
 }
 
 # Function to run database migrations
@@ -182,9 +248,28 @@ run_migrations() {
 # Pre-flight checks
 echo "🔍 Running pre-flight checks..."
 
-# Wait for dependencies
-wait_for_db
-wait_for_redis
+# Wait for dependencies in parallel
+wait_for_db &
+DB_PID=$!
+wait_for_redis &
+REDIS_PID=$!
+
+set +e
+wait "$DB_PID"
+DB_STATUS=$?
+wait "$REDIS_PID"
+REDIS_STATUS=$?
+set -e
+
+if [ "$DB_STATUS" -ne 0 ]; then
+    echo "❌ Database readiness checks failed"
+    exit "$DB_STATUS"
+fi
+
+if [ "$REDIS_STATUS" -ne 0 ]; then
+    echo "❌ Redis readiness checks failed"
+    exit "$REDIS_STATUS"
+fi
 
 # Run migrations in production
 if [ "$ENVIRONMENT" = "production" ]; then
