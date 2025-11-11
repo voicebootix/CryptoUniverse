@@ -454,6 +454,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
         task.add_done_callback(_cleanup)
 
+<<<<<<< HEAD
     async def _mark_scan_active(self, cache_key: str, scan_id: str) -> None:
         if not self.redis:
             return
