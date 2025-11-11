@@ -49,6 +49,7 @@ import { useUser } from '@/store/authStore';
 import { UserRole } from '@/types/auth';
 import { useExchanges } from '@/hooks/useExchanges';
 import { useStrategies } from '@/hooks/useStrategies';
+import type { TradingStrategy } from '@/hooks/useStrategies';
 import { usePortfolioStore } from '@/hooks/usePortfolio';
 import { useAIConsensus } from '@/hooks/useAIConsensus';
 import { useCredits } from '@/hooks/useCredits';
@@ -175,40 +176,66 @@ const ASSET_TIER_OPTIONS = [
 const ManualTradingPage: React.FC = () => {
   const user = useUser();
   const { toast } = useToast();
-
-  // Access control: Only TRADER and ADMIN roles can access Manual Trading
-  if (!user || (user.role !== UserRole.TRADER && user.role !== UserRole.ADMIN)) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center p-4">
-        <Card className="w-full max-w-md">
-          <CardHeader className="text-center">
-            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-orange-100 dark:bg-orange-900/20">
-              <Shield className="h-6 w-6 text-orange-600 dark:text-orange-400" />
-            </div>
-            <CardTitle className="text-xl">Access Restricted</CardTitle>
-            <CardDescription>
-              Manual Trading is only available for traders and administrators.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="text-center text-sm text-muted-foreground">
-              <p>Your current role: <Badge variant="outline">{user?.role || 'Unknown'}</Badge></p>
-              <p className="mt-2">Please contact an administrator to upgrade your account if you need access to trading features.</p>
-            </div>
-            <Button 
-              onClick={() => window.history.back()} 
-              className="w-full"
-              variant="outline"
-            >
-              Go Back
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+  const isAuthorized = !!user && (user.role === UserRole.TRADER || user.role === UserRole.ADMIN);
   const { exchanges, aggregatedStats } = useExchanges();
-  const { strategies, availableStrategies, actions: strategyActions, executing: strategyExecuting } = useStrategies();
+  const {
+    strategies,
+    portfolioStrategies,
+    availableStrategies,
+    actions: strategyActions,
+    executing: strategyExecuting
+  } = useStrategies();
+  const strategyOptions = useMemo<TradingStrategy[]>(() => {
+    const formatStrategyName = (strategyId: string) =>
+      strategyId
+        .split('_')
+        .map((segment) => {
+          if (segment.length <= 3 && segment.toLowerCase() === 'ai') {
+            return segment.toUpperCase();
+          }
+          if (!segment) {
+            return segment;
+          }
+          return segment.charAt(0).toUpperCase() + segment.slice(1);
+        })
+        .join(' ');
+
+    const options = new Map<string, TradingStrategy>();
+
+    portfolioStrategies.forEach((strategy) => {
+      options.set(strategy.strategy_id, strategy);
+    });
+
+    strategies.forEach((strategy) => {
+      options.set(strategy.strategy_id, strategy);
+    });
+
+    Object.entries(availableStrategies).forEach(([strategyId, metadata]) => {
+      const fallbackName = metadata.name || formatStrategyName(strategyId);
+      const existing = options.get(strategyId);
+
+      if (existing) {
+        if (!existing.name || existing.name === existing.strategy_id || existing.name !== fallbackName) {
+          options.set(strategyId, { ...existing, name: fallbackName });
+        }
+        return;
+      }
+
+      options.set(strategyId, {
+        strategy_id: strategyId,
+        name: fallbackName,
+        status: 'available',
+        is_active: false,
+        total_trades: 0,
+        winning_trades: 0,
+        win_rate: 0,
+        total_pnl: 0,
+        created_at: '1970-01-01T00:00:00.000Z',
+      });
+    });
+
+    return Array.from(options.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [portfolioStrategies, strategies, availableStrategies]);
   const {
     totalValue,
     availableBalance,
@@ -449,14 +476,14 @@ const ManualTradingPage: React.FC = () => {
   }, []);
 
   const selectAllStrategies = useCallback(() => {
-    if (!strategies.length) {
+    if (!strategyOptions.length) {
       return;
     }
     setScanFilters((prev) => {
-      const combined = new Set([...prev.strategyIds, ...strategies.map((strategy) => strategy.strategy_id)]);
+      const combined = new Set([...prev.strategyIds, ...strategyOptions.map((strategy) => strategy.strategy_id)]);
       return { ...prev, strategyIds: Array.from(combined) };
     });
-  }, [strategies]);
+  }, [strategyOptions]);
 
   const clearStrategies = useCallback(() => {
     setScanFilters((prev) => ({ ...prev, strategyIds: [] }));
@@ -1940,6 +1967,37 @@ const ManualTradingPage: React.FC = () => {
     }
   }, [marketData]);
 
+  if (!isAuthorized) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-4">
+        <Card className="w-full max-w-md">
+          <CardHeader className="text-center">
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-orange-100 dark:bg-orange-900/20">
+              <Shield className="h-6 w-6 text-orange-600 dark:text-orange-400" />
+            </div>
+            <CardTitle className="text-xl">Access Restricted</CardTitle>
+            <CardDescription>
+              Manual Trading is only available for traders and administrators.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="text-center text-sm text-muted-foreground">
+              <p>Your current role: <Badge variant="outline">{user?.role || 'Unknown'}</Badge></p>
+              <p className="mt-2">Please contact an administrator to upgrade your account if you need access to trading features.</p>
+            </div>
+            <Button
+              onClick={() => window.history.back()}
+              className="w-full"
+              variant="outline"
+            >
+              Go Back
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="h-full flex flex-col">
       {/* Header Section */}
@@ -2350,7 +2408,7 @@ const ManualTradingPage: React.FC = () => {
                           variant="ghost"
                           size="sm"
                           onClick={selectAllStrategies}
-                          disabled={!strategies.length}
+                          disabled={!strategyOptions.length}
                         >
                           Select all
                         </Button>
@@ -2367,10 +2425,10 @@ const ManualTradingPage: React.FC = () => {
                     </div>
                     <ScrollArea className="max-h-48 rounded-md border">
                       <div className="space-y-2 p-3">
-                        {strategies.length === 0 ? (
-                          <p className="text-sm text-muted-foreground">No active strategies available.</p>
+                        {strategyOptions.length === 0 ? (
+                          <p className="text-sm text-muted-foreground">No strategies available.</p>
                         ) : (
-                          strategies.map((strategy) => (
+                          strategyOptions.map((strategy) => (
                             <label
                               key={strategy.strategy_id}
                               className="flex items-start gap-3 rounded-md p-2 transition-colors hover:bg-muted/60"

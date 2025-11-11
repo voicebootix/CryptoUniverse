@@ -47,8 +47,10 @@ export interface StrategyConfigRequest {
 
 export const useStrategies = () => {
   const [strategies, setStrategies] = useState<TradingStrategy[]>([]);
+  const [portfolioStrategies, setPortfolioStrategies] = useState<TradingStrategy[]>([]);
   const [availableStrategies, setAvailableStrategies] = useState<Record<string, AvailableStrategy>>({});
   const [loading, setLoading] = useState(false);
+  const [portfolioLoading, setPortfolioLoading] = useState(false);
   const [executing, setExecuting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
@@ -58,10 +60,10 @@ export const useStrategies = () => {
     try {
       setLoading(true);
       setError(null);
-      
+
       const response = await apiClient.get('/strategies/list');
       setStrategies(response.data);
-      
+
     } catch (err: any) {
       const errorMsg = err.response?.data?.detail || 'Failed to fetch strategies';
       setError(errorMsg);
@@ -72,6 +74,156 @@ export const useStrategies = () => {
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchPortfolioStrategies = async () => {
+    try {
+      setPortfolioLoading(true);
+      setError(null);
+
+      const response = await apiClient.get('/strategies/my-portfolio');
+      const data = response.data ?? {};
+
+      const candidateLists: any[][] = [];
+
+      if (Array.isArray(data.active_strategies)) {
+        candidateLists.push(data.active_strategies);
+      }
+
+      if (Array.isArray(data.strategies)) {
+        candidateLists.push(data.strategies);
+      }
+
+      if (Array.isArray(data.provisioned_strategies)) {
+        candidateLists.push(data.provisioned_strategies);
+      }
+
+      if (Array.isArray(data.available_strategies)) {
+        candidateLists.push(data.available_strategies);
+      }
+
+      if (Array.isArray(data.summary?.strategies)) {
+        candidateLists.push(data.summary.strategies);
+      }
+
+      if (Array.isArray(data.portfolio?.strategies)) {
+        candidateLists.push(data.portfolio.strategies);
+      }
+
+      if (Array.isArray(data.portfolio?.active_strategies)) {
+        candidateLists.push(data.portfolio.active_strategies);
+      }
+
+      const formatStrategyId = (strategyId: string) =>
+        strategyId
+          .split('_')
+          .map((segment) => {
+            if (segment.length <= 3 && segment.toLowerCase() === 'ai') {
+              return segment.toUpperCase();
+            }
+            if (!segment) {
+              return segment;
+            }
+            return segment.charAt(0).toUpperCase() + segment.slice(1);
+          })
+          .join(' ');
+
+      const normalizedMap = new Map<string, TradingStrategy>();
+
+      candidateLists.flat().forEach((strategy: any) => {
+        if (!strategy || typeof strategy !== 'object') {
+          return;
+        }
+
+        const rawId =
+          strategy.strategy_id ||
+          strategy.strategyId ||
+          strategy.id ||
+          strategy.strategy_name ||
+          strategy.name ||
+          null;
+
+        const strategyId = typeof rawId === 'string' ? rawId : null;
+
+        if (!strategyId) {
+          return;
+        }
+
+        const existing = normalizedMap.get(strategyId) ?? {};
+        const rawName =
+          strategy.name ||
+          strategy.strategy_name ||
+          existing.name ||
+          formatStrategyId(strategyId);
+
+        const rawStatus =
+          typeof strategy.status === 'string'
+            ? strategy.status
+            : strategy.is_active === false
+              ? 'inactive'
+              : 'active';
+
+        const normalized: TradingStrategy = {
+          strategy_id: strategyId,
+          name: rawName,
+          status: rawStatus,
+          is_active: strategy.is_active ?? existing.is_active ?? rawStatus === 'active',
+          total_trades:
+            strategy.total_trades ??
+            strategy.metrics?.total_trades ??
+            existing.total_trades ??
+            0,
+          winning_trades:
+            strategy.winning_trades ??
+            strategy.metrics?.winning_trades ??
+            existing.winning_trades ??
+            0,
+          win_rate:
+            strategy.win_rate ??
+            strategy.metrics?.win_rate ??
+            existing.win_rate ??
+            0,
+          total_pnl:
+            strategy.total_pnl_usd ??
+            strategy.total_pnl ??
+            strategy.metrics?.total_pnl_usd ??
+            existing.total_pnl ??
+            0,
+          sharpe_ratio:
+            strategy.sharpe_ratio ??
+            strategy.metrics?.sharpe_ratio ??
+            existing.sharpe_ratio,
+          created_at:
+            strategy.activated_at ||
+            strategy.created_at ||
+            existing.created_at ||
+            '1970-01-01T00:00:00.000Z',
+          last_executed_at:
+            strategy.last_executed_at ||
+            strategy.last_execution_at ||
+            existing.last_executed_at,
+        };
+
+        normalizedMap.set(strategyId, normalized);
+      });
+
+      const normalizedStrategies = Array.from(normalizedMap.values()).sort((a, b) =>
+        a.name.localeCompare(b.name)
+      );
+
+      setPortfolioStrategies(normalizedStrategies);
+    } catch (err: any) {
+      const errorMsg = err.response?.data?.detail || 'Failed to fetch portfolio strategies';
+      setError(errorMsg);
+      toast({
+        title: "Error",
+        description: "Failed to load portfolio strategies",
+        variant: "destructive",
+      });
+      console.warn('Failed to fetch portfolio strategies:', err?.response?.data ?? err);
+    } finally {
+      setPortfolioLoading(false);
     }
   };
 
@@ -124,7 +276,7 @@ export const useStrategies = () => {
         });
 
         // Refresh strategies list to update metrics
-        await fetchStrategies();
+        await Promise.all([fetchStrategies(), fetchPortfolioStrategies()]);
         
         return result;
       } else {
@@ -163,7 +315,7 @@ export const useStrategies = () => {
         });
 
         // Refresh strategies list
-        await fetchStrategies();
+        await Promise.all([fetchStrategies(), fetchPortfolioStrategies()]);
         
         return response.data;
       } else {
@@ -199,12 +351,14 @@ export const useStrategies = () => {
         });
 
         // Update local state
-        setStrategies(prev => prev.map(strategy => 
-          strategy.strategy_id === strategyId 
+        setStrategies(prev => prev.map(strategy =>
+          strategy.strategy_id === strategyId
             ? { ...strategy, is_active: true, status: 'active' }
             : strategy
         ));
-        
+
+        await fetchPortfolioStrategies();
+
         return response.data;
       }
       
@@ -232,12 +386,14 @@ export const useStrategies = () => {
         });
 
         // Update local state
-        setStrategies(prev => prev.map(strategy => 
-          strategy.strategy_id === strategyId 
+        setStrategies(prev => prev.map(strategy =>
+          strategy.strategy_id === strategyId
             ? { ...strategy, is_active: false, status: 'inactive' }
             : strategy
         ));
-        
+
+        await fetchPortfolioStrategies();
+
         return response.data;
       }
       
@@ -271,17 +427,21 @@ export const useStrategies = () => {
   // Load data on mount
   useEffect(() => {
     fetchStrategies();
+    fetchPortfolioStrategies();
     fetchAvailableStrategies();
   }, []);
 
   return {
     strategies,
+    portfolioStrategies,
     availableStrategies,
     loading,
     executing,
+    portfolioLoading,
     error,
     actions: {
       fetchStrategies,
+      fetchPortfolioStrategies,
       executeStrategy,
       configureStrategy,
       activateStrategy,
