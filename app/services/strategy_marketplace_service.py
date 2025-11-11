@@ -894,48 +894,96 @@ class StrategyMarketplaceService(DatabaseSessionMixin, LoggerMixin):
 
         return badge_map.get(normalized_quality, ["Simulated / No live trades"])
     
-    async def _get_backtest_results(self, strategy_func: str) -> Dict[str, Any]:
-        """Get REAL backtesting results using actual market data."""
-
+    async def _get_backtest_results(self, strategy_func: str, use_cache: bool = True) -> Dict[str, Any]:
+        """
+        Get backtesting results with caching and timeout protection.
+        
+        PERFORMANCE FIX: Backtests are expensive and don't change frequently.
+        - Uses Redis cache (24 hour TTL) to avoid re-running backtests
+        - Has 5 second timeout to prevent blocking marketplace loading
+        - Falls back to realistic mock data if backtest fails or times out
+        """
+        
+        cache_key = f"backtest_results:ai_{strategy_func}"
+        
+        # Try cache first (24 hour TTL - backtests don't change often)
+        if use_cache:
+            try:
+                from app.core.redis import get_redis_client
+                redis_client = await get_redis_client()
+                cached_result = await redis_client.get(cache_key)
+                if cached_result:
+                    try:
+                        if isinstance(cached_result, bytes):
+                            cached_result = cached_result.decode('utf-8')
+                        if isinstance(cached_result, str):
+                            cached_data = json.loads(cached_result)
+                            self.logger.debug(f"Using cached backtest results for {strategy_func}")
+                            return cached_data
+                    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+                        self.logger.warning(f"Failed to decode cached backtest data for {strategy_func}", error=str(e))
+                        # Continue to regenerate
+            except Exception as e:
+                self.logger.warning(f"Cache check failed for {strategy_func}, continuing", error=str(e))
+        
+        # Try to get real backtest results with timeout protection
         try:
             # Use the new real backtesting engine
             from app.services.real_backtesting_engine import real_backtesting_engine
-
-            # Get ALL available symbols from market data service
-            from app.services.real_market_data import real_market_data_service
-
+            
             # Use top traded pairs across multiple asset classes
             backtest_symbols = [
                 "BTC/USDT", "ETH/USDT", "BNB/USDT",  # Large caps
                 "SOL/USDT", "ADA/USDT", "DOT/USDT",   # Mid caps
-                "MATIC/USDT", "LINK/USDT", "UNI/USDT", # DeFi
-                "ATOM/USDT", "AVAX/USDT", "NEAR/USDT"  # Layer 1s
             ]
-
-            # Run backtest with real market data on diverse assets
-            backtest_result = await real_backtesting_engine.run_backtest(
-                strategy_id=f"ai_{strategy_func}",
-                strategy_func=strategy_func,
-                start_date="2023-01-01",
-                end_date="2024-01-01",
-                symbols=backtest_symbols[:6],  # Use 6 diverse symbols for performance
-                initial_capital=10000
-            )
             
-            if backtest_result.get("success"):
-                # Check if results exist and are valid
-                if "results" in backtest_result and backtest_result["results"]:
-                    return backtest_result["results"]
-                elif backtest_result.get("results") is not None:
-                    # Results exist but might be empty - still valid
-                    return backtest_result["results"]
-                else:
-                    # Success but no results - use the full result
-                    return backtest_result
-            else:
-                # Backtest failed - use fallback
-                self.logger.warning(f"Backtest failed for {strategy_func}, using fallback", 
-                                  error=backtest_result.get("error", "Unknown error"))
+            # CRITICAL PERFORMANCE FIX: Add timeout to prevent blocking
+            # Marketplace should load quickly, backtests can be slow
+            try:
+                # Use async timeout to prevent blocking marketplace loading
+                async with async_timeout(5.0):  # 5 second max timeout
+                    backtest_result = await real_backtesting_engine.run_backtest(
+                        strategy_id=f"ai_{strategy_func}",
+                        strategy_func=strategy_func,
+                        start_date="2023-01-01",
+                        end_date="2024-01-01",
+                        symbols=backtest_symbols[:3],  # Reduced to 3 symbols for faster execution
+                        initial_capital=10000
+                    )
+                    
+                    if backtest_result.get("success"):
+                        # Check if results exist and are valid
+                        result_data = None
+                        if "results" in backtest_result and backtest_result["results"]:
+                            result_data = backtest_result["results"]
+                        elif backtest_result.get("results") is not None:
+                            result_data = backtest_result["results"]
+                        else:
+                            result_data = backtest_result
+                        
+                        # Cache successful results
+                        if use_cache and result_data:
+                            try:
+                                from app.core.redis import get_redis_client
+                                redis_client = await get_redis_client()
+                                await redis_client.setex(
+                                    cache_key,
+                                    86400,  # 24 hours
+                                    json.dumps(result_data, default=str)
+                                )
+                            except Exception as cache_err:
+                                self.logger.warning(f"Failed to cache backtest results for {strategy_func}", error=str(cache_err))
+                        
+                        return result_data
+                    else:
+                        # Backtest failed - use fallback
+                        self.logger.warning(f"Backtest failed for {strategy_func}, using fallback", 
+                                          error=backtest_result.get("error", "Unknown error"))
+                        return self._get_realistic_backtest_by_strategy(strategy_func)
+                        
+            except (asyncio.TimeoutError, TimeoutError):
+                # Backtest timed out - use fallback immediately
+                self.logger.warning(f"Backtest timeout for {strategy_func} (5s), using fallback")
                 return self._get_realistic_backtest_by_strategy(strategy_func)
                 
         except Exception as e:
