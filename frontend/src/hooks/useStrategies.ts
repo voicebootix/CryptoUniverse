@@ -47,8 +47,10 @@ export interface StrategyConfigRequest {
 
 export const useStrategies = () => {
   const [strategies, setStrategies] = useState<TradingStrategy[]>([]);
+  const [portfolioStrategies, setPortfolioStrategies] = useState<TradingStrategy[]>([]);
   const [availableStrategies, setAvailableStrategies] = useState<Record<string, AvailableStrategy>>({});
   const [loading, setLoading] = useState(false);
+  const [portfolioLoading, setPortfolioLoading] = useState(false);
   const [executing, setExecuting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
@@ -58,10 +60,10 @@ export const useStrategies = () => {
     try {
       setLoading(true);
       setError(null);
-      
+
       const response = await apiClient.get('/strategies/list');
       setStrategies(response.data);
-      
+
     } catch (err: any) {
       const errorMsg = err.response?.data?.detail || 'Failed to fetch strategies';
       setError(errorMsg);
@@ -72,6 +74,44 @@ export const useStrategies = () => {
       });
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchPortfolioStrategies = async () => {
+    try {
+      setPortfolioLoading(true);
+      setError(null);
+
+      const response = await apiClient.get('/strategies/my-portfolio');
+      const activeStrategies = Array.isArray(response.data?.active_strategies)
+        ? response.data.active_strategies
+        : [];
+
+      const normalized = activeStrategies.map((strategy: any) => ({
+        strategy_id: strategy.strategy_id,
+        name: strategy.name || strategy.strategy_id,
+        status: strategy.is_active ? 'active' : 'inactive',
+        is_active: strategy.is_active ?? true,
+        total_trades: strategy.total_trades ?? 0,
+        winning_trades: strategy.winning_trades ?? 0,
+        win_rate: strategy.win_rate ?? 0,
+        total_pnl: strategy.total_pnl_usd ?? 0,
+        created_at: strategy.activated_at || '1970-01-01T00:00:00.000Z',
+        last_executed_at: strategy.last_executed_at || undefined,
+      }));
+
+      setPortfolioStrategies(normalized);
+    } catch (err: any) {
+      const errorMsg = err.response?.data?.detail || 'Failed to fetch portfolio strategies';
+      setError(errorMsg);
+      toast({
+        title: "Error",
+        description: "Failed to load portfolio strategies",
+        variant: "destructive",
+      });
+      console.warn('Failed to fetch portfolio strategies:', err?.response?.data ?? err);
+    } finally {
+      setPortfolioLoading(false);
     }
   };
 
@@ -124,7 +164,7 @@ export const useStrategies = () => {
         });
 
         // Refresh strategies list to update metrics
-        await fetchStrategies();
+        await Promise.all([fetchStrategies(), fetchPortfolioStrategies()]);
         
         return result;
       } else {
@@ -163,7 +203,7 @@ export const useStrategies = () => {
         });
 
         // Refresh strategies list
-        await fetchStrategies();
+        await Promise.all([fetchStrategies(), fetchPortfolioStrategies()]);
         
         return response.data;
       } else {
@@ -199,12 +239,14 @@ export const useStrategies = () => {
         });
 
         // Update local state
-        setStrategies(prev => prev.map(strategy => 
-          strategy.strategy_id === strategyId 
+        setStrategies(prev => prev.map(strategy =>
+          strategy.strategy_id === strategyId
             ? { ...strategy, is_active: true, status: 'active' }
             : strategy
         ));
-        
+
+        await fetchPortfolioStrategies();
+
         return response.data;
       }
       
@@ -232,12 +274,14 @@ export const useStrategies = () => {
         });
 
         // Update local state
-        setStrategies(prev => prev.map(strategy => 
-          strategy.strategy_id === strategyId 
+        setStrategies(prev => prev.map(strategy =>
+          strategy.strategy_id === strategyId
             ? { ...strategy, is_active: false, status: 'inactive' }
             : strategy
         ));
-        
+
+        await fetchPortfolioStrategies();
+
         return response.data;
       }
       
@@ -271,17 +315,21 @@ export const useStrategies = () => {
   // Load data on mount
   useEffect(() => {
     fetchStrategies();
+    fetchPortfolioStrategies();
     fetchAvailableStrategies();
   }, []);
 
   return {
     strategies,
+    portfolioStrategies,
     availableStrategies,
     loading,
     executing,
+    portfolioLoading,
     error,
     actions: {
       fetchStrategies,
+      fetchPortfolioStrategies,
       executeStrategy,
       configureStrategy,
       activateStrategy,
