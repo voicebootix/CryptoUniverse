@@ -188,26 +188,41 @@ const ManualTradingPage: React.FC = () => {
   const strategyOptions = useMemo<TradingStrategy[]>(() => {
     const options = new Map<string, TradingStrategy>();
 
+    // Add portfolio strategies first
     portfolioStrategies.forEach((strategy) => {
       options.set(strategy.strategy_id, strategy);
     });
 
+    // Add configured strategies (may overwrite portfolio strategies)
     strategies.forEach((strategy) => {
       options.set(strategy.strategy_id, strategy);
     });
 
+    // Enrich with marketplace metadata and add marketplace-only strategies
     Object.entries(availableStrategies).forEach(([strategyId, metadata]) => {
       const existing = options.get(strategyId);
+      const fallbackName = metadata.name || strategyId.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
 
-      if (!existing) {
+      if (existing) {
+        // Update name if it's different
+        if (existing.name !== fallbackName) {
+          options.set(strategyId, { ...existing, name: fallbackName });
+        }
         return;
       }
 
-      const fallbackName = metadata.name || strategyId.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
-
-      if (existing.name !== fallbackName) {
-        options.set(strategyId, { ...existing, name: fallbackName });
-      }
+      // Add marketplace strategy that's not in portfolio or configured
+      options.set(strategyId, {
+        strategy_id: strategyId,
+        name: fallbackName,
+        status: 'available',
+        is_active: false,
+        total_trades: 0,
+        winning_trades: 0,
+        win_rate: 0,
+        total_pnl: 0,
+        created_at: '1970-01-01T00:00:00.000Z',
+      });
     });
 
     return Array.from(options.values()).sort((a, b) => a.name.localeCompare(b.name));
