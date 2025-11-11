@@ -176,38 +176,7 @@ const ASSET_TIER_OPTIONS = [
 const ManualTradingPage: React.FC = () => {
   const user = useUser();
   const { toast } = useToast();
-
-  // Access control: Only TRADER and ADMIN roles can access Manual Trading
-  if (!user || (user.role !== UserRole.TRADER && user.role !== UserRole.ADMIN)) {
-    return (
-      <div className="min-h-screen bg-background flex items-center justify-center p-4">
-        <Card className="w-full max-w-md">
-          <CardHeader className="text-center">
-            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-orange-100 dark:bg-orange-900/20">
-              <Shield className="h-6 w-6 text-orange-600 dark:text-orange-400" />
-            </div>
-            <CardTitle className="text-xl">Access Restricted</CardTitle>
-            <CardDescription>
-              Manual Trading is only available for traders and administrators.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="text-center text-sm text-muted-foreground">
-              <p>Your current role: <Badge variant="outline">{user?.role || 'Unknown'}</Badge></p>
-              <p className="mt-2">Please contact an administrator to upgrade your account if you need access to trading features.</p>
-            </div>
-            <Button 
-              onClick={() => window.history.back()} 
-              className="w-full"
-              variant="outline"
-            >
-              Go Back
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+  const isAuthorized = !!user && (user.role === UserRole.TRADER || user.role === UserRole.ADMIN);
   const { exchanges, aggregatedStats } = useExchanges();
   const {
     strategies,
@@ -229,26 +198,16 @@ const ManualTradingPage: React.FC = () => {
 
     Object.entries(availableStrategies).forEach(([strategyId, metadata]) => {
       const existing = options.get(strategyId);
-      const fallbackName = metadata.name || strategyId.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
 
-      if (existing) {
-        if (existing.name !== fallbackName) {
-          options.set(strategyId, { ...existing, name: fallbackName });
-        }
+      if (!existing) {
         return;
       }
 
-      options.set(strategyId, {
-        strategy_id: strategyId,
-        name: fallbackName,
-        status: 'available',
-        is_active: false,
-        total_trades: 0,
-        winning_trades: 0,
-        win_rate: 0,
-        total_pnl: 0,
-        created_at: '1970-01-01T00:00:00.000Z',
-      });
+      const fallbackName = metadata.name || strategyId.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
+
+      if (existing.name !== fallbackName) {
+        options.set(strategyId, { ...existing, name: fallbackName });
+      }
     });
 
     return Array.from(options.values()).sort((a, b) => a.name.localeCompare(b.name));
@@ -1983,6 +1942,37 @@ const ManualTradingPage: React.FC = () => {
       });
     }
   }, [marketData]);
+
+  if (!isAuthorized) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center p-4">
+        <Card className="w-full max-w-md">
+          <CardHeader className="text-center">
+            <div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-orange-100 dark:bg-orange-900/20">
+              <Shield className="h-6 w-6 text-orange-600 dark:text-orange-400" />
+            </div>
+            <CardTitle className="text-xl">Access Restricted</CardTitle>
+            <CardDescription>
+              Manual Trading is only available for traders and administrators.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="text-center text-sm text-muted-foreground">
+              <p>Your current role: <Badge variant="outline">{user?.role || 'Unknown'}</Badge></p>
+              <p className="mt-2">Please contact an administrator to upgrade your account if you need access to trading features.</p>
+            </div>
+            <Button
+              onClick={() => window.history.back()}
+              className="w-full"
+              variant="outline"
+            >
+              Go Back
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="h-full flex flex-col">

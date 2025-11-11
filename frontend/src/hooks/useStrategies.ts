@@ -50,6 +50,7 @@ export const useStrategies = () => {
   const [portfolioStrategies, setPortfolioStrategies] = useState<TradingStrategy[]>([]);
   const [availableStrategies, setAvailableStrategies] = useState<Record<string, AvailableStrategy>>({});
   const [loading, setLoading] = useState(false);
+  const [portfolioLoading, setPortfolioLoading] = useState(false);
   const [executing, setExecuting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { toast } = useToast();
@@ -78,6 +79,9 @@ export const useStrategies = () => {
 
   const fetchPortfolioStrategies = async () => {
     try {
+      setPortfolioLoading(true);
+      setError(null);
+
       const response = await apiClient.get('/strategies/my-portfolio');
       const activeStrategies = Array.isArray(response.data?.active_strategies)
         ? response.data.active_strategies
@@ -97,8 +101,17 @@ export const useStrategies = () => {
       }));
 
       setPortfolioStrategies(normalized);
-    } catch (err) {
-      console.warn('Failed to fetch portfolio strategies:', err);
+    } catch (err: any) {
+      const errorMsg = err.response?.data?.detail || 'Failed to fetch portfolio strategies';
+      setError(errorMsg);
+      toast({
+        title: "Error",
+        description: "Failed to load portfolio strategies",
+        variant: "destructive",
+      });
+      console.warn('Failed to fetch portfolio strategies:', err?.response?.data ?? err);
+    } finally {
+      setPortfolioLoading(false);
     }
   };
 
@@ -312,6 +325,7 @@ export const useStrategies = () => {
     availableStrategies,
     loading,
     executing,
+    portfolioLoading,
     error,
     actions: {
       fetchStrategies,
