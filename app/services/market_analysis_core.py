@@ -367,6 +367,12 @@ class MarketAnalysisService(LoggerMixin):
         self._price_cache_ttl = 300  # 5 minutes - increased from 30s for better cache reuse
         self._redis = None
         self._redis_lock = asyncio.Lock()
+        self._request_locks: Dict[str, asyncio.Lock] = {}
+        self._request_locks_guard = asyncio.Lock()
+        self._exchange_failure_state: Dict[str, Dict[str, float]] = {}
+        self._exchange_failure_lock = asyncio.Lock()
+        self._exchange_circuit_threshold = 3
+        self._exchange_circuit_reset_seconds = 60.0
 
     @staticmethod
     def _safe_float(value: Any, default: Optional[float] = 0.0) -> Optional[float]:
@@ -649,6 +655,46 @@ class MarketAnalysisService(LoggerMixin):
                 "expires_at": time.monotonic() + ttl_seconds,
             }
 
+    async def _get_request_lock(self, cache_key: str) -> asyncio.Lock:
+        async with self._request_locks_guard:
+            lock = self._request_locks.get(cache_key)
+            if lock is None:
+                lock = asyncio.Lock()
+                self._request_locks[cache_key] = lock
+            return lock
+
+    async def _is_exchange_available(self, exchange: str) -> bool:
+        async with self._exchange_failure_lock:
+            state = self._exchange_failure_state.get(exchange)
+            if not state:
+                return True
+
+            blocked_until = state.get("blocked_until", 0.0)
+            if blocked_until and blocked_until > time.monotonic():
+                return False
+
+            # Circuit has expired - reset state
+            self._exchange_failure_state.pop(exchange, None)
+            return True
+
+    async def _record_exchange_failure(self, exchange: str) -> None:
+        async with self._exchange_failure_lock:
+            state = self._exchange_failure_state.setdefault(exchange, {"failures": 0, "blocked_until": 0.0})
+            state["failures"] = state.get("failures", 0) + 1
+            if state["failures"] >= self._exchange_circuit_threshold:
+                state["blocked_until"] = time.monotonic() + self._exchange_circuit_reset_seconds
+                state["failures"] = 0
+                self.logger.warning(
+                    "Exchange circuit breaker opened",
+                    exchange=exchange,
+                    cooldown_seconds=self._exchange_circuit_reset_seconds,
+                )
+
+    async def _record_exchange_success(self, exchange: str) -> None:
+        async with self._exchange_failure_lock:
+            if exchange in self._exchange_failure_state:
+                self._exchange_failure_state.pop(exchange, None)
+
     def _get_symbol_semaphore(self) -> asyncio.Semaphore:
         loop = asyncio.get_running_loop()
         loop_id = id(loop)
@@ -695,37 +741,45 @@ class MarketAnalysisService(LoggerMixin):
                 await self._update_performance_metrics(time.time() - start_time, True, user_id)
                 return cached_response
 
-            price_data: Dict[str, Any] = {}
+            request_lock = await self._get_request_lock(cache_key)
+            async with request_lock:
+                # Re-check cache in case another coroutine populated it while we waited.
+                cached_response = await self._get_cached_result(cache_key)
+                if cached_response:
+                    await self._update_performance_metrics(time.time() - start_time, True, user_id)
+                    return cached_response
 
-            semaphore = self._get_symbol_semaphore()
+                price_data: Dict[str, Any] = {}
 
-            async def process_symbol(symbol: str) -> None:
-                async with semaphore:
-                    symbol_results = await self._collect_symbol_data(symbol, exchange_list)
-                    if symbol_results:
-                        price_data[symbol] = symbol_results
+                semaphore = self._get_symbol_semaphore()
 
-            await asyncio.gather(*(process_symbol(symbol) for symbol in symbol_list))
+                async def process_symbol(symbol: str) -> None:
+                    async with semaphore:
+                        symbol_results = await self._collect_symbol_data(symbol, exchange_list)
+                        if symbol_results:
+                            price_data[symbol] = symbol_results
 
-            response_time = time.time() - start_time
-            await self._update_performance_metrics(response_time, True, user_id)
+                await asyncio.gather(*(process_symbol(symbol) for symbol in symbol_list))
 
-            response = {
-                "success": True,
-                "function": "realtime_price_tracking",
-                "data": price_data,
-                "metadata": {
-                    "symbols_requested": len(symbol_list),
-                    "symbols_found": len(price_data),
-                    "exchanges_checked": len(exchange_list),
-                    "response_time_ms": round(response_time * 1000, 2),
-                    "timestamp": datetime.utcnow().isoformat(),
-                },
-            }
+                response_time = time.time() - start_time
+                await self._update_performance_metrics(response_time, True, user_id)
 
-            response_with_metadata = self._prepare_for_cache(response)
-            await self._set_cached_result(cache_key, response_with_metadata, pre_processed=True)
-            return response_with_metadata
+                response = {
+                    "success": True,
+                    "function": "realtime_price_tracking",
+                    "data": price_data,
+                    "metadata": {
+                        "symbols_requested": len(symbol_list),
+                        "symbols_found": len(price_data),
+                        "exchanges_checked": len(exchange_list),
+                        "response_time_ms": round(response_time * 1000, 2),
+                        "timestamp": datetime.utcnow().isoformat(),
+                    },
+                }
+
+                response_with_metadata = self._prepare_for_cache(response)
+                await self._set_cached_result(cache_key, response_with_metadata, pre_processed=True)
+                return response_with_metadata
 
         except Exception as e:
             await self._update_performance_metrics(time.time() - start_time, False, user_id)
@@ -784,13 +838,25 @@ class MarketAnalysisService(LoggerMixin):
         exchange_list: List[str],
     ) -> Optional[Dict[str, Any]]:
         async def fetch(exchange: str) -> Optional[Dict[str, Any]]:
+            if not await self._is_exchange_available(exchange):
+                self.logger.debug(
+                    "Skipping exchange due to open circuit breaker",
+                    symbol=symbol,
+                    exchange=exchange,
+                )
+                return None
             try:
                 price_info = await asyncio.wait_for(
                     self._get_symbol_price(exchange, symbol),
                     timeout=self._per_exchange_timeout,
                 )
-                return {"exchange": exchange, **price_info} if price_info else None
+                if price_info:
+                    await self._record_exchange_success(exchange)
+                    return {"exchange": exchange, **price_info}
+                # Symbol not listed on exchange - this is normal, not a failure
+                return None
             except asyncio.TimeoutError:
+                await self._record_exchange_failure(exchange)
                 self.logger.warning(
                     "Exchange price fetch timed out",
                     symbol=symbol,
@@ -799,6 +865,7 @@ class MarketAnalysisService(LoggerMixin):
                 )
                 return None
             except Exception as exc:  # pragma: no cover - defensive logging
+                await self._record_exchange_failure(exchange)
                 self.logger.warning(
                     "Failed to get symbol price",
                     symbol=symbol,
@@ -807,7 +874,21 @@ class MarketAnalysisService(LoggerMixin):
                 )
                 return None
 
-        tasks = [asyncio.create_task(fetch(exchange)) for exchange in exchange_list]
+        eligible_exchanges: List[str] = []
+        for exchange in exchange_list:
+            if await self._is_exchange_available(exchange):
+                eligible_exchanges.append(exchange)
+            else:
+                self.logger.info(
+                    "Exchange circuit breaker active, skipping",
+                    symbol=symbol,
+                    exchange=exchange,
+                )
+
+        if not eligible_exchanges:
+            return None
+
+        tasks = [asyncio.create_task(fetch(exchange)) for exchange in eligible_exchanges]
 
         exchanges_data: List[Dict[str, Any]] = []
         try:

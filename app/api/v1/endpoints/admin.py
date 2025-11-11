@@ -8,13 +8,13 @@ system configuration, and monitoring for the AI money manager platform.
 import asyncio
 from datetime import date, datetime, timedelta
 from decimal import Decimal
-from typing import Dict, List, Optional, Any, Iterable
+from typing import Dict, List, Optional, Any, Iterable, Literal
 import uuid
 from uuid import UUID
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Query, status, BackgroundTasks
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import and_, or_, func, select, case, desc
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,6 +37,9 @@ from app.services.master_controller import MasterSystemController
 from app.services.rate_limit import rate_limiter
 from app.services.credit_ledger import credit_ledger, InsufficientCreditsError
 from app.services.strategy_submission_service import strategy_submission_service
+from app.services.strategy_scanning_policy_service import (
+    strategy_scanning_policy_service,
+)
 
 settings = get_settings()
 logger = structlog.get_logger(__name__)
@@ -162,6 +165,36 @@ class CreditPricingConfigRequest(BaseModel):
 
 class StrategyPricingRequest(BaseModel):
     strategy_pricing: Dict[str, int]  # strategy_name -> credit_cost
+
+
+class StrategyScanningPolicyUpdate(BaseModel):
+    max_symbols: Optional[int] = Field(default=None, ge=1)
+    chunk_size: Optional[int] = Field(default=None, ge=1)
+    priority: Optional[int] = Field(default=None, ge=0)
+    enabled: Optional[bool] = True
+
+
+class StrategyScanningPolicyResponse(BaseModel):
+    strategy_key: str
+    max_symbols: Optional[int] = None
+    chunk_size: Optional[int] = None
+    priority: Optional[int] = None
+    enabled: bool = True
+    source: Literal["default", "config", "database"]
+    id: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
+
+class StrategyScanningPolicyListResponse(BaseModel):
+    success: bool
+    policies: List[StrategyScanningPolicyResponse]
+    count: int
+
+
+class StrategyScanningPolicyResult(BaseModel):
+    success: bool
+    policy: StrategyScanningPolicyResponse
 
 
 class UserManagementRequest(BaseModel):
@@ -1545,8 +1578,86 @@ async def configure_system(
         logger.exception("System configuration failed")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="System configuration failed"
-    ) from e
+            detail="System configuration failed"
+        ) from e
+
+
+@router.get("/opportunity-policies", response_model=StrategyScanningPolicyListResponse)
+async def get_opportunity_policies(
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
+):
+    """List strategy scanning policies with defaults and overrides."""
+
+    try:
+        policies = await strategy_scanning_policy_service.list_policies()
+        return StrategyScanningPolicyListResponse(
+            success=True,
+            policies=[StrategyScanningPolicyResponse(**policy) for policy in policies],
+            count=len(policies),
+        )
+    except Exception as error:
+        logger.exception("Failed to list opportunity policies")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to load opportunity scanning policies",
+        ) from error
+
+
+@router.put("/opportunity-policies/{strategy_key}", response_model=StrategyScanningPolicyResult)
+async def upsert_opportunity_policy(
+    strategy_key: str,
+    request: StrategyScanningPolicyUpdate,
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
+):
+    """Create or update a strategy scanning policy."""
+
+    try:
+        payload = request.model_dump(exclude_unset=True)
+        policy = await strategy_scanning_policy_service.upsert_policy(
+            strategy_key,
+            **payload,
+        )
+        return StrategyScanningPolicyResult(
+            success=True,
+            policy=StrategyScanningPolicyResponse(**policy),
+        )
+    except ValueError as error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(error),
+        ) from error
+    except Exception as error:
+        logger.exception("Failed to update opportunity policy", strategy_key=strategy_key)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update opportunity scanning policy",
+        ) from error
+
+
+@router.delete("/opportunity-policies/{strategy_key}", response_model=StrategyScanningPolicyResult)
+async def delete_opportunity_policy(
+    strategy_key: str,
+    current_user: User = Depends(require_role([UserRole.ADMIN])),
+):
+    """Remove a persisted opportunity scanning policy and fall back to defaults."""
+
+    try:
+        policy = await strategy_scanning_policy_service.delete_policy(strategy_key)
+        return StrategyScanningPolicyResult(
+            success=True,
+            policy=StrategyScanningPolicyResponse(**policy),
+        )
+    except ValueError as error:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(error),
+        ) from error
+    except Exception as error:
+        logger.exception("Failed to delete opportunity policy", strategy_key=strategy_key)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete opportunity scanning policy",
+        ) from error
 
 
 @router.get("/credit-pricing")
@@ -1571,7 +1682,7 @@ async def get_credit_pricing_config(
             "strategy_pricing": profit_sharing_service.strategy_pricing,
             "explanation": {
                 "platform_fee": "Percentage of profits users pay as platform fee",
-                "credit_calculation": "Credits = Profit Potential × Platform Fee Percentage",
+                "credit_calculation": "Credits = Profit Potential [emoji] Platform Fee Percentage",
                 "example": f"$100 profit potential = ${pricing_config.get('platform_fee_percentage', 25):.0f} credits at {pricing_config.get('platform_fee_percentage', 25):.0f}% fee"
             }
         }
@@ -2911,7 +3022,7 @@ async def assign_strategy_submission(
             "message": "Strategy submission assigned",
             "submission_id": submission_id,
             "reviewer": reviewer.email,
-            "status_value": submission.status.value
+            "status_value": submission.status
         }
 
     except HTTPException:
@@ -2968,7 +3079,7 @@ async def review_strategy(
             "submission_id": submission.id,
             "reviewer": current_user.email,
             "timestamp": datetime.utcnow().isoformat(),
-            "status_value": submission.status.value,
+            "status_value": submission.status,
             "published_strategy_id": (submission.strategy_config or {}).get("published_strategy_id")
         }
 

@@ -389,7 +389,7 @@ class StrategySubmissionService(DatabaseSessionMixin, LoggerMixin):
             allowed_statuses.add(changes_requested_status)
 
         if submission.status not in allowed_statuses:
-            status_value = submission.status.value if submission.status else "unknown"
+            status_value = submission.status if submission.status else "unknown"
             raise ValueError(
                 "Cannot assign submission while status is "
                 f"'{status_value}'; only submitted, under_review"
@@ -719,7 +719,7 @@ class StrategySubmissionService(DatabaseSessionMixin, LoggerMixin):
         user = submission.user
         reviewer = submission.reviewer
         review_state = (submission.strategy_config or {}).get(
-            self.REVIEW_STATE_KEY, submission.status.value
+            self.REVIEW_STATE_KEY, submission.status
         )
         status = self._map_admin_status(submission.status, review_state)
 
@@ -748,8 +748,8 @@ class StrategySubmissionService(DatabaseSessionMixin, LoggerMixin):
             "publisher_id": str(user.id) if user else None,
             "publisher_name": publisher_name or (user.email.split("@")[0] if user and user.email else "Unknown"),
             "publisher_email": user.email if user else None,
-            "risk_level": submission.risk_level.value if submission.risk_level else "medium",
-            "complexity_level": submission.complexity_level.value
+            "risk_level": submission.risk_level if submission.risk_level else "medium",
+            "complexity_level": submission.complexity_level
             if submission.complexity_level
             else "intermediate",
             "expected_return_range": [
@@ -765,9 +765,9 @@ class StrategySubmissionService(DatabaseSessionMixin, LoggerMixin):
                 "timeframes", [self._extract_timeframe(submission)]
             ),
             "tags": submission.tags or [],
-            "pricing_model": submission.pricing_model.value
+            "pricing_model": submission.pricing_model
             if submission.pricing_model
-            else PricingModel.FREE.value,
+            else "free",
             "price_amount": float(submission.price_amount or 0.0)
             if submission.price_amount is not None
             else None,
@@ -872,7 +872,7 @@ class StrategySubmissionService(DatabaseSessionMixin, LoggerMixin):
         if isinstance(risk_parameters, dict) and risk_parameters:
             return risk_parameters
         return {
-            "risk_level": submission.risk_level.value if submission.risk_level else "medium",
+            "risk_level": submission.risk_level if submission.risk_level else "medium",
             "required_capital": float(submission.required_capital or 0.0),
             "max_drawdown": float(
                 (submission.backtest_results or {}).get("max_drawdown", 0.0)
@@ -941,7 +941,7 @@ class StrategySubmissionService(DatabaseSessionMixin, LoggerMixin):
             "medium": Decimal("2.0"),
             "high": Decimal("3.5"),
         }
-        risk_level = submission.risk_level.value if submission.risk_level else "medium"
+        risk_level = submission.risk_level if submission.risk_level else "medium"
         return risk_map.get(risk_level, Decimal("2.0"))
 
     def _calculate_winning_trades(self, backtest: Dict[str, Any]) -> int:

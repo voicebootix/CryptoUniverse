@@ -161,6 +161,51 @@ class TelegramAPIConnector(LoggerMixin):
                 "error": str(e),
                 "chat_id": chat_id
             }
+
+    async def edit_message_text(
+        self,
+        chat_id: str,
+        message_id: int,
+        text: str,
+        parse_mode: str = "Markdown",
+    ) -> Dict[str, Any]:
+        """Edit an existing Telegram message."""
+
+        await self._ensure_initialized()
+
+        if not self.bot_token or not self.api_base_url:
+            return {"success": False, "error": "Telegram not configured"}
+
+        try:
+            payload = {
+                "chat_id": chat_id,
+                "message_id": message_id,
+                "text": text,
+                "parse_mode": parse_mode,
+            }
+
+            response = await self._make_api_request("editMessageText", payload)
+
+            return {
+                "success": True,
+                "message_id": response.get("message_id", message_id),
+                "chat_id": response.get("chat", {}).get("id", chat_id),
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+
+        except Exception as e:
+            self.logger.error(
+                "Failed to edit message",
+                error=str(e),
+                chat_id=chat_id,
+                message_id=message_id,
+            )
+            return {
+                "success": False,
+                "error": str(e),
+                "chat_id": chat_id,
+                "message_id": message_id,
+            }
     
     async def send_photo(
         self,

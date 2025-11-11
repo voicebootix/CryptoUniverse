@@ -11,8 +11,9 @@ Date: 2025-09-12
 """
 
 import asyncio
+import uuid
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Set
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
@@ -44,7 +45,45 @@ class OpportunityDiscoveryRequest(BaseModel):
     preferred_timeframes: Optional[List[str]] = None  # ["1h", "4h", "24h", "7d"]
     opportunity_type: Optional[List[str]] = None  # Filter by specific opportunity types
     strategy_types: Optional[List[str]] = None  # Legacy alias for opportunity_type (backward compatibility)
-    
+    symbols: Optional[List[str]] = None
+    asset_tiers: Optional[List[str]] = None
+    strategy_ids: Optional[List[str]] = None
+
+    @field_validator("symbols", "asset_tiers", "strategy_ids", mode="before")
+    @classmethod
+    def normalize_list_values(cls, value):
+        if value is None:
+            return None
+
+        if isinstance(value, str):
+            items = [segment.strip() for segment in value.split(",")]
+        elif isinstance(value, (list, tuple, set)):
+            items = []
+            for entry in value:
+                if entry is None:
+                    continue
+                if isinstance(entry, str):
+                    candidate = entry.strip()
+                else:
+                    candidate = str(entry).strip()
+                if candidate:
+                    items.append(candidate)
+        else:
+            raise ValueError("List values must be provided as a sequence or comma-separated string")
+
+        deduped: List[str] = []
+        seen: Set[str] = set()
+        for item in items:
+            if not item:
+                continue
+            key = item.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(item)
+
+        return deduped or None
+
     def __init__(self, **data):
         # Handle backward compatibility: map strategy_types to opportunity_type
         if 'strategy_types' in data and 'opportunity_type' not in data:
@@ -143,40 +182,82 @@ async def discover_opportunities(
         
         # Initialize discovery service
         await user_opportunity_discovery.async_init()
-        
-        # Generate scan ID
-        scan_id = f"scan_{current_user.id}_{int(datetime.utcnow().timestamp())}"
-        
-        # Check if there's already a scan running
-        existing_task = user_opportunity_discovery._scan_tasks.get(str(current_user.id))
+
+        user_id_str = str(current_user.id)
+        symbols = request.symbols or []
+        asset_tiers = request.asset_tiers or []
+        strategy_ids = request.strategy_ids or []
+        filter_summary = user_opportunity_discovery._summarize_scan_filters(
+            symbols=symbols,
+            asset_tiers=asset_tiers,
+            strategy_ids=strategy_ids,
+        )
+        cache_key = user_opportunity_discovery._build_scan_cache_key(
+            user_id_str,
+            symbols=symbols,
+            asset_tiers=asset_tiers,
+            strategy_ids=strategy_ids,
+        )
+
+        existing_task = user_opportunity_discovery._scan_tasks.get(cache_key)
+        existing_scan_id = getattr(existing_task, "scan_id", None) if existing_task else None
+
         if existing_task and not existing_task.done() and not request.force_refresh:
-            # Return existing scan info
-            cached_entry = await user_opportunity_discovery._get_cached_scan_entry(str(current_user.id))
+            cached_entry = await user_opportunity_discovery._get_cached_scan_entry(
+                user_id_str,
+                scan_id=existing_scan_id,
+            )
             if cached_entry:
+                active_scan_id = cached_entry.payload.get("scan_id", existing_scan_id)
+                poll_id = active_scan_id or existing_scan_id or f"scan_{uuid.uuid4().hex}"
                 return {
                     "success": True,
-                    "scan_id": cached_entry.payload.get("scan_id", scan_id),
+                    "scan_id": poll_id,
                     "status": "scanning",
-                    "message": "A scan is already in progress for this user",
+                    "message": "A scan is already in progress for this filter set",
                     "estimated_completion_seconds": 120,
-                    "poll_url": f"/api/v1/opportunities/status/{scan_id}",
+                    "poll_url": f"/api/v1/opportunities/status/{poll_id}",
                     "progress": {
                         "strategies_completed": cached_entry.payload.get("metadata", {}).get("strategies_completed", 0),
                         "total_strategies": cached_entry.payload.get("metadata", {}).get("total_strategies", 14)
-                    }
+                    },
+                    "filters": filter_summary,
                 }
-        
+
+        scan_id = existing_scan_id or f"scan_{uuid.uuid4().hex}"
+
+        await user_opportunity_discovery._register_scan_lookup(
+            user_id_str,
+            cache_key,
+            scan_id,
+        )
+
+        await user_opportunity_discovery._prime_scan_placeholder(
+            cache_key=cache_key,
+            user_id=user_id_str,
+            scan_id=scan_id,
+            filter_summary=filter_summary,
+            symbols=symbols or None,
+            asset_tiers=asset_tiers or None,
+            strategy_ids=strategy_ids or None,
+        )
+
         # Start background scan (don't await!)
         async def run_discovery_background():
             try:
                 await user_opportunity_discovery.discover_opportunities_for_user(
-                    user_id=str(current_user.id),
+                    user_id=user_id_str,
                     force_refresh=request.force_refresh,
-                    include_strategy_recommendations=request.include_strategy_recommendations
+                    include_strategy_recommendations=request.include_strategy_recommendations,
+                    symbols=symbols or None,
+                    asset_tiers=asset_tiers or None,
+                    strategy_ids=strategy_ids or None,
+                    scan_id=scan_id,
+                    cache_key=cache_key,
                 )
             except Exception as e:
                 logger.error("Background opportunity discovery failed",
-                           user_id=str(current_user.id),
+                           user_id=user_id_str,
                            error=str(e),
                            exc_info=True)
         
@@ -193,7 +274,8 @@ async def discover_opportunities(
             "poll_url": f"/api/v1/opportunities/status/{scan_id}",
             "results_url": f"/api/v1/opportunities/results/{scan_id}",
             "polling_interval_seconds": 3,
-            "instructions": "Poll the status endpoint every 3 seconds to check progress"
+            "instructions": "Poll the status endpoint every 3 seconds to check progress",
+            "filters": filter_summary,
         }
         
     except Exception as e:
@@ -222,16 +304,64 @@ async def get_scan_status(
     - partial_results: First 10 opportunities (if available)
     """
     try:
+        user_id_str = str(current_user.id)
+
         # Get cached scan entry
-        cached_entry = await user_opportunity_discovery._get_cached_scan_entry(str(current_user.id))
-        
+        cached_entry = await user_opportunity_discovery._get_cached_scan_entry(
+            user_id_str,
+            scan_id=scan_id,
+        )
+
+        cache_key: Optional[str] = None
         if not cached_entry:
-            return {
-                "success": False,
-                "status": "not_found",
-                "message": "No scan found for this user. Please initiate a new scan."
-            }
-        
+            # Attempt to resolve the cache key even if cached entry is missing. This allows us to
+            # detect scans that are still warming up or whose placeholder has not been written yet.
+            cache_key = await user_opportunity_discovery._resolve_scan_cache_key(
+                user_id=user_id_str,
+                scan_id=scan_id,
+            )
+
+            if cache_key:
+                # Re-check using the cache key directly in case the entry was created between the
+                # initial lookup and resolving the cache key (avoids transient race conditions).
+                cached_entry = await user_opportunity_discovery._peek_cached_scan_entry(cache_key)
+
+        not_found_response = {
+            "success": False,
+            "status": "not_found",
+            "message": "No scan found for this user. Please initiate a new scan.",
+        }
+
+        if not cached_entry:
+            if cache_key:
+                in_progress = await user_opportunity_discovery.has_active_scan_task(cache_key)
+                if not in_progress:
+                    return not_found_response
+
+                progress_payload = {
+                    "strategies_completed": 0,
+                    "total_strategies": 0,
+                    "opportunities_found_so_far": 0,
+                    "percentage": 0,
+                }
+
+                message = (
+                    "Scan is initializing. No results are available yet." if in_progress else
+                    "Scan registration found but no cached progress yet."
+                )
+
+                return {
+                    "success": True,
+                    "status": "scanning",
+                    "scan_id": scan_id,
+                    "message": message,
+                    "progress": progress_payload,
+                    "partial_results": [],
+                    "estimated_time_remaining_seconds": 120,
+                }
+
+            return not_found_response
+
         # Check if scan is still in progress
         if cached_entry.partial:
             metadata = cached_entry.payload.get("metadata", {})
@@ -289,7 +419,10 @@ async def get_scan_results(
     """
     try:
         # Get cached scan entry
-        cached_entry = await user_opportunity_discovery._get_cached_scan_entry(str(current_user.id))
+        cached_entry = await user_opportunity_discovery._get_cached_scan_entry(
+            str(current_user.id),
+            scan_id=scan_id,
+        )
         
         if not cached_entry:
             raise HTTPException(

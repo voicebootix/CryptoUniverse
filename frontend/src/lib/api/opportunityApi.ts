@@ -29,6 +29,9 @@ export interface OpportunityDiscoveryRequest {
   preferred_timeframes?: string[];
   opportunity_type?: string[];
   strategy_types?: string[];
+  symbols?: string[];
+  asset_tiers?: string[];
+  strategy_ids?: string[];
 }
 
 export interface OpportunityScanProgress {
@@ -36,6 +39,12 @@ export interface OpportunityScanProgress {
   total_strategies: number;
   opportunities_found_so_far: number;
   percentage?: number;
+}
+
+export interface OpportunityScanFilters {
+  symbols?: string[];
+  asset_tiers?: string[];
+  strategy_ids?: string[];
 }
 
 export interface OpportunityScanInitiation {
@@ -49,6 +58,7 @@ export interface OpportunityScanInitiation {
   polling_interval_seconds?: number;
   instructions?: string;
   progress?: OpportunityScanProgress;
+  filters?: OpportunityScanFilters;
 }
 
 export interface OpportunityScanStatusResponse {

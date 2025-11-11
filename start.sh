@@ -115,22 +115,71 @@ if [ "$ENVIRONMENT" = "production" ]; then
     run_migrations
 fi
 
-# Calculate workers based on available CPU cores
-if [ -z "$WEB_CONCURRENCY" ]; then
-    # Use 2 workers per core, with a minimum of 2 and maximum of 8
-    WORKERS=$(python -c "
-import os
-import multiprocessing
+# Derive optimal runtime settings from configuration helper
+RUNTIME_HINTS_RAW="$(python - <<'PYTHON'
+from app.core.config import settings
 
-cores = multiprocessing.cpu_count()
-workers = min(max(cores * 2, 2), 8)
-print(workers)
-")
-    export WEB_CONCURRENCY=$WORKERS
+print(settings.recommended_web_concurrency)
+print(settings.memory_limit_mb or "")
+print(settings.GUNICORN_TIMEOUT)
+print(settings.GUNICORN_GRACEFUL_TIMEOUT)
+print(settings.GUNICORN_KEEPALIVE)
+print(settings.GUNICORN_MAX_REQUESTS)
+print(settings.GUNICORN_MAX_REQUESTS_JITTER)
+PYTHON
+)" || {
+    echo "❌ Failed to derive runtime hints from app.core.config" >&2
+    exit 1
+}
+readarray -t RUNTIME_HINTS <<<"$RUNTIME_HINTS_RAW"
+
+AUTO_WORKERS=${RUNTIME_HINTS[0]:-1}
+AUTO_MEMORY_LIMIT=${RUNTIME_HINTS[1]:-}
+AUTO_TIMEOUT=${RUNTIME_HINTS[2]:-180}
+AUTO_GRACEFUL_TIMEOUT=${RUNTIME_HINTS[3]:-180}
+AUTO_KEEPALIVE=${RUNTIME_HINTS[4]:-2}
+AUTO_MAX_REQUESTS=${RUNTIME_HINTS[5]:-1000}
+AUTO_MAX_REQUESTS_JITTER=${RUNTIME_HINTS[6]:-100}
+
+if [ -z "$WEB_CONCURRENCY" ] || ! [[ "$WEB_CONCURRENCY" =~ ^[0-9]+$ ]] || [ "$WEB_CONCURRENCY" -lt 1 ]; then
+    WEB_CONCURRENCY=$AUTO_WORKERS
 fi
+
+if [ -z "$GUNICORN_TIMEOUT" ]; then
+    GUNICORN_TIMEOUT=$AUTO_TIMEOUT
+fi
+
+if [ -z "$GUNICORN_GRACEFUL_TIMEOUT" ]; then
+    GUNICORN_GRACEFUL_TIMEOUT=$AUTO_GRACEFUL_TIMEOUT
+fi
+
+if [ -z "$GUNICORN_KEEPALIVE" ]; then
+    GUNICORN_KEEPALIVE=$AUTO_KEEPALIVE
+fi
+
+if [ -z "$GUNICORN_MAX_REQUESTS" ]; then
+    GUNICORN_MAX_REQUESTS=$AUTO_MAX_REQUESTS
+fi
+
+if [ -z "$GUNICORN_MAX_REQUESTS_JITTER" ]; then
+    GUNICORN_MAX_REQUESTS_JITTER=$AUTO_MAX_REQUESTS_JITTER
+fi
+
+export WEB_CONCURRENCY
+export GUNICORN_TIMEOUT
+export GUNICORN_GRACEFUL_TIMEOUT
+export GUNICORN_KEEPALIVE
+export GUNICORN_MAX_REQUESTS
+export GUNICORN_MAX_REQUESTS_JITTER
 
 echo "🔧 Configuration:"
 echo "  Workers: $WEB_CONCURRENCY"
+if [ -n "$AUTO_MEMORY_LIMIT" ]; then
+    echo "  Memory limit: ${AUTO_MEMORY_LIMIT} MB"
+else
+    echo "  Memory limit: not detected"
+fi
+echo "  Timeout: ${GUNICORN_TIMEOUT}s (graceful ${GUNICORN_GRACEFUL_TIMEOUT}s)"
 echo "  Port: $PORT"
 echo "  Environment: $ENVIRONMENT"
 
@@ -139,13 +188,14 @@ echo "🎉 Starting Gunicorn server..."
 
 exec gunicorn main:app \
     --bind 0.0.0.0:${PORT:-8000} \
-    --workers ${WEB_CONCURRENCY:-4} \
+    --workers ${WEB_CONCURRENCY:-1} \
     --worker-class uvicorn.workers.UvicornWorker \
     --worker-connections 1000 \
-    --max-requests 1000 \
-    --max-requests-jitter 50 \
-    --timeout 120 \
-    --keep-alive 2 \
+    --max-requests ${GUNICORN_MAX_REQUESTS} \
+    --max-requests-jitter ${GUNICORN_MAX_REQUESTS_JITTER} \
+    --timeout ${GUNICORN_TIMEOUT} \
+    --graceful-timeout ${GUNICORN_GRACEFUL_TIMEOUT} \
+    --keep-alive ${GUNICORN_KEEPALIVE} \
     --preload \
     --access-logfile - \
     --error-logfile - \

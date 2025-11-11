@@ -35,11 +35,21 @@ import { Switch } from '@/components/ui/switch';
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Separator } from '@/components/ui/separator';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import { Checkbox } from '@/components/ui/checkbox';
 import { useToast } from '@/components/ui/use-toast';
 import { useUser } from '@/store/authStore';
 import { UserRole } from '@/types/auth';
 import { useExchanges } from '@/hooks/useExchanges';
 import { useStrategies } from '@/hooks/useStrategies';
+import type { TradingStrategy } from '@/hooks/useStrategies';
 import { usePortfolioStore } from '@/hooks/usePortfolio';
 import { useAIConsensus } from '@/hooks/useAIConsensus';
 import { useCredits } from '@/hooks/useCredits';
@@ -52,7 +62,7 @@ import {
   opportunityApi,
   OpportunityDiscoveryResponse,
   OpportunityApiError,
-  type Opportunity as DiscoveryOpportunity
+  type Opportunity as DiscoveryOpportunity,
 } from '@/lib/api/opportunityApi';
 import { AIConsensusCard } from '@/components/trading/AIConsensusCard';
 import { MarketContextCard } from '@/components/trading/MarketContextCard';
@@ -124,6 +134,45 @@ const DEFAULT_WORKFLOW: WorkflowConfig = {
   customNotes: ''
 };
 
+type OpportunityScanFilterState = {
+  symbols: string[];
+  assetTiers: string[];
+  strategyIds: string[];
+};
+
+const ASSET_TIER_OPTIONS = [
+  {
+    value: 'tier_institutional',
+    label: 'Institutional',
+    description: '$100M+ daily volume',
+  },
+  {
+    value: 'tier_enterprise',
+    label: 'Enterprise',
+    description: '$50M+ daily volume',
+  },
+  {
+    value: 'tier_professional',
+    label: 'Professional',
+    description: '$10M+ daily volume',
+  },
+  {
+    value: 'tier_retail',
+    label: 'Retail',
+    description: '$1M+ daily volume',
+  },
+  {
+    value: 'tier_emerging',
+    label: 'Emerging',
+    description: '$100K+ daily volume',
+  },
+  {
+    value: 'tier_micro',
+    label: 'Micro',
+    description: '$10K+ daily volume',
+  },
+];
+
 const ManualTradingPage: React.FC = () => {
   const user = useUser();
   const { toast } = useToast();
@@ -161,6 +210,39 @@ const ManualTradingPage: React.FC = () => {
   }
   const { exchanges, aggregatedStats } = useExchanges();
   const { strategies, availableStrategies, actions: strategyActions, executing: strategyExecuting } = useStrategies();
+  const strategyOptions = useMemo<TradingStrategy[]>(() => {
+    const options = new Map<string, TradingStrategy>();
+
+    strategies.forEach((strategy) => {
+      options.set(strategy.strategy_id, strategy);
+    });
+
+    Object.entries(availableStrategies).forEach(([strategyId, metadata]) => {
+      const existing = options.get(strategyId);
+      const fallbackName = metadata.name || strategyId.replace(/_/g, ' ').replace(/\b\w/g, (char) => char.toUpperCase());
+
+      if (existing) {
+        if (existing.name !== fallbackName) {
+          options.set(strategyId, { ...existing, name: fallbackName });
+        }
+        return;
+      }
+
+      options.set(strategyId, {
+        strategy_id: strategyId,
+        name: fallbackName,
+        status: 'available',
+        is_active: false,
+        total_trades: 0,
+        winning_trades: 0,
+        win_rate: 0,
+        total_pnl: 0,
+        created_at: '1970-01-01T00:00:00.000Z',
+      });
+    });
+
+    return Array.from(options.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [strategies, availableStrategies]);
   const {
     totalValue,
     availableBalance,
@@ -239,6 +321,13 @@ const ManualTradingPage: React.FC = () => {
     executing: new Set(),
     validating: new Set()
   });
+  const [scanDialogOpen, setScanDialogOpen] = useState(false);
+  const [scanFilters, setScanFilters] = useState<OpportunityScanFilterState>({
+    symbols: [],
+    assetTiers: [],
+    strategyIds: [],
+  });
+  const [scanSymbolInput, setScanSymbolInput] = useState('');
 
   const streamingControllerRef = useRef<AbortController | null>(null);
   const manualSessionRef = useRef<string | null>(null);
@@ -253,6 +342,10 @@ const ManualTradingPage: React.FC = () => {
     }
     return Array.from(symbols).sort();
   }, [positions, marketData, tradeForm.symbol]);
+  const suggestedSymbols = useMemo(() => {
+    const normalized = availableSymbols.map((symbol) => symbol.replace(/\s+/g, '').toUpperCase());
+    return Array.from(new Set(normalized)).slice(0, 12);
+  }, [availableSymbols]);
 
   const selectedStrategy = useMemo(() => {
     if (!workflowConfig.strategyId || workflowConfig.strategyId === 'manual') {
@@ -306,6 +399,138 @@ const ManualTradingPage: React.FC = () => {
         message
       }
     ]);
+  }, []);
+
+  const addScanSymbol = useCallback((rawSymbol: string) => {
+    const normalized = rawSymbol.replace(/\s+/g, '').toUpperCase();
+    if (!normalized) {
+      return;
+    }
+    setScanFilters((prev) => {
+      if (prev.symbols.includes(normalized)) {
+        return prev;
+      }
+      return {
+        ...prev,
+        symbols: [...prev.symbols, normalized],
+      };
+    });
+  }, []);
+
+  const removeScanSymbol = useCallback((symbol: string) => {
+    setScanFilters((prev) => ({
+      ...prev,
+      symbols: prev.symbols.filter((value) => value !== symbol),
+    }));
+  }, []);
+
+  const handleAddScanSymbol = useCallback(() => {
+    if (!scanSymbolInput.trim()) {
+      return;
+    }
+    addScanSymbol(scanSymbolInput);
+    setScanSymbolInput('');
+  }, [scanSymbolInput, addScanSymbol]);
+
+  const handleSymbolInputKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLInputElement>) => {
+      if (event.key === 'Enter') {
+        event.preventDefault();
+        handleAddScanSymbol();
+      }
+    },
+    [handleAddScanSymbol]
+  );
+
+  const toggleAssetTier = useCallback((tier: string, enabled: boolean) => {
+    const normalized = tier.trim();
+    if (!normalized) {
+      return;
+    }
+
+    setScanFilters((prev) => {
+      const hasTier = prev.assetTiers.includes(normalized);
+      if (enabled && !hasTier) {
+        return { ...prev, assetTiers: [...prev.assetTiers, normalized] };
+      }
+      if (!enabled && hasTier) {
+        return { ...prev, assetTiers: prev.assetTiers.filter((value) => value !== normalized) };
+      }
+      return prev;
+    });
+  }, []);
+
+  const clearAssetTiers = useCallback(() => {
+    setScanFilters((prev) => ({ ...prev, assetTiers: [] }));
+  }, []);
+
+  const toggleStrategySelection = useCallback((strategyId: string, enabled: boolean) => {
+    const normalized = strategyId.trim();
+    if (!normalized) {
+      return;
+    }
+
+    setScanFilters((prev) => {
+      const hasStrategy = prev.strategyIds.includes(normalized);
+      if (enabled && !hasStrategy) {
+        return { ...prev, strategyIds: [...prev.strategyIds, normalized] };
+      }
+      if (!enabled && hasStrategy) {
+        return { ...prev, strategyIds: prev.strategyIds.filter((value) => value !== normalized) };
+      }
+      return prev;
+    });
+  }, []);
+
+  const selectAllStrategies = useCallback(() => {
+    if (!strategyOptions.length) {
+      return;
+    }
+    setScanFilters((prev) => {
+      const combined = new Set([...prev.strategyIds, ...strategyOptions.map((strategy) => strategy.strategy_id)]);
+      return { ...prev, strategyIds: Array.from(combined) };
+    });
+  }, [strategyOptions]);
+
+  const clearStrategies = useCallback(() => {
+    setScanFilters((prev) => ({ ...prev, strategyIds: [] }));
+  }, []);
+
+  const normalizeFiltersForSubmission = useCallback(
+    (filters: OpportunityScanFilterState): OpportunityScanFilterState => {
+      const normalizeArray = (values: string[], transform?: (value: string) => string): string[] => {
+        if (!values.length) {
+          return [];
+        }
+
+        const next = new Set<string>();
+        values.forEach((value) => {
+          if (!value) {
+            return;
+          }
+          const trimmed = value.trim();
+          if (!trimmed) {
+            return;
+          }
+          const finalValue = transform ? transform(trimmed) : trimmed;
+          if (finalValue) {
+            next.add(finalValue);
+          }
+        });
+        return Array.from(next);
+      };
+
+      return {
+        symbols: normalizeArray(filters.symbols, (value) => value.toUpperCase()),
+        assetTiers: normalizeArray(filters.assetTiers),
+        strategyIds: normalizeArray(filters.strategyIds),
+      };
+    },
+    []
+  );
+
+  const handleOpenScanDialog = useCallback(() => {
+    setScanDialogOpen(true);
   }, []);
 
   const appendPhase = useCallback((phase: ExecutionPhase, detail?: string) => {
@@ -632,7 +857,7 @@ const ManualTradingPage: React.FC = () => {
       pushWorkflowLog('success', `Trade executed successfully on ${result.exchange || 'selected exchange'}.`);
       toast({
         title: 'Trade Executed',
-        description: `${tradeForm.action.toUpperCase()} ${tradeForm.symbol} · ${formatCurrency(Number(result.amount || tradeForm.amount))}`,
+        description: `${tradeForm.action.toUpperCase()} ${tradeForm.symbol} ? ${formatCurrency(Number(result.amount || tradeForm.amount))}`,
         variant: 'default'
       });
 
@@ -648,7 +873,16 @@ const ManualTradingPage: React.FC = () => {
         variant: 'destructive'
       });
     }
-  }, [tradeForm, toast, selectedStrategy, pushWorkflowLog, creditActions, fetchPortfolio, fetchRecentTrades]);
+  }, [
+    tradeForm,
+    toast,
+    selectedStrategy,
+    pushWorkflowLog,
+    creditActions,
+    fetchPortfolio,
+    fetchRecentTrades,
+    scanFilters,
+  ]);
 
   const recordInsight = useCallback((title: string, fn: string, payload: any) => {
     setAiInsights((prev) => [
@@ -664,12 +898,19 @@ const ManualTradingPage: React.FC = () => {
   }, []);
 
   const handleConsensusAction = useCallback(
-    async (action: 'opportunity' | 'validation' | 'risk' | 'portfolio' | 'market' | 'decision') => {
+    async (
+      action: 'opportunity' | 'validation' | 'risk' | 'portfolio' | 'market' | 'decision',
+      options?: { filters?: OpportunityScanFilterState }
+    ) => {
       try {
         const primarySymbol = sanitizedTargetSymbols[0] || tradeForm.symbol;
 
         switch (action) {
           case 'opportunity': {
+            const appliedFilters = options?.filters ?? scanFilters;
+            if (options?.filters) {
+              setScanFilters(options.filters);
+            }
             let lastLoggedMessage: string | null = null;
             const logMessage = (level: WorkflowLogLevel, message: string) => {
               if (lastLoggedMessage === message) {
@@ -679,12 +920,28 @@ const ManualTradingPage: React.FC = () => {
               pushWorkflowLog(level, message);
             };
 
-            logMessage('info', `Scanning opportunities using your active trading strategies...`);
+            const filterMessages: string[] = [];
+            if (appliedFilters?.symbols?.length) {
+              filterMessages.push(`symbols (${appliedFilters.symbols.join(', ')})`);
+            }
+            if (appliedFilters?.assetTiers?.length) {
+              filterMessages.push(`asset tiers (${appliedFilters.assetTiers.join(', ')})`);
+            }
+            if (appliedFilters?.strategyIds?.length) {
+              filterMessages.push(`strategies (${appliedFilters.strategyIds.join(', ')})`);
+            }
+
+            const filterSuffix = filterMessages.length ? ` with ${filterMessages.join('; ')}` : '';
+
+            logMessage('info', `Scanning opportunities using your active trading strategies${filterSuffix}...`);
 
             // 1. Initiate the enterprise opportunity discovery scan
             const scanInitiation = await opportunityApi.discoverOpportunities({
               force_refresh: true,
-              include_strategy_recommendations: true
+              include_strategy_recommendations: true,
+              symbols: appliedFilters?.symbols?.length ? appliedFilters.symbols : undefined,
+              asset_tiers: appliedFilters?.assetTiers?.length ? appliedFilters.assetTiers : undefined,
+              strategy_ids: appliedFilters?.strategyIds?.length ? appliedFilters.strategyIds : undefined,
             });
 
             if (!scanInitiation?.success) {
@@ -739,7 +996,7 @@ const ManualTradingPage: React.FC = () => {
                     const results = await attemptEarlyResultFetch();
                     if (results) {
                       scanResult = results;
-                      logMessage('success', `Retrieved ${results.total_opportunities} opportunities.`);
+                      logMessage('success', `Retrieved ${results.total_opportunities} opportunities${filterSuffix}.`);
                       break;
                     }
 
@@ -771,9 +1028,9 @@ const ManualTradingPage: React.FC = () => {
 
                     if (pollAttempts >= 3 && pollAttempts % 5 === 0) {
                       const results = await attemptEarlyResultFetch();
-                      if (results) {
-                        scanResult = results;
-                        logMessage('success', `Retrieved ${results.total_opportunities} opportunities.`);
+                    if (results) {
+                      scanResult = results;
+                      logMessage('success', `Retrieved ${results.total_opportunities} opportunities${filterSuffix}.`);
                         break;
                       }
                     }
@@ -789,9 +1046,9 @@ const ManualTradingPage: React.FC = () => {
 
                     if (notFoundStreak >= 3) {
                       const results = await attemptEarlyResultFetch();
-                      if (results) {
-                        scanResult = results;
-                        logMessage('success', `Retrieved ${results.total_opportunities} opportunities.`);
+                    if (results) {
+                      scanResult = results;
+                      logMessage('success', `Retrieved ${results.total_opportunities} opportunities${filterSuffix}.`);
                         break;
                       }
                     }
@@ -864,7 +1121,7 @@ const ManualTradingPage: React.FC = () => {
                 const finalResults = await attemptEarlyResultFetch();
                 if (finalResults) {
                   scanResult = finalResults;
-                  logMessage('success', `Retrieved ${finalResults.total_opportunities} opportunities.`);
+                  logMessage('success', `Retrieved ${finalResults.total_opportunities} opportunities${filterSuffix}.`);
                 }
               } catch (finalError) {
                 if (
@@ -904,7 +1161,7 @@ const ManualTradingPage: React.FC = () => {
             // 3. Parse opportunities from scan result
             const opportunities = scanResult.opportunities || [];
 
-            logMessage('success', `Found ${opportunities.length} opportunities from your active strategies!`);
+            logMessage('success', `Found ${opportunities.length} opportunities from your active strategies${filterSuffix}.`);
 
             // 2. Map opportunities from discovery service to our Opportunity type
             // These are already pre-validated by the strategy engine
@@ -1016,7 +1273,7 @@ const ManualTradingPage: React.FC = () => {
 
             // 7. Show toast
             toast({
-              title: `✨ ${validated.length} AI-Validated Opportunities`,
+              title: `? ${validated.length} AI-Validated Opportunities`,
               description: `${opportunities.length} total found | ${validated.length} ready to execute`,
             });
 
@@ -1157,9 +1414,22 @@ const ManualTradingPage: React.FC = () => {
       creditActions,
       fetchPortfolio,
       toast,
-      selectedStrategy
+      selectedStrategy,
+      scanFilters,
+      pricingConfig,
+      user,
     ]
   );
+
+  const handleStartOpportunityScan = useCallback(() => {
+    const normalized = normalizeFiltersForSubmission(scanFilters);
+    setScanDialogOpen(false);
+    void handleConsensusAction('opportunity', { filters: normalized });
+  }, [
+    handleConsensusAction,
+    normalizeFiltersForSubmission,
+    scanFilters,
+  ]);
 
   const applyAiRecommendationToTrade = useCallback(() => {
     if (!aiSummary?.actionData) {
@@ -1988,8 +2258,187 @@ const ManualTradingPage: React.FC = () => {
         <div className="col-span-1 lg:col-span-4 flex flex-col gap-4 min-h-0 overflow-hidden">
           <div className="space-y-4 overflow-y-auto flex-1 pr-2 pb-4">
             {/* Quick Action Bar */}
+            <Dialog open={scanDialogOpen} onOpenChange={setScanDialogOpen}>
+              <DialogContent className="max-w-3xl">
+                <DialogHeader>
+                  <DialogTitle>Configure opportunity scan</DialogTitle>
+                  <DialogDescription>
+                    Choose optional filters to focus the scan. Leave everything blank to analyze all eligible assets and strategies.
+                  </DialogDescription>
+                </DialogHeader>
+                <div className="space-y-6">
+                  <div>
+                    <Label className="text-sm font-semibold">Symbols</Label>
+                    <p className="text-sm text-muted-foreground mt-1">
+                      Provide trading pairs (e.g. BTCUSDT). Leave empty to scan the full asset universe.
+                    </p>
+                    <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                      <Input
+                        value={scanSymbolInput}
+                        onChange={(event) => setScanSymbolInput(event.target.value)}
+                        onKeyDown={handleSymbolInputKeyDown}
+                        placeholder="Add symbol (press Enter to add)"
+                        className="sm:flex-1"
+                      />
+                      <div className="flex gap-2">
+                        <Button type="button" variant="secondary" onClick={handleAddScanSymbol}>
+                          Add
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          onClick={() => setScanFilters((prev) => ({ ...prev, symbols: [] }))}
+                          disabled={!scanFilters.symbols.length}
+                        >
+                          Clear
+                        </Button>
+                      </div>
+                    </div>
+                    {scanFilters.symbols.length > 0 ? (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {scanFilters.symbols.map((symbol) => (
+                          <Badge key={symbol} variant="secondary" className="flex items-center gap-1">
+                            {symbol}
+                            <button
+                              type="button"
+                              onClick={() => removeScanSymbol(symbol)}
+                              className="text-xs leading-none text-muted-foreground transition-colors hover:text-destructive focus:outline-none"
+                              aria-label={`Remove ${symbol}`}
+                            >
+                              ?
+                            </button>
+                          </Badge>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="mt-3 text-sm text-muted-foreground">
+                        Leave empty to include every discovered asset.
+                      </p>
+                    )}
+                    {suggestedSymbols.length > 0 && (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {suggestedSymbols.map((symbol) => (
+                          <Button
+                            key={symbol}
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => addScanSymbol(symbol)}
+                            disabled={scanFilters.symbols.includes(symbol)}
+                          >
+                            {symbol}
+                          </Button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <Label className="text-sm font-semibold">Asset tiers</Label>
+                        <p className="text-sm text-muted-foreground">
+                          Narrow the scan by daily volume tier. Leave all unchecked to respect your profile tier.
+                        </p>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={clearAssetTiers}
+                        disabled={!scanFilters.assetTiers.length}
+                      >
+                        Use profile tiers
+                      </Button>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      {ASSET_TIER_OPTIONS.map((tier) => (
+                        <label
+                          key={tier.value}
+                          className="flex items-start gap-3 rounded-md border p-3 transition-colors hover:bg-muted/60"
+                        >
+                          <Checkbox
+                            checked={scanFilters.assetTiers.includes(tier.value)}
+                            onCheckedChange={(checked) => toggleAssetTier(tier.value, checked === true)}
+                          />
+                          <div>
+                            <div className="font-medium">{tier.label}</div>
+                            <p className="text-xs text-muted-foreground">{tier.description}</p>
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <Label className="text-sm font-semibold">Strategies</Label>
+                        <p className="text-sm text-muted-foreground">
+                          Choose specific strategies to include. Leave empty to scan all active strategies.
+                        </p>
+                      </div>
+                      <div className="flex gap-2">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={selectAllStrategies}
+                          disabled={!strategyOptions.length}
+                        >
+                          Select all
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={clearStrategies}
+                          disabled={!scanFilters.strategyIds.length}
+                        >
+                          Clear
+                        </Button>
+                      </div>
+                    </div>
+                    <ScrollArea className="max-h-48 rounded-md border">
+                      <div className="space-y-2 p-3">
+                        {strategyOptions.length === 0 ? (
+                          <p className="text-sm text-muted-foreground">No strategies available.</p>
+                        ) : (
+                          strategyOptions.map((strategy) => (
+                            <label
+                              key={strategy.strategy_id}
+                              className="flex items-start gap-3 rounded-md p-2 transition-colors hover:bg-muted/60"
+                            >
+                              <Checkbox
+                                checked={scanFilters.strategyIds.includes(strategy.strategy_id)}
+                                onCheckedChange={(checked) => toggleStrategySelection(strategy.strategy_id, checked === true)}
+                              />
+                              <div>
+                                <div className="font-medium">{strategy.name}</div>
+                                <p className="text-xs text-muted-foreground capitalize">
+                                  {strategy.status?.replace(/_/g, ' ') || 'active'}
+                                </p>
+                              </div>
+                            </label>
+                          ))
+                        )}
+                      </div>
+                    </ScrollArea>
+                  </div>
+                </div>
+                <DialogFooter>
+                  <Button type="button" variant="outline" onClick={() => setScanDialogOpen(false)}>
+                    Cancel
+                  </Button>
+                  <Button type="button" onClick={handleStartOpportunityScan}>
+                    Start scan
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
+
             <QuickActionBar
-              onScanOpportunities={() => handleConsensusAction('opportunity')}
+              onScanOpportunities={handleOpenScanDialog}
               onValidateTrade={() => handleConsensusAction('validation')}
               onAssessRisk={() => handleConsensusAction('risk')}
               onRebalancePortfolio={() => handleConsensusAction('portfolio')}

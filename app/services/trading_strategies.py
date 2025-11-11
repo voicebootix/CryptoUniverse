@@ -29,8 +29,6 @@ Integrates with Trade Execution Service for order placement.
 """
 
 import asyncio
-import contextlib
-import copy
 import json
 import time
 from datetime import datetime, timedelta
@@ -283,40 +281,13 @@ class ExchangeConfigurationsFutures:
 class PriceResolverMixin:
     """Shared helper for resolving spot prices across strategy engines."""
 
-    _DEFAULT_PRICE_CACHE_TTL = 30.0
-    _DEFAULT_PRICE_CACHE_CAPACITY = 512
-
-    def _ensure_price_cache_containers(self) -> Tuple[
-        Dict[Tuple[str, str], Dict[str, Any]],
-        Dict[Tuple[str, str], asyncio.Task],
-    ]:
-        if not hasattr(self, "_price_cache"):
-            self._price_cache = {}
-        cache = self._price_cache
-
-        if not hasattr(self, "_price_cache_inflight"):
-            self._price_cache_inflight = {}
-        inflight = self._price_cache_inflight
-
-        return cache, inflight
-
-    def reset_transient_caches(self) -> None:
-        cache = getattr(self, "_price_cache", None)
-        if isinstance(cache, dict):
-            cache.clear()
-
-        inflight = getattr(self, "_price_cache_inflight", None)
-        if isinstance(inflight, dict):
-            inflight.clear()
-
-    def _get_price_cache_ttl(self) -> float:
-        return float(getattr(self, "_price_cache_ttl", self._DEFAULT_PRICE_CACHE_TTL))
-
-    def _get_price_cache_capacity(self) -> int:
-        return int(getattr(self, "_price_cache_capacity", self._DEFAULT_PRICE_CACHE_CAPACITY))
-
     async def _get_symbol_price(self, exchange: str, symbol: str) -> Dict[str, Any]:
-        """Resolve the latest market price for the supplied symbol with caching and fallbacks."""
+        """Resolve the latest market price for the supplied symbol.
+
+        The helper mirrors the implementation that previously lived only on the
+        top-level ``TradingStrategiesService`` so that derivative and spot
+        engines can consistently access live pricing without duplicating logic.
+        """
 
         target_exchange = (exchange or "").strip().lower() or "binance"
         if target_exchange in {"auto", "spot", "default"}:
@@ -366,98 +337,60 @@ class PriceResolverMixin:
             except (TypeError, ValueError):
                 return default
 
-        cache_key = (target_exchange, normalized_symbol)
-        cache, inflight = self._ensure_price_cache_containers()
-        now = time.monotonic()
-        cache_entry = cache.get(cache_key)
-        if cache_entry and cache_entry["expires_at"] > now:
-            return copy.deepcopy(cache_entry["payload"])
-
-        existing_task = inflight.get(cache_key)
-        if existing_task is not None:
-            try:
-                result = await existing_task
-                return copy.deepcopy(result)
-            except Exception:
-                inflight.pop(cache_key, None)
-
-        async def _resolve_price() -> Dict[str, Any]:
-            try:
-                price_payload = await market_analysis_service.get_exchange_price(
-                    target_exchange,
-                    normalized_symbol,
+        try:
+            price_payload = await market_analysis_service.get_exchange_price(
+                target_exchange,
+                normalized_symbol,
+            )
+            if isinstance(price_payload, dict) and price_payload.get("price") is not None:
+                return {
+                    "success": True,
+                    "price": _safe_number(price_payload.get("price"), 0.0),
+                    "symbol": normalized_symbol,
+                    "volume": _safe_number(
+                        price_payload.get("volume") or price_payload.get("volume_24h"),
+                        0.0,
+                    ),
+                    "change_24h": _safe_number(price_payload.get("change_24h"), 0.0),
+                    "timestamp": price_payload.get("timestamp", datetime.utcnow().isoformat()),
+                }
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            if hasattr(self, "logger"):
+                self.logger.warning(
+                    "Primary price fetch failed",
+                    exchange=target_exchange,
+                    symbol=normalized_symbol,
+                    error=str(exc),
                 )
-                if isinstance(price_payload, dict) and price_payload.get("price") is not None:
+
+        base_symbol = normalized_symbol.split("/", 1)[0]
+        try:
+            snapshot = await market_data_feeds.get_market_snapshot(base_symbol)
+            if snapshot.get("success"):
+                data = snapshot.get("data", {})
+                price = data.get("price")
+                if price is not None:
                     return {
                         "success": True,
-                        "price": _safe_number(price_payload.get("price"), 0.0),
+                        "price": _safe_number(price, 0.0),
                         "symbol": normalized_symbol,
-                        "volume": _safe_number(
-                            price_payload.get("volume") or price_payload.get("volume_24h"),
-                            0.0,
-                        ),
-                        "change_24h": _safe_number(price_payload.get("change_24h"), 0.0),
-                        "timestamp": price_payload.get("timestamp", datetime.utcnow().isoformat()),
+                        "volume": _safe_number(data.get("volume_24h"), 0.0),
+                        "change_24h": _safe_number(data.get("change_24h"), 0.0),
+                        "timestamp": data.get("timestamp", datetime.utcnow().isoformat()),
                     }
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                if hasattr(self, "logger"):
-                    self.logger.warning(
-                        "Primary price fetch failed",
-                        exchange=target_exchange,
-                        symbol=normalized_symbol,
-                        error=str(exc),
-                    )
+        except asyncio.CancelledError:
+            raise
+        except Exception as exc:
+            if hasattr(self, "logger"):
+                self.logger.warning(
+                    "Market snapshot fallback failed",
+                    symbol=normalized_symbol,
+                    error=str(exc),
+                )
 
-            base_symbol = normalized_symbol.split("/", 1)[0]
-            try:
-                snapshot = await market_data_feeds.get_market_snapshot(base_symbol)
-                if snapshot.get("success"):
-                    data = snapshot.get("data", {})
-                    price = data.get("price")
-                    if price is not None:
-                        return {
-                            "success": True,
-                            "price": _safe_number(price, 0.0),
-                            "symbol": normalized_symbol,
-                            "volume": _safe_number(data.get("volume_24h"), 0.0),
-                            "change_24h": _safe_number(data.get("change_24h"), 0.0),
-                            "timestamp": data.get("timestamp", datetime.utcnow().isoformat()),
-                        }
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                if hasattr(self, "logger"):
-                    self.logger.warning(
-                        "Market snapshot fallback failed",
-                        symbol=normalized_symbol,
-                        error=str(exc),
-                    )
-
-            return {"success": False, "error": f"Price unavailable for {normalized_symbol}"}
-
-        loop = asyncio.get_running_loop()
-        task = loop.create_task(_resolve_price())
-        inflight[cache_key] = task
-        try:
-            payload = await task
-        finally:
-            inflight.pop(cache_key, None)
-
-        if payload.get("success"):
-            ttl_seconds = self._get_price_cache_ttl()
-            cache_capacity = self._get_price_cache_capacity()
-            expires_at = now + max(ttl_seconds, 0.0)
-            if len(cache) >= cache_capacity:
-                oldest_key = min(cache.items(), key=lambda item: item[1]["expires_at"])[0]
-                cache.pop(oldest_key, None)
-            cache[cache_key] = {
-                "expires_at": expires_at,
-                "payload": copy.deepcopy(payload),
-            }
-
-        return copy.deepcopy(payload)
+        return {"success": False, "error": f"Price unavailable for {normalized_symbol}"}
 
 
 class DerivativesEngine(LoggerMixin, PriceResolverMixin):
@@ -583,23 +516,21 @@ class DerivativesEngine(LoggerMixin, PriceResolverMixin):
             )
             
             if not option_contract:
-                # Create a synthetic contract for testing if none found
-                option_type_str = "CALL" if strategy_type == StrategyType.CALL_OPTION else "PUT"
-                contract_symbol = f"{symbol.replace('USDT', '')}{expiry_date.replace('-', '')}{int(strike_price)}{option_type_str}"
-                
-                option_contract = {
-                    "symbol": symbol,
-                    "contract_symbol": contract_symbol,
-                    "strike_price": strike_price,
-                    "expiry_date": expiry_date,
-                    "option_type": option_type_str,
-                    "underlying_symbol": symbol.replace("USDT", ""),
-                    "premium": 100.0,  # Default premium
-                    "ask_price": 100.0,  # Default ask price
-                    "bid_price": 95.0,   # Default bid price
-                    "synthetic": True
+                error_message = (
+                    "No option contract matched the requested strike/expiry"
+                )
+                self.logger.error(
+                    error_message,
+                    symbol=symbol,
+                    strike=strike_price,
+                    expiry=expiry_date,
+                    strategy=strategy_type.value if isinstance(strategy_type, StrategyType) else strategy_type,
+                )
+                return {
+                    "success": False,
+                    "error": error_message,
+                    "timestamp": datetime.utcnow().isoformat(),
                 }
-                self.logger.warning("Using synthetic option contract for testing", symbol=symbol, strike=strike_price)
             
             # Calculate option premium and Greeks
             greeks = await self._calculate_greeks(option_contract, parameters)
@@ -1148,43 +1079,50 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
                 or {}
             )
             symbol_analysis = analysis_payload.get(symbol, {})
-            analysis_block = symbol_analysis.get("analysis", {}) if isinstance(symbol_analysis, dict) else {}
-            momentum_data = analysis_block.get("momentum", {}) if isinstance(analysis_block, dict) else {}
-            price_snapshot_raw = analysis_block.get("price") if isinstance(analysis_block, dict) else {}
+            momentum_data = symbol_analysis.get("analysis", {}).get("momentum", {})
+            price_data = symbol_analysis.get("analysis", {}).get("price", {})
 
-            if not price_snapshot_raw:
-                # Fallback to direct price payloads in case structure differs slightly
-                price_snapshot_raw = (
-                    symbol_analysis.get("price")
-                    if isinstance(symbol_analysis, dict)
-                    else None
-                ) or analysis_payload.get("price") or {}
-
-            def _safe_float(value: Any) -> Optional[float]:
+            def _safe_float(value: Any, default: float = 0.0) -> float:
                 try:
                     if value is None:
-                        return None
+                        return default
                     return float(value)
                 except (TypeError, ValueError):
-                    return None
+                    return default
 
-            price_snapshot = {}
-            if isinstance(price_snapshot_raw, dict):
-                for key in ("current", "high_24h", "low_24h", "volume"):
-                    safe_value = _safe_float(price_snapshot_raw.get(key))
-                    if safe_value is not None:
-                        # Round monetary values to 2 decimals, volumes can stay with more precision
-                        price_snapshot[key] = round(safe_value, 2) if key != "volume" else round(safe_value, 4)
+            current_price = _safe_float(price_data.get("current"))
+            high_24h = _safe_float(price_data.get("high_24h")) or current_price
+            low_24h = _safe_float(price_data.get("low_24h")) or current_price
+            volume_24h = _safe_float(price_data.get("volume"))
 
-            current_price = price_snapshot.get("current")
-            
+            if current_price <= 0:
+                fallback_price = await self._get_symbol_price("auto", symbol)
+                current_price = _safe_float(fallback_price.get("price"))
+                if current_price <= 0:
+                    return {
+                        "success": False,
+                        "error": "Price data unavailable",
+                        "timestamp": datetime.utcnow().isoformat(),
+                    }
+                high_24h = max(current_price, current_price * 1.02)
+                low_24h = min(current_price, current_price * 0.98)
+                volume_24h = _safe_float(fallback_price.get("volume"))
+
+            price_snapshot = {
+                "current": round(current_price, 2),
+                "high_24h": round(high_24h, 2) if high_24h else round(current_price, 2),
+                "low_24h": round(low_24h, 2) if low_24h else round(current_price, 2),
+                "volume_24h": round(volume_24h, 2) if volume_24h else 0.0,
+            }
+
             # Momentum signal logic
             rsi = momentum_data.get("rsi", 50)
             macd_trend = momentum_data.get("macd", {}).get("trend", "NEUTRAL")
-            
+
             # Generate trading signal
             signal_strength = 0
-            
+            action = "HOLD"
+
             if rsi > 60 and macd_trend == "BULLISH":
                 signal_strength = 8
                 action = "BUY"
@@ -1198,113 +1136,118 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
                 signal_strength = 5
                 action = "HOLD"
             
-            # Execute if signal is strong enough
-            recommended_stop = None
-            recommended_take = None
-            risk_amount_usd = None
-            potential_profit_usd = None
-            position_notional = None
-            risk_reward_ratio = None
+            # Calculate risk profile if we have a directional signal
+            quantity = float(parameters.quantity or 0.01)
+            notional_value = quantity * current_price
+            volatility_pct = 0.0
+            if current_price > 0:
+                price_range = abs(high_24h - low_24h)
+                volatility_pct = price_range / current_price if current_price else 0.0
+            risk_pct = max(0.005, min(0.03, (volatility_pct / 2) if volatility_pct else 0.01))
+            reward_pct = min(risk_pct * 2.0, 0.10)
 
-            if current_price and current_price > 0 and action in {"BUY", "SELL"}:
-                risk_buffer = 0.02  # 2% distance to stop
-                reward_buffer = 0.03  # 3% distance to target
-
+            trade_risk = {}
+            if action in {"BUY", "SELL"}:
                 if action == "BUY":
-                    recommended_stop = round(current_price * (1 - risk_buffer), 2)
-                    recommended_take = round(current_price * (1 + reward_buffer), 2)
+                    stop_loss_price = current_price * (1 - risk_pct)
+                    take_profit_price = current_price * (1 + reward_pct)
                 else:
-                    recommended_stop = round(current_price * (1 + risk_buffer), 2)
-                    recommended_take = round(current_price * (1 - reward_buffer), 2)
+                    stop_loss_price = current_price * (1 + risk_pct)
+                    take_profit_price = current_price * (1 - reward_pct)
+                    take_profit_price = max(take_profit_price, current_price * 0.1)
 
-                price_risk = abs((recommended_stop or 0) - current_price)
-                price_reward = abs((recommended_take or 0) - current_price)
-                position_notional = round(current_price * parameters.quantity, 2)
-                risk_amount_usd = round(price_risk * parameters.quantity, 2) if price_risk else None
-                potential_profit_usd = round(price_reward * parameters.quantity, 2) if price_reward else None
-                if risk_amount_usd and risk_amount_usd > 0 and potential_profit_usd is not None:
-                    risk_reward_ratio = round(potential_profit_usd / risk_amount_usd, 2) if risk_amount_usd else None
-
-            if signal_strength >= parameters.min_confidence / 10:
-                trade_request = {
-                    "action": action,
-                    "symbol": symbol,
-                    "quantity": parameters.quantity,
-                    "order_type": "MARKET",
-                    "stop_loss": parameters.stop_loss,
-                    "take_profit": parameters.take_profit
-                }
-                
-                execution_result = await self.trade_executor.execute_trade(
-                    trade_request,
-                    user_id,
-                    simulation_mode=True,
-                    strategy_id=strategy_id,
+                risk_amount_usd = abs(current_price - stop_loss_price) * quantity
+                potential_profit_usd = abs(take_profit_price - current_price) * quantity
+                risk_reward_ratio = (
+                    potential_profit_usd / risk_amount_usd if risk_amount_usd > 0 else 0.0
                 )
-                
-                price_payload = price_snapshot if price_snapshot else None
-                indicators_payload = {
+
+                trade_risk = {
+                    "entry_price": current_price,
+                    "stop_loss_price": round(stop_loss_price, 4),
+                    "take_profit_price": round(take_profit_price, 4),
+                    "stop_loss": round(stop_loss_price, 4),
+                    "take_profit": round(take_profit_price, 4),
+                    "risk_amount_usd": round(risk_amount_usd, 2),
+                    "potential_profit_usd": round(potential_profit_usd, 2),
+                    "risk_reward_ratio": round(risk_reward_ratio, 2),
+                    "risk_pct": round(risk_pct * 100, 2),
+                    "reward_pct": round(reward_pct * 100, 2),
+                }
+
+            risk_management_block = {
+                "position_size": quantity,
+                "notional_usd": round(notional_value, 2),
+                "price_snapshot": price_snapshot,
+                "price": price_snapshot.get("current", 0),
+            }
+
+            if trade_risk:
+                risk_management_block.update(trade_risk)
+
+            # Execute only if signal is strong enough AND action is BUY/SELL with valid stop/take
+            execution_result = None
+            if signal_strength >= parameters.min_confidence / 10:
+                # Validate action and risk bounds before executing
+                if action in {"BUY", "SELL"} and trade_risk:
+                    stop_loss_val = trade_risk.get("stop_loss_price", 0)
+                    take_profit_val = trade_risk.get("take_profit_price", 0)
+
+                    if stop_loss_val > 0 and take_profit_val > 0:
+                        trade_request = {
+                            "action": action,
+                            "symbol": symbol,
+                            "quantity": parameters.quantity,
+                            "order_type": "MARKET",
+                            "stop_loss": stop_loss_val,
+                            "take_profit": take_profit_val
+                        }
+
+                        execution_result = await self.trade_executor.execute_trade(
+                            trade_request,
+                            user_id,
+                            simulation_mode=True,
+                            strategy_id=strategy_id,
+                        )
+                    else:
+                        self.logger.warning(
+                            "Skipping momentum trade due to invalid stop/take profit",
+                            symbol=symbol,
+                            strategy_id=strategy_id,
+                            action=action,
+                            stop_loss=stop_loss_val,
+                            take_profit=take_profit_val,
+                        )
+                else:
+                    self.logger.info(
+                        "Skipping momentum trade execution",
+                        symbol=symbol,
+                        strategy_id=strategy_id,
+                        action=action,
+                        reason="HOLD action or missing trade_risk",
+                    )
+
+            return {
+                "success": True,
+                "strategy": "momentum",
+                "signal": {
+                    "action": action,
+                    "strength": signal_strength,
+                    "confidence": signal_strength * 10,
+                    "price_snapshot": price_snapshot,
+                },
+                "indicators": {
                     "rsi": rsi,
                     "macd_trend": macd_trend,
                     "momentum_score": signal_strength,
-                }
-                indicators_payload["price_snapshot"] = price_payload
-                indicators_payload["price"] = price_payload
+                    "price_snapshot": price_snapshot,
+                    "price": price_snapshot.get("current", 0),
+                },
+                "execution_result": execution_result,
+                "risk_management": risk_management_block,
+                "timestamp": datetime.utcnow().isoformat()
+            }
 
-                return {
-                    "success": True,
-                    "strategy": "momentum",
-                    "signal": {
-                        "action": action,
-                        "strength": signal_strength,
-                        "confidence": signal_strength * 10
-                    },
-                    "indicators": indicators_payload,
-                    "execution_result": execution_result,
-                    "risk_management": {
-                        "stop_loss": parameters.stop_loss,
-                        "take_profit": parameters.take_profit,
-                        "position_size": parameters.quantity,
-                        "entry_price": current_price,
-                        "stop_loss_price": recommended_stop,
-                        "take_profit_price": recommended_take,
-                        "position_notional": position_notional,
-                        "risk_amount": risk_amount_usd,
-                        "potential_profit": potential_profit_usd,
-                        "risk_reward_ratio": risk_reward_ratio,
-                        "recommended_side": action.lower(),
-                    },
-                    "timestamp": datetime.utcnow().isoformat()
-                }
-            else:
-                price_payload = price_snapshot if price_snapshot else None
-                indicators_payload = {
-                    "rsi": rsi,
-                    "macd_trend": macd_trend,
-                }
-                indicators_payload["price_snapshot"] = price_payload
-                indicators_payload["price"] = price_payload
-
-                return {
-                    "success": True,
-                    "strategy": "momentum",
-                    "signal": {
-                        "action": "HOLD",
-                        "strength": signal_strength,
-                        "confidence": signal_strength * 10,
-                        "reason": "Signal strength below threshold"
-                    },
-                    "indicators": indicators_payload,
-                    "risk_management": {
-                        "stop_loss": parameters.stop_loss,
-                        "take_profit": parameters.take_profit,
-                        "position_size": parameters.quantity,
-                        "entry_price": current_price,
-                        "recommended_side": "hold",
-                    },
-                    "timestamp": datetime.utcnow().isoformat()
-                }
-                
         except Exception as e:
             self.logger.error("Momentum strategy failed", error=str(e), exc_info=True)
             return {
@@ -1366,6 +1309,85 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
                 action = "HOLD"
                 confidence = 30
 
+            current_price = float(reversion_signals.get("current_price") or 0.0)
+            mean_price = float(reversion_signals.get("mean_price") or current_price)
+            std_dev = float(reversion_signals.get("standard_deviation") or 0.0)
+            bollinger_upper = float(reversion_signals.get("bollinger_upper") or (mean_price + std_dev))
+            bollinger_lower = float(reversion_signals.get("bollinger_lower") or (mean_price - std_dev))
+
+            price_snapshot = {
+                "current": round(current_price, 4) if current_price else 0.0,
+                "mean": round(mean_price, 4) if mean_price else 0.0,
+                "bollinger_upper": round(bollinger_upper, 4),
+                "bollinger_lower": round(bollinger_lower, 4),
+                "standard_deviation": round(std_dev, 6),
+            }
+
+            reversion_signals["price_snapshot"] = price_snapshot
+            reversion_signals["price"] = price_snapshot.get("current", 0)
+
+            quantity = float(parameters.quantity or 0.01)
+            notional_value = current_price * quantity if current_price else 0.0
+            volatility_ratio = std_dev / current_price if current_price else 0.0
+            risk_pct = max(0.005, min(0.05, abs(volatility_ratio)))
+            reward_pct = min(risk_pct * 1.8, 0.12)
+
+            trade_risk = {}
+            if action in {"BUY", "SELL"} and current_price > 0:
+                if action == "BUY":
+                    stop_loss_price = min(
+                        current_price * (1 - risk_pct),
+                        current_price - std_dev if std_dev else current_price * 0.99,
+                    )
+                    take_profit_price = max(mean_price, current_price * (1 + reward_pct))
+                else:
+                    stop_loss_price = max(
+                        current_price * (1 + risk_pct),
+                        current_price + std_dev if std_dev else current_price * 1.01,
+                    )
+                    take_profit_price = min(mean_price, current_price * (1 - reward_pct))
+                    take_profit_price = max(take_profit_price, current_price * 0.1)
+
+                # Validate stop loss and take profit before using them
+                if stop_loss_price <= 0 or take_profit_price <= 0:
+                    self.logger.warning(
+                        "Skipping mean reversion trade due to invalid risk bounds",
+                        symbol=symbol,
+                        strategy_id=strategy_id,
+                        stop_loss=stop_loss_price,
+                        take_profit=take_profit_price,
+                    )
+                    action = "HOLD"
+                else:
+                    risk_amount_usd = abs(current_price - stop_loss_price) * quantity
+                    potential_profit_usd = abs(take_profit_price - current_price) * quantity
+                    risk_reward_ratio = (
+                        potential_profit_usd / risk_amount_usd if risk_amount_usd > 0 else 0.0
+                    )
+
+                    trade_risk = {
+                        "entry_price": current_price,
+                        "stop_loss_price": round(stop_loss_price, 4),
+                        "take_profit_price": round(take_profit_price, 4),
+                        "stop_loss": round(stop_loss_price, 4),
+                        "take_profit": round(take_profit_price, 4),
+                        "risk_amount_usd": round(risk_amount_usd, 2),
+                        "potential_profit_usd": round(potential_profit_usd, 2),
+                        "risk_reward_ratio": round(risk_reward_ratio, 2),
+                        "risk_pct": round(risk_pct * 100, 2),
+                        "reward_pct": round(reward_pct * 100, 2),
+                    }
+
+            risk_management_block = {
+                "position_size": quantity,
+                "notional_usd": round(notional_value, 2),
+                "price_snapshot": price_snapshot,
+                "price": price_snapshot.get("current", 0),
+            }
+
+            if trade_risk:
+                risk_management_block.update(trade_risk)
+
             # Execute if confidence is high enough
             execution_result = None
             if confidence >= parameters.min_confidence and action != "HOLD":
@@ -1375,114 +1397,17 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
                     "quantity": parameters.quantity,
                     "order_type": "LIMIT",
                     "price": reversion_signals["entry_price"],
-                    "stop_loss": parameters.stop_loss,
-                    "take_profit": parameters.take_profit
+                    "stop_loss": trade_risk.get("stop_loss_price") if trade_risk else parameters.stop_loss,
+                    "take_profit": trade_risk.get("take_profit_price") if trade_risk else parameters.take_profit
                 }
-                
+
                 execution_result = await self.trade_executor.execute_trade(
                     trade_request,
                     user_id,
                     simulation_mode=True,
                     strategy_id=strategy_id,
                 )
-
-            def _safe_float(value: Any) -> Optional[float]:
-                try:
-                    if value is None:
-                        return None
-                    return float(value)
-                except (TypeError, ValueError):
-                    return None
-
-            entry_price = _safe_float(reversion_signals.get("entry_price"))
-            mean_price = _safe_float(reversion_signals.get("mean_price"))
-            std_dev = _safe_float(reversion_signals.get("standard_deviation"))
-            current_price = _safe_float(reversion_signals.get("current_price"))
-
-            price_snapshot: Dict[str, Optional[float]] = {
-                "current": round(current_price, 2) if current_price else None,
-                "mean_price": round(mean_price, 2) if mean_price else None,
-                "bollinger_upper": round(_safe_float(reversion_signals.get("bollinger_upper")) or 0, 2)
-                if reversion_signals.get("bollinger_upper")
-                else None,
-                "bollinger_lower": round(_safe_float(reversion_signals.get("bollinger_lower")) or 0, 2)
-                if reversion_signals.get("bollinger_lower")
-                else None,
-            }
-
-            if isinstance(price_data, dict):
-                data_block = (price_data.get("data") or {}).get(symbol, {})
-                aggregated = data_block.get("aggregated", {}) if isinstance(data_block, dict) else {}
-                market_snapshot = data_block.get("market_snapshots", {}) if isinstance(data_block, dict) else {}
-
-                snapshot_current = _safe_float(aggregated.get("average_price")) or _safe_float(
-                    market_snapshot.get("price")
-                )
-                snapshot_high = _safe_float(market_snapshot.get("price_high_24h"))
-                snapshot_low = _safe_float(market_snapshot.get("price_low_24h"))
-                snapshot_volume = _safe_float(aggregated.get("total_volume"))
-
-                if snapshot_current and not price_snapshot.get("current"):
-                    price_snapshot["current"] = round(snapshot_current, 2)
-                if snapshot_high:
-                    price_snapshot["high_24h"] = round(snapshot_high, 2)
-                if snapshot_low:
-                    price_snapshot["low_24h"] = round(snapshot_low, 2)
-                if snapshot_volume:
-                    price_snapshot["volume"] = round(snapshot_volume, 4)
-
-            risk_buffer = std_dev if std_dev and std_dev > 0 else (entry_price * 0.02 if entry_price else None)
-            reward_target = mean_price if mean_price else None
-
-            recommended_stop: Optional[float] = None
-            recommended_take: Optional[float] = None
-
-            if action == "BUY" and entry_price:
-                stop_candidate = entry_price - (risk_buffer or entry_price * 0.02)
-                recommended_stop = round(max(stop_candidate, 0), 2)
-                if reward_target and reward_target > entry_price:
-                    recommended_take = round(reward_target, 2)
-                elif risk_buffer:
-                    recommended_take = round(entry_price + risk_buffer, 2)
-            elif action == "SELL" and entry_price:
-                stop_candidate = entry_price + (risk_buffer or entry_price * 0.02)
-                recommended_stop = round(max(stop_candidate, 0), 2)
-                if reward_target and reward_target < entry_price:
-                    recommended_take = round(reward_target, 2)
-                elif risk_buffer:
-                    recommended_take = round(entry_price - risk_buffer, 2)
-
-            position_size = max(float(parameters.quantity or 0.01), 0.01)
-            position_notional = round(position_size * entry_price, 2) if entry_price else None
-
-            risk_amount = None
-            potential_profit = None
-            risk_reward_ratio = None
-
-            if entry_price and recommended_stop:
-                risk_amount = round(abs(entry_price - recommended_stop) * position_size, 2)
-            if entry_price and recommended_take:
-                potential_profit = round(abs(recommended_take - entry_price) * position_size, 2)
-            if risk_amount and risk_amount > 0 and potential_profit is not None:
-                risk_reward_ratio = round(potential_profit / risk_amount, 2)
-
-            risk_management = {
-                "entry_price": entry_price,
-                "stop_loss_price": recommended_stop,
-                "take_profit_price": recommended_take,
-                "position_size": position_size,
-                "position_notional": position_notional,
-                "risk_amount": risk_amount,
-                "potential_profit": potential_profit,
-                "risk_reward_ratio": risk_reward_ratio,
-                "recommended_side": action.lower(),
-            }
-
-            indicators_payload = dict(reversion_signals)
-            indicators_payload["price_snapshot"] = {
-                key: value for key, value in price_snapshot.items() if value is not None
-            }
-
+            
             return {
                 "success": True,
                 "strategy": "mean_reversion",
@@ -1490,11 +1415,12 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
                     "action": action,
                     "confidence": confidence,
                     "z_score": z_score,
-                    "entry_price": entry_price
+                    "entry_price": reversion_signals.get("entry_price"),
+                    "price_snapshot": price_snapshot,
                 },
-                "indicators": indicators_payload,
-                "risk_management": risk_management,
+                "indicators": reversion_signals,
                 "execution_result": execution_result,
+                "risk_management": risk_management_block,
                 "timestamp": datetime.utcnow().isoformat()
             }
             
@@ -1572,85 +1498,97 @@ class SpotAlgorithms(LoggerMixin, PriceResolverMixin):
                 current_price, resistance_levels, support_levels, parameters
             )
 
-            execution_result = None
-            direction = breakout_signal.get("direction", "HOLD")
-            conviction = breakout_signal.get("conviction", 0)
-            breakout_confidence = breakout_signal.get("confidence", 0)
-            breakout_probability = min(max(breakout_confidence / 100.0, 0.0), 1.0)
-
-            position_multiplier = max(conviction, 0.5)
-            position_size = round(max(parameters.quantity or 0.01, 0.01) * position_multiplier, 6)
-
-            stop_loss_price = float(breakout_signal.get("stop_loss") or 0.0)
-            take_profit_price = float(breakout_signal.get("take_profit") or 0.0)
-            entry_price = float(current_price)
-
-            if breakout_signal["breakout_detected"]:
-                trade_request = {
-                    "action": direction,
-                    "symbol": symbol,
-                    "quantity": position_size,
-                    "order_type": "MARKET",
-                    "stop_loss": stop_loss_price,
-                    "take_profit": take_profit_price
-                }
-
-                execution_result = await self.trade_executor.execute_trade(
-                    trade_request,
-                    user_id,
-                    simulation_mode=True,
-                    strategy_id=strategy_id,
-                )
-
-            risk_amount = None
-            potential_profit = None
-            risk_reward_ratio = None
-            position_notional = round(entry_price * position_size, 2) if entry_price else None
-
-            if entry_price and stop_loss_price:
-                risk_amount = round(abs(entry_price - stop_loss_price) * position_size, 2)
-            if entry_price and take_profit_price:
-                potential_profit = round(abs(take_profit_price - entry_price) * position_size, 2)
-            if risk_amount and risk_amount > 0 and potential_profit is not None:
-                risk_reward_ratio = round(potential_profit / risk_amount, 2)
+            # Calculate executed quantity with conviction multiplier
+            base_quantity = float(parameters.quantity or 0.01)
+            conviction = float(breakout_signal.get("conviction", 1.0))
+            executed_quantity = base_quantity * conviction
+            notional_value = current_price * executed_quantity
 
             price_snapshot = {
-                "current": round(entry_price, 2) if entry_price else None,
-                "stop_loss": round(stop_loss_price, 2) if stop_loss_price else None,
-                "take_profit": round(take_profit_price, 2) if take_profit_price else None,
+                "current": round(current_price, 4),
+                "resistance_levels": resistance_levels[:3],
+                "support_levels": support_levels[:3],
             }
+            breakout_signal["price_snapshot"] = price_snapshot
+            breakout_signal["price"] = price_snapshot.get("current", 0)
+
+            risk_management_block: Dict[str, Any] = {
+                "position_size": executed_quantity,
+                "notional_usd": round(notional_value, 2),
+                "price_snapshot": price_snapshot,
+                "price": price_snapshot.get("current", 0),
+            }
+
+            if breakout_signal["breakout_detected"]:
+                stop_loss_price = float(breakout_signal.get("stop_loss") or 0.0)
+                take_profit_price = float(breakout_signal.get("take_profit") or 0.0)
+                if stop_loss_price <= 0 or take_profit_price <= 0:
+                    stop_loss_price = current_price * (0.98 if breakout_signal["direction"] == "BUY" else 1.02)
+                    take_profit_price = current_price * (1.05 if breakout_signal["direction"] == "BUY" else 0.95)
+
+                if stop_loss_price <= 0 or take_profit_price <= 0:
+                    self.logger.warning(
+                        "Skipping breakout trade due to invalid risk bounds",
+                        symbol=symbol,
+                        strategy_id=strategy_id,
+                        stop_loss=stop_loss_price,
+                        take_profit=take_profit_price,
+                    )
+                    execution_result = None
+                else:
+                    # Sanitize and write back to breakout_signal so payload matches execution
+                    sanitized_stop = round(stop_loss_price, 4)
+                    sanitized_take = round(take_profit_price, 4)
+                    breakout_signal["stop_loss"] = sanitized_stop
+                    breakout_signal["take_profit"] = sanitized_take
+
+                    risk_amount_usd = abs(current_price - stop_loss_price) * executed_quantity
+                    potential_profit_usd = abs(take_profit_price - current_price) * executed_quantity
+                    risk_reward_ratio = (
+                        potential_profit_usd / risk_amount_usd if risk_amount_usd > 0 else 0.0
+                    )
+
+                    risk_management_block.update(
+                        {
+                            "entry_price": current_price,
+                            "stop_loss_price": sanitized_stop,
+                            "take_profit_price": sanitized_take,
+                            "stop_loss": sanitized_stop,
+                            "take_profit": sanitized_take,
+                            "risk_amount_usd": round(risk_amount_usd, 2),
+                            "potential_profit_usd": round(potential_profit_usd, 2),
+                            "risk_reward_ratio": round(risk_reward_ratio, 2),
+                        }
+                    )
+
+                    trade_request = {
+                        "action": breakout_signal["direction"],
+                        "symbol": symbol,
+                        "quantity": executed_quantity,
+                        "order_type": "MARKET",
+                        "stop_loss": sanitized_stop,
+                        "take_profit": sanitized_take,
+                    }
+
+                    execution_result = await self.trade_executor.execute_trade(
+                        trade_request,
+                        user_id,
+                        simulation_mode=True,
+                        strategy_id=strategy_id,
+                    )
+            else:
+                execution_result = None
 
             return {
                 "success": True,
                 "strategy": "breakout",
-                "signal": {
-                    "action": direction,
-                    "confidence": breakout_confidence,
-                    "conviction": conviction,
-                    "breakout_probability": breakout_probability,
-                },
                 "breakout_analysis": breakout_signal,
                 "current_price": current_price,
-                "risk_management": {
-                    "entry_price": entry_price,
-                    "stop_loss_price": round(stop_loss_price, 2) if stop_loss_price else None,
-                    "take_profit_price": round(take_profit_price, 2) if take_profit_price else None,
-                    "position_size": position_size,
-                    "position_notional": position_notional,
-                    "risk_amount": risk_amount,
-                    "potential_profit": potential_profit,
-                    "risk_reward_ratio": risk_reward_ratio,
-                    "recommended_side": direction.lower() if direction else "hold",
-                },
-                "indicators": {
-                    "price_snapshot": {k: v for k, v in price_snapshot.items() if v is not None},
-                    "resistance_levels": resistance_levels[:3],
-                    "support_levels": support_levels[:3],
-                },
                 "key_levels": {
                     "resistance": resistance_levels[:3],
-                    "support": support_levels[:3],
+                    "support": support_levels[:3]
                 },
+                "risk_management": risk_management_block,
                 "execution_result": execution_result,
                 "timestamp": datetime.utcnow().isoformat()
             }
@@ -1775,12 +1713,6 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
         self._platform_strategy_ids: Dict[str, str] = {}
         self._platform_strategy_lock = asyncio.Lock()
         self._platform_strategy_owner_id: Optional[uuid.UUID] = None
-
-        # Transient price cache tuning for strategy scans
-        self._price_cache: Dict[Tuple[str, str], Dict[str, Any]] = {}
-        self._price_cache_inflight: Dict[Tuple[str, str], asyncio.Future] = {}
-        self._price_cache_ttl = 45.0  # slightly longer than a single scan burst
-        self._price_cache_capacity = 512
 
     async def get_platform_strategy_id(self, function_name: str) -> Optional[str]:
         """Return the UUID for a platform AI strategy function."""
@@ -2092,7 +2024,7 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
                 "summary": (
                     "Daily double-digit moves are common. Position sizing, stop-losses and disciplined risk budgets are critical safeguards."
                 ),
-                "actionable_tip": "Stress test positions assuming 30–80% annualised volatility and plan for gap risk.",
+                "actionable_tip": "Stress test positions assuming 30?80% annualised volatility and plan for gap risk.",
             },
             {
                 "topic": "Stablecoins vs. alt-coins",
@@ -2456,14 +2388,53 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
         risk_mode: str = "balanced",
         exchange: str = "binance",
         user_id: Optional[str] = None,
-        simulation_mode: bool = True
+        simulation_mode: bool = True,
+        timeout_seconds: Optional[float] = None,
+        start_time: Optional[float] = None,
+        preloaded_portfolio: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Main strategy execution router - handles all 25+ functions."""
 
-        start_time = time.time()
-        self.logger.info("Executing strategy", function=function, strategy_type=strategy_type, symbol=symbol)
+        # Use monotonic time for timeout calculations to avoid issues with system clock changes
+        # If start_time is provided, ensure it's already a monotonic timestamp
+        execution_start_time = start_time if start_time is not None else time.monotonic()
+        effective_timeout = timeout_seconds or 30.0
+
+        self.logger.info(
+            "Executing strategy",
+            function=function,
+            strategy_type=strategy_type,
+            symbol=symbol,
+            timeout_seconds=effective_timeout,
+        )
+
+        def _abort_if_timeout(reason: str, threshold: float = 0.9) -> Optional[Dict[str, Any]]:
+            elapsed = time.monotonic() - execution_start_time
+            if elapsed >= effective_timeout * threshold:
+                self.logger.warning(
+                    "Strategy execution approaching timeout",
+                    function=function,
+                    reason=reason,
+                    elapsed_seconds=elapsed,
+                    timeout_seconds=effective_timeout,
+                )
+                return {
+                    "success": False,
+                    "error": "timeout_approaching",
+                    "partial": True,
+                    "reason": reason,
+                    "elapsed_seconds": elapsed,
+                }
+            return None
 
         parameter_dict = dict(parameters or {})
+
+        async def _await_with_guard(awaitable, reason: str, threshold: float = 0.95):
+            timeout_payload = _abort_if_timeout(reason, threshold)
+            if timeout_payload:
+                return timeout_payload, True
+            result = await awaitable
+            return result, False
         symbol_override = parameter_dict.get("symbol")
         if symbol_override:
             symbol = str(symbol_override)
@@ -2489,14 +2460,24 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
 
         try:
             if function in ["futures_trade", "options_trade", "perpetual_trade", "complex_strategy"]:
-                strategy_result = await self._execute_derivatives_strategy(
-                    function, strategy_type, symbol, strategy_params, exchange, user_id
+                strategy_result, aborted = await _await_with_guard(
+                    self._execute_derivatives_strategy(
+                        function, strategy_type, symbol, strategy_params, exchange, user_id
+                    ),
+                    "derivatives_dispatch",
                 )
+                if aborted:
+                    return strategy_result
 
             elif function in ["spot_momentum_strategy", "spot_mean_reversion", "spot_breakout_strategy"]:
-                strategy_result = await self._execute_spot_strategy(
-                    function, symbol, strategy_params, user_id
+                strategy_result, aborted = await _await_with_guard(
+                    self._execute_spot_strategy(
+                        function, symbol, strategy_params, user_id
+                    ),
+                    "spot_dispatch",
                 )
+                if aborted:
+                    return strategy_result
 
             elif function in ["algorithmic_trading", "pairs_trading", "statistical_arbitrage", "market_making", "scalping_strategy"]:
                 strategy_symbol = symbol
@@ -2509,93 +2490,153 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
 
                 strategy_params.symbol = strategy_symbol
 
-                strategy_result = await self._execute_algorithmic_strategy(
-                    function, strategy_type, strategy_symbol, strategy_params, user_id, parameter_dict
+                strategy_result, aborted = await _await_with_guard(
+                    self._execute_algorithmic_strategy(
+                        function, strategy_type, strategy_symbol, strategy_params, user_id, parameter_dict
+                    ),
+                    "algorithmic_dispatch",
                 )
+                if aborted:
+                    return strategy_result
 
             elif function == "risk_management":
-                strategy_result = await self.risk_management(
-                    analysis_type=analysis_type_param or "comprehensive",
-                    symbols=symbols_param or symbol,
-                    parameters=parameter_dict,
-                    user_id=user_id
+                strategy_result, aborted = await _await_with_guard(
+                    self.risk_management(
+                        analysis_type=analysis_type_param or "comprehensive",
+                        symbols=symbols_param or symbol,
+                        parameters=parameter_dict,
+                        user_id=user_id
+                    ),
+                    "risk_management",
                 )
+                if aborted:
+                    return strategy_result
 
             elif function in ["position_management", "portfolio_optimization"]:
-                strategy_result = await self._execute_management_function(
-                    function, symbol, strategy_params, user_id, parameter_dict
+                strategy_result, aborted = await _await_with_guard(
+                    self._execute_management_function(
+                        function,
+                        symbol,
+                        strategy_params,
+                        user_id,
+                        parameter_dict,
+                        preloaded_portfolio=preloaded_portfolio,
+                    ),
+                    "management_dispatch",
                 )
+                if aborted:
+                    return strategy_result
 
             elif function == "funding_arbitrage":
-                strategy_result = await self.funding_arbitrage(
-                    symbols=symbols_param or symbol,
-                    exchanges=exchanges_param or "all",
-                    min_funding_rate=parameter_dict.get("min_funding_rate", 0.005),
-                    user_id=user_id
+                strategy_result, aborted = await _await_with_guard(
+                    self.funding_arbitrage(
+                        symbols=symbols_param or symbol,
+                        exchanges=exchanges_param or "all",
+                        min_funding_rate=parameter_dict.get("min_funding_rate", 0.005),
+                        user_id=user_id
+                    ),
+                    "funding_arbitrage",
                 )
+                if aborted:
+                    return strategy_result
 
             elif function == "calculate_greeks":
                 strike_price = parameter_dict.get("strike_price")
                 if strike_price is None and strategy_params.price:
                     strike_price = strategy_params.price * 1.1
-                strategy_result = await self.calculate_greeks(
-                    option_symbol=symbol,
-                    underlying_price=strategy_params.price or 0,
-                    strike_price=strike_price,
-                    time_to_expiry=parameter_dict.get("time_to_expiry", 30 / 365),
-                    volatility=parameter_dict.get("volatility", 0),
-                    user_id=user_id
+                strategy_result, aborted = await _await_with_guard(
+                    self.calculate_greeks(
+                        option_symbol=symbol,
+                        underlying_price=strategy_params.price or 0,
+                        strike_price=strike_price,
+                        time_to_expiry=parameter_dict.get("time_to_expiry", 30 / 365),
+                        volatility=parameter_dict.get("volatility", 0),
+                        user_id=user_id
+                    ),
+                    "calculate_greeks",
                 )
+                if aborted:
+                    return strategy_result
 
             elif function == "swing_trading":
-                strategy_result = await self.swing_trading(
-                    symbol=symbol,
-                    timeframe=strategy_params.timeframe,
-                    holding_period=parameter_dict.get("holding_period", 7),
-                    user_id=user_id
+                strategy_result, aborted = await _await_with_guard(
+                    self.swing_trading(
+                        symbol=symbol,
+                        timeframe=strategy_params.timeframe,
+                        holding_period=parameter_dict.get("holding_period", 7),
+                        user_id=user_id
+                    ),
+                    "swing_trading",
                 )
+                if aborted:
+                    return strategy_result
 
             elif function == "leverage_position":
                 leverage_params = dict(parameter_dict)
                 leverage_params.setdefault("position_size", strategy_params.quantity)
                 action = leverage_params.pop("action", "increase_leverage")
-                strategy_result = await self.leverage_position(
-                    symbol=symbol,
-                    action=action,
-                    target_leverage=strategy_params.leverage,
-                    parameters=leverage_params,
-                    user_id=user_id
+                strategy_result, aborted = await _await_with_guard(
+                    self.leverage_position(
+                        symbol=symbol,
+                        action=action,
+                        target_leverage=strategy_params.leverage,
+                        parameters=leverage_params,
+                        user_id=user_id
+                    ),
+                    "leverage_position",
                 )
+                if aborted:
+                    return strategy_result
 
             elif function == "margin_status":
-                strategy_result = await self.margin_status(
-                    user_id=user_id,
-                    exchange=exchange
+                strategy_result, aborted = await _await_with_guard(
+                    self.margin_status(
+                        user_id=user_id,
+                        exchange=exchange
+                    ),
+                    "margin_status",
                 )
+                if aborted:
+                    return strategy_result
 
             elif function == "options_chain":
-                strategy_result = await self.options_chain(
-                    underlying_symbol=symbol,
-                    expiry_date=parameter_dict.get("expiry_date"),
-                    user_id=user_id
+                strategy_result, aborted = await _await_with_guard(
+                    self.options_chain(
+                        underlying_symbol=symbol,
+                        expiry_date=parameter_dict.get("expiry_date"),
+                        user_id=user_id
+                    ),
+                    "options_chain",
                 )
+                if aborted:
+                    return strategy_result
 
             elif function == "basis_trade":
-                strategy_result = await self.basis_trade(
-                    symbol=symbol,
-                    user_id=user_id
+                strategy_result, aborted = await _await_with_guard(
+                    self.basis_trade(
+                        symbol=symbol,
+                        user_id=user_id
+                    ),
+                    "basis_trade",
                 )
+                if aborted:
+                    return strategy_result
 
             elif function == "liquidation_price":
-                strategy_result = await self.liquidation_price(
-                    symbol=symbol,
-                    entry_price=strategy_params.price or 0,
-                    leverage=strategy_params.leverage,
-                    position_side=parameter_dict.get("position_side")
-                    or parameter_dict.get("position_type", "long"),
-                    position_size=parameter_dict.get("position_size", strategy_params.quantity),
-                    user_id=user_id
+                strategy_result, aborted = await _await_with_guard(
+                    self.liquidation_price(
+                        symbol=symbol,
+                        entry_price=strategy_params.price or 0,
+                        leverage=strategy_params.leverage,
+                        position_side=parameter_dict.get("position_side")
+                        or parameter_dict.get("position_type", "long"),
+                        position_size=parameter_dict.get("position_size", strategy_params.quantity),
+                        user_id=user_id
+                    ),
+                    "liquidation_price",
                 )
+                if aborted:
+                    return strategy_result
 
             elif function == "hedge_position":
                 hedge_params = dict(parameter_dict)
@@ -2603,21 +2644,31 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
                 primary_position_size = hedge_params.get("primary_position_size", strategy_params.quantity)
                 primary_side = hedge_params.get("primary_side", "long")
                 hedge_type = hedge_params.get("hedge_type", "direct_hedge")
-                strategy_result = await self.hedge_position(
-                    symbol,
-                    primary_position_size,
-                    primary_side=primary_side,
-                    hedge_type=hedge_type,
-                    parameters=hedge_params,
-                    user_id=user_id
+                strategy_result, aborted = await _await_with_guard(
+                    self.hedge_position(
+                        symbol,
+                        primary_position_size,
+                        primary_side=primary_side,
+                        hedge_type=hedge_type,
+                        parameters=hedge_params,
+                        user_id=user_id
+                    ),
+                    "hedge_position",
                 )
+                if aborted:
+                    return strategy_result
 
             elif function == "strategy_performance":
-                strategy_result = await self.strategy_performance(
-                    strategy_name=parameter_dict.get("strategy_name"),
-                    analysis_period=parameter_dict.get("analysis_period", "30d"),
-                    user_id=user_id
+                strategy_result, aborted = await _await_with_guard(
+                    self.strategy_performance(
+                        strategy_name=parameter_dict.get("strategy_name"),
+                        analysis_period=parameter_dict.get("analysis_period", "30d"),
+                        user_id=user_id
+                    ),
+                    "strategy_performance",
                 )
+                if aborted:
+                    return strategy_result
 
             else:
                 strategy_result = {
@@ -2658,7 +2709,7 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
                 "timestamp": datetime.utcnow().isoformat()
             }
 
-        execution_latency = round(time.time() - start_time, 4)
+        execution_latency = round(time.monotonic() - execution_start_time, 4)
         if isinstance(strategy_result, dict):
             strategy_result.setdefault("execution_time_seconds", execution_latency)
 
@@ -4469,11 +4520,12 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
         parameters: StrategyParameters,
         user_id: str,
         raw_parameters: Optional[Dict[str, Any]] = None,
+        preloaded_portfolio: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """Execute position/risk management functions."""
 
         raw_parameters = raw_parameters or {}
-        
+
         if function == "portfolio_optimization":
             # Import the portfolio risk service
             from app.services.portfolio_risk_core import portfolio_risk_service
@@ -4496,33 +4548,66 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
             if not portfolio_snapshot_param and raw_parameters.get("positions"):
                 portfolio_snapshot_param = {"positions": raw_parameters.get("positions")}
 
+            def _extract_snapshot(candidate: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+                if not isinstance(candidate, dict):
+                    return None
+                if "positions" in candidate:
+                    return candidate
+                nested = candidate.get("portfolio") if isinstance(candidate.get("portfolio"), dict) else None
+                if nested and isinstance(nested, dict) and "positions" in nested:
+                    return nested
+                return None
+
             if portfolio_snapshot_param:
                 provided_snapshot = await self._build_portfolio_snapshot_from_parameters(
                     portfolio_snapshot_param
                 )
                 portfolio_result = {"success": True, "portfolio": provided_snapshot}
             else:
-                # Add timeout to prevent hanging
-                try:
-                    portfolio_result = await asyncio.wait_for(
-                        portfolio_risk_service.get_portfolio(user_id),
-                        timeout=5.0  # Reduced timeout
+                preloaded_snapshot = _extract_snapshot(preloaded_portfolio)
+                if preloaded_snapshot:
+                    # Reuse the portfolio snapshot fetched by the discovery pipeline so we
+                    # avoid an additional round-trip to the portfolio service for each scan.
+                    self.logger.debug(
+                        "Using preloaded portfolio snapshot for optimization",
+                        source="preloaded_portfolio",
                     )
-                    provided_snapshot = portfolio_result.get("portfolio") if portfolio_result.get("success") else None
-                except asyncio.TimeoutError:
-                    self.logger.warning("Portfolio service timeout, using fallback data")
-                    portfolio_result = {"success": False, "error": "Portfolio service timeout"}
-                    provided_snapshot = None
+                    provided_snapshot = await self._build_portfolio_snapshot_from_parameters(
+                        preloaded_snapshot
+                    )
+                    if provided_snapshot:
+                        portfolio_result = {"success": True, "portfolio": provided_snapshot}
+                    else:
+                        self.logger.warning(
+                            "Preloaded portfolio snapshot invalid; refetching",
+                            source="preloaded_portfolio",
+                        )
+
+                if provided_snapshot is None:
+                    # Add timeout to prevent hanging
+                    try:
+                        portfolio_result = await asyncio.wait_for(
+                            portfolio_risk_service.get_portfolio(user_id),
+                            timeout=5.0  # Reduced timeout
+                        )
+                        provided_snapshot = portfolio_result.get("portfolio") if portfolio_result.get("success") else None
+                    except asyncio.TimeoutError:
+                        self.logger.warning("Portfolio service timeout, using fallback data")
+                        portfolio_result = {"success": False, "error": "Portfolio service timeout"}
+                        provided_snapshot = None
+                    except asyncio.CancelledError:
+                        self.logger.warning("Portfolio service cancelled; treating as timeout")
+                        portfolio_result = {"success": False, "error": "Portfolio service cancelled"}
+                        provided_snapshot = None
 
             current_positions = []
             if provided_snapshot:
                 current_positions = provided_snapshot.get("positions", [])
 
-            # Run each optimization strategy
-            for strategy in optimization_strategies:
+            async def run_optimizer(strategy: str) -> Tuple[str, Dict[str, Any]]:
                 try:
                     if provided_snapshot and provided_snapshot.get("positions"):
-                        opt_result = await asyncio.wait_for(
+                        result = await asyncio.wait_for(
                             portfolio_risk_service.optimize_allocation_with_portfolio_data(
                                 user_id=user_id or "system",
                                 portfolio_data=provided_snapshot,
@@ -4533,60 +4618,76 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
                                     "max_positions": 15,
                                 },
                             ),
-                            timeout=3.0  # Reduced timeout
+                            timeout=3.0,
                         )
                     else:
-                        opt_result = await asyncio.wait_for(
+                        result = await asyncio.wait_for(
                             portfolio_risk_service.optimize_allocation(
                                 user_id=user_id,
                                 strategy=strategy,
                                 constraints={
-                                    "min_position_size": 0.02,  # 2% minimum
-                                    "max_position_size": 0.25,  # 25% maximum
+                                    "min_position_size": 0.02,
+                                    "max_position_size": 0.25,
                                     "max_positions": 15,
                                 },
                             ),
-                            timeout=3.0  # Reduced timeout
+                            timeout=3.0,
                         )
-                    
-                    if opt_result.get("success") and opt_result.get("optimization_result"):
-                        opt_data = opt_result["optimization_result"]
-                        
-                        # Calculate profit potential for this strategy
-                        expected_return = opt_data.get("expected_return", 0)
-                        risk_level = opt_data.get("risk_metrics", {}).get("portfolio_volatility", 0)
-                        sharpe = opt_data.get("expected_sharpe", 0)
-                        
-                        # Store strategy result
-                        strategy_results[strategy] = {
-                            "expected_return": expected_return,
-                            "risk_level": risk_level,
-                            "sharpe_ratio": sharpe,
-                            "weights": opt_data.get("weights", {}),
-                            "rebalancing_needed": opt_data.get("rebalancing_needed", False)
-                        }
-                        
-                        # Create recommendations if rebalancing needed
-                        if opt_data.get("rebalancing_needed"):
-                            suggested_trades = opt_data.get("suggested_trades", [])
-                            for trade in suggested_trades:
-                                all_recommendations.append({
-                                    "strategy": strategy.upper(),
-                                    "symbol": trade.get("symbol", ""),
-                                    "action": trade.get("action", ""),
-                                    "amount": trade.get("amount", 0),
-                                    "rationale": f"{strategy.replace('_', ' ').title()} optimization suggests this trade",
-                                    "improvement_potential": expected_return,
-                                    "risk_reduction": trade.get("risk_reduction", 0),
-                                    "urgency": "HIGH" if abs(trade.get("amount", 0)) > 0.1 else "MEDIUM"
-                                })
-                        
-                except Exception as e:
-                    self.logger.warning(f"Failed to run {strategy} optimization", error=str(e))
+                    return strategy, result
+                except asyncio.TimeoutError:
+                    self.logger.warning(
+                        "Portfolio optimization strategy timed out",
+                        user_id=user_id,
+                        strategy=strategy,
+                    )
+                    return strategy, {"success": False, "error": "optimization_timeout"}
+                except Exception as exc:
+                    self.logger.warning(
+                        f"Failed to run {strategy} optimization",
+                        error=str(exc),
+                    )
+                    return strategy, {"success": False, "error": str(exc)}
+
+            optimization_tasks = [run_optimizer(strategy) for strategy in optimization_strategies]
+            results = await asyncio.gather(*optimization_tasks)
+
+            for strategy, opt_result in results:
+                if opt_result.get("success") and opt_result.get("optimization_result"):
+                    opt_data = opt_result["optimization_result"]
+
+                    # Calculate profit potential for this strategy
+                    expected_return = opt_data.get("expected_return", 0)
+                    risk_level = opt_data.get("risk_metrics", {}).get("portfolio_volatility", 0)
+                    sharpe = opt_data.get("expected_sharpe", 0)
+
+                    # Store strategy result
                     strategy_results[strategy] = {
-                        "error": str(e),
+                        "expected_return": expected_return,
+                        "risk_level": risk_level,
+                        "sharpe_ratio": sharpe,
+                        "weights": opt_data.get("weights", {}),
+                        "rebalancing_needed": opt_data.get("rebalancing_needed", False)
+                    }
+
+                    # Create recommendations if rebalancing needed
+                    if opt_data.get("rebalancing_needed"):
+                        suggested_trades = opt_data.get("suggested_trades", [])
+                        for trade in suggested_trades:
+                            all_recommendations.append({
+                                "strategy": strategy.upper(),
+                                "symbol": trade.get("symbol", ""),
+                                "action": trade.get("action", ""),
+                                "amount": trade.get("amount", 0),
+                                "rationale": f"{strategy.replace('_', ' ').title()} optimization suggests this trade",
+                                "improvement_potential": expected_return,
+                                "risk_reduction": trade.get("risk_reduction", 0),
+                                "urgency": "HIGH" if abs(trade.get("amount", 0)) > 0.1 else "MEDIUM"
+                            })
+                else:
+                    strategy_results[strategy] = {
+                        "error": opt_result.get("error", "unknown_error"),
                         "expected_return": 0,
-                        "risk_level": 0
+                        "risk_level": 0,
                     }
             
             # If no positions exist, suggest initial allocation
@@ -5836,11 +5937,9 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
                 "risk_assessment": {}
             }
             
-            # Get price data for both symbols concurrently
-            price_a_data, price_b_data = await asyncio.gather(
-                self._get_symbol_price("binance", f"{symbol_a}USDT"),
-                self._get_symbol_price("binance", f"{symbol_b}USDT"),
-            )
+            # Get price data for both symbols
+            price_a_data = await self._get_symbol_price("binance", f"{symbol_a}USDT")
+            price_b_data = await self._get_symbol_price("binance", f"{symbol_b}USDT")
             
             price_a = float(price_a_data.get("price", 0)) if price_a_data else 0
             price_b = float(price_b_data.get("price", 0)) if price_b_data else 0
@@ -6227,7 +6326,7 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
         
         try:
             params = parameters or {}
-
+            
             mm_result = {
                 "symbol": symbol,
                 "strategy_type": strategy_type,
@@ -6237,17 +6336,12 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
                 "profitability_analysis": {},
                 "risk_controls": {}
             }
-
-            volatility_task = asyncio.create_task(self._estimate_daily_volatility(symbol))
-
+            
             # Get current market data
             price_data = await self._get_symbol_price(exchange, symbol)
             current_price = float(price_data.get("price", 0)) if price_data else 0
-
+            
             if current_price <= 0:
-                volatility_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await volatility_task
                 return {
                     "success": False,
                     "error": f"Unable to get real price for {symbol}",
@@ -6259,15 +6353,13 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
             order_book_depth = params.get("order_book_depth", 1000000)  # $1M depth
             daily_volume = float(price_data.get("volume", 1000000000)) if price_data else 1000000000
             
-            daily_volatility = await volatility_task
-
             mm_result["market_microstructure"] = {
                 "current_price": current_price,
                 "typical_spread_bps": bid_ask_spread_bps,
                 "order_book_depth_usd": order_book_depth,
                 "daily_volume_usd": daily_volume,
                 "market_impact": self._estimate_market_impact(symbol, daily_volume),
-                "volatility": daily_volatility,
+                "volatility": await self._estimate_daily_volatility(symbol),
                 "liquidity_score": min(100, daily_volume / 100000000),  # Volume-based liquidity score
                 "market_making_suitability": daily_volume > 100000000 and bid_ask_spread_bps > 5
             }
@@ -6392,7 +6484,7 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
         
         try:
             params = parameters or {}
-
+            
             scalp_result = {
                 "symbol": symbol,
                 "timeframe": timeframe,
@@ -6402,24 +6494,19 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
                 "profit_targets": {},
                 "risk_controls": {}
             }
-
-            volatility_task = asyncio.create_task(self._estimate_daily_volatility(symbol))
-
+            
             # Get current market conditions
             price_data = await self._get_symbol_price(exchange, symbol)
             if not price_data or not price_data.get("success"):
-                volatility_task.cancel()
-                with contextlib.suppress(asyncio.CancelledError):
-                    await volatility_task
                 return {
                     "success": False,
                     "error": f"Unable to get price for {symbol}",
                     "function": "scalping_strategy"
                 }
             current_price = float(price_data.get("price", 0))
-
+            
             # Market condition analysis for scalping
-            daily_volatility = await volatility_task
+            daily_volatility = await self._estimate_daily_volatility(symbol)
             intraday_volatility = daily_volatility / 4  # Approximate hourly volatility
             tick_size = self._get_tick_size(symbol, exchange)
             
@@ -7401,7 +7488,37 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
                     }
 
                 # Fallback to latest backtest results if available
-                backtest_stmt = select(BacktestResult).order_by(BacktestResult.end_date.desc()).limit(1)
+                # Use explicit column selection to avoid errors if columns don't exist yet
+                backtest_stmt = select(
+                    BacktestResult.id,
+                    BacktestResult.strategy_id,
+                    BacktestResult.strategy_name,
+                    BacktestResult.user_id,
+                    BacktestResult.start_date,
+                    BacktestResult.end_date,
+                    BacktestResult.initial_capital,
+                    BacktestResult.symbols,
+                    BacktestResult.strategy_params,
+                    BacktestResult.risk_params,
+                    BacktestResult.execution_params,
+                    BacktestResult.final_capital,
+                    BacktestResult.total_return,
+                    BacktestResult.total_return_pct,
+                    BacktestResult.total_trades,
+                    BacktestResult.winning_trades,
+                    BacktestResult.losing_trades,
+                    BacktestResult.win_rate,
+                    BacktestResult.profit_factor,
+                    BacktestResult.expectancy,
+                    BacktestResult.max_drawdown,
+                    BacktestResult.max_drawdown_duration,
+                    BacktestResult.sharpe_ratio,
+                    BacktestResult.sortino_ratio,
+                    BacktestResult.calmar_ratio,
+                    # Legacy metrics - exclude annual_return, volatility, beta, alpha as they may not exist in DB yet
+                    # Only select columns that are actually used below
+                    BacktestResult.avg_trade_return,
+                ).order_by(BacktestResult.end_date.desc()).limit(1)
 
                 if strategy_name:
                     backtest_stmt = backtest_stmt.where(
@@ -7418,46 +7535,54 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
                             BacktestResult.user_id.is_(None)
                         )
                     )
+                
+                # Wrap query execution in try/except to handle missing columns gracefully
+                try:
+                    backtest_result = await db.execute(backtest_stmt)
+                    backtest_row = backtest_result.first()
 
-                backtest_result = await db.execute(backtest_stmt)
-                backtest = backtest_result.scalars().first()
+                    if backtest_row:
+                        # Access columns safely - some may not exist if migration hasn't run
+                        total_return_decimal = safe_float(getattr(backtest_row, 'total_return_pct', None), safe_float(getattr(backtest_row, 'total_return', None), 0.0)) / 100
+                        win_rate_decimal = safe_float(getattr(backtest_row, 'win_rate', None), 0.0) / 100
+                        profit_factor = safe_float(getattr(backtest_row, 'profit_factor', None), 0.0)
+                        avg_trade_decimal = safe_float(getattr(backtest_row, 'avg_trade_return', None), 0.0) / 100
+                        max_drawdown = safe_float(getattr(backtest_row, 'max_drawdown', None), 0.0)
+                        volatility_ratio = safe_float(getattr(backtest_row, 'volatility', None), 0.0)
+                        recovery_time = safe_int(getattr(backtest_row, 'max_drawdown_duration', None), 0)
 
-                if backtest:
-                    total_return_decimal = safe_float(backtest.total_return_pct, safe_float(backtest.total_return, 0.0)) / 100
-                    win_rate_decimal = safe_float(backtest.win_rate, 0.0) / 100
-                    profit_factor = safe_float(backtest.profit_factor, 0.0)
-                    avg_trade_decimal = safe_float(backtest.avg_trade_return, 0.0) / 100
-                    max_drawdown = safe_float(backtest.max_drawdown, 0.0)
-                    volatility_ratio = safe_float(backtest.volatility, 0.0)
-                    recovery_time = safe_int(backtest.max_drawdown_duration, 0)
-
-                    return {
-                        "total_return": total_return_decimal,
-                        "total_return_units": "decimal",
-                        "benchmark_return": 0.0,
-                        "benchmark_return_units": "decimal",
-                        "volatility": volatility_ratio,
-                        "volatility_units": "ratio",
-                        "max_drawdown": max_drawdown,
-                        "max_drawdown_units": "decimal",
-                        "recovery_time": recovery_time,
-                        "recovery_time_units": "days",
-                        "win_rate": win_rate_decimal,
-                        "win_rate_units": "decimal",
-                        "profit_factor": profit_factor,
-                        "avg_trade": avg_trade_decimal,
-                        "avg_trade_units": "decimal",
-                        "largest_win": 0.0,
-                        "largest_win_units": "decimal",
-                        "largest_loss": 0.0,
-                        "largest_loss_units": "decimal",
-                        "total_trades": safe_int(backtest.total_trades, 0),
-                        "net_pnl": safe_float(backtest.final_capital, 0.0) - safe_float(backtest.initial_capital, 0.0),
-                        "net_pnl_units": "usd",
-                        "data_quality": "simulated_backtest",
-                        "status": "backtest_only",
-                        "performance_badges": ["Simulated / No live trades"]
-                    }
+                        return {
+                            "total_return": total_return_decimal,
+                            "total_return_units": "decimal",
+                            "benchmark_return": 0.0,
+                            "benchmark_return_units": "decimal",
+                            "volatility": volatility_ratio,
+                            "volatility_units": "ratio",
+                            "max_drawdown": max_drawdown,
+                            "max_drawdown_units": "decimal",
+                            "recovery_time": recovery_time,
+                            "recovery_time_units": "days",
+                            "win_rate": win_rate_decimal,
+                            "win_rate_units": "decimal",
+                            "profit_factor": profit_factor,
+                            "avg_trade": avg_trade_decimal,
+                            "avg_trade_units": "decimal",
+                            "largest_win": 0.0,
+                            "largest_win_units": "decimal",
+                            "largest_loss": 0.0,
+                            "largest_loss_units": "decimal",
+                            "total_trades": safe_int(getattr(backtest_row, 'total_trades', None), 0),
+                            "net_pnl": safe_float(getattr(backtest_row, 'final_capital', None), 0.0) - safe_float(getattr(backtest_row, 'initial_capital', None), 0.0),
+                            "net_pnl_units": "usd",
+                            "data_quality": "simulated_backtest",
+                            "status": "backtest_only",
+                            "performance_badges": ["Simulated / No live trades"]
+                        }
+                except Exception as backtest_error:
+                    # If query fails due to missing columns, log and continue without backtest data
+                    self.logger.warning("Failed to fetch backtest results (column may not exist)",
+                                 error=str(backtest_error),
+                                 strategy_name=strategy_name)
 
             # No data available
             return {
@@ -7659,14 +7784,6 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
                 except (TypeError, ValueError):
                     return None
 
-            def _safe_int(value: Any) -> int:
-                try:
-                    if value is None:
-                        return 0
-                    return int(float(value))
-                except (TypeError, ValueError):
-                    return 0
-
             data_quality = strategy_data.get("data_quality", "unknown")
             perf_result["data_quality"] = data_quality
             perf_result["status"] = strategy_data.get("status", data_quality)
@@ -7701,18 +7818,6 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
             largest_win = _safe_float(normalized_data.get("largest_win")) or 0.0
             largest_loss = _safe_float(normalized_data.get("largest_loss")) or 0.0
 
-            total_trades = _safe_int(
-                normalized_data.get("total_trades")
-                if normalized_data.get("total_trades") is not None
-                else strategy_data.get("total_trades")
-            )
-            winning_trades = _safe_int(
-                normalized_data.get("winning_trades")
-                if normalized_data.get("winning_trades") is not None
-                else strategy_data.get("winning_trades")
-            )
-            losing_trades = max(total_trades - winning_trades, 0)
-
             if any(
                 metric is None
                 for metric in [total_return, volatility, max_drawdown, win_rate, average_trade]
@@ -7746,10 +7851,7 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
                 "profit_factor": _safe_float(strategy_data.get("profit_factor")) or 0.0,
                 "average_trade_return": average_trade * 100,
                 "largest_win": largest_win * 100,
-                "largest_loss": largest_loss * 100,
-                "total_trades": total_trades,
-                "winning_trades": winning_trades,
-                "losing_trades": losing_trades,
+                "largest_loss": largest_loss * 100
             }
 
             # Risk-adjusted metrics
@@ -7805,7 +7907,7 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
             optimization_recommendations = []
 
             # Sharpe ratio optimization
-            if total_trades > 0 and sharpe_ratio < 1.0:
+            if strategy_data.get("total_trades", 0) > 0 and sharpe_ratio < 1.0:
                 optimization_recommendations.append({
                     "type": "RISK_EFFICIENCY",
                     "recommendation": "Improve risk-adjusted returns",
@@ -7825,7 +7927,7 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
                 })
             
             # Win rate optimization
-            if total_trades > 0 and perf_result["performance_metrics"]["winning_trades_pct"] < 55:
+            if strategy_data.get("total_trades", 0) > 0 and perf_result["performance_metrics"]["winning_trades_pct"] < 55:
                 optimization_recommendations.append({
                     "type": "WIN_RATE_IMPROVEMENT",
                     "recommendation": "Improve trade selection",
@@ -7864,7 +7966,7 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
                     "expected_improvement": "Target correlation <0.8"
                 })
 
-            if strategy_data.get("data_quality", "no_data") == "no_data" or total_trades == 0:
+            if strategy_data.get("data_quality", "no_data") == "no_data" or strategy_data.get("total_trades", 0) == 0:
                 perf_result["optimization_recommendations"] = []
             else:
                 perf_result["optimization_recommendations"] = optimization_recommendations
@@ -8021,7 +8123,7 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
                 return closing_prices
 
             # Attempt a shorter window if no candles returned
-            fallback_timeframe, fallback_limit = "1d", 120
+            fallback_timeframe, fallback_limit = "1d", 14
             if (timeframe, limit) != (fallback_timeframe, fallback_limit):
                 fallback_candles = await real_market_data_service.get_historical_ohlcv(
                     symbol=trading_pair,
@@ -8063,7 +8165,7 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
         """
         try:
             self.logger.info(
-                f"🎯 Generating trading signal",
+                f"?? Generating trading signal",
                 strategy=strategy_type,
                 risk_mode=risk_mode,
                 user_id=user_id
@@ -8297,7 +8399,7 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
             volatility_adjustment = (volatility - 0.03) * 0.002  # Higher vol = higher funding
             
             funding_rate = base_rate + volatility_adjustment
-            funding_rate = max(-0.005, min(funding_rate, 0.005))  # Cap at ±0.5%
+            funding_rate = max(-0.005, min(funding_rate, 0.005))  # Cap at ?0.5%
 
             # Calculate next funding time as proper ISO timestamp
             now = datetime.utcnow()
@@ -8682,7 +8784,7 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
             position_value = position.get('position_size', 0) * position.get('entry_price', 1)
             trading_cost = position_value * 0.001  # 0.1% fee
             # Funding is applied to notional value only, not multiplied by leverage
-            daily_funding = position_value * 0.0001 * 3  # Daily funding rate × notional × 3 periods
+            daily_funding = position_value * 0.0001 * 3  # Daily funding rate ? notional ? 3 periods
             return {"total_immediate_cost": trading_cost, "estimated_daily_cost": daily_funding}
         except Exception:
             return {"total_immediate_cost": 0, "estimated_daily_cost": 0}
