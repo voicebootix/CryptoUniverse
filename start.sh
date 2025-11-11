@@ -195,37 +195,43 @@ PYTHON
 # Function to wait for Redis
 wait_for_redis() {
     echo "⏳ Waiting for Redis connection..."
-    python -c "
-import redis
+    python - <<'PYTHON'
 import os
 import time
-from urllib.parse import urlparse
 
-def wait_for_redis():
-    redis_url = os.getenv('REDIS_URL')
+import redis
+
+
+def wait_for_redis() -> bool:
+    redis_url = os.getenv("REDIS_URL")
     if not redis_url:
-        print('❌ REDIS_URL not set')
+        print("❌ REDIS_URL not set")
         return False
-    
+
     max_attempts = 30
-    attempt = 0
-    
-    while attempt < max_attempts:
+
+    for attempt in range(1, max_attempts + 1):
         try:
-            r = redis.from_url(redis_url)
-            r.ping()
-            print('✅ Redis connection successful')
-            return True
-        except Exception as e:
-            attempt += 1
-            print(f'🔄 Redis connection attempt {attempt}/{max_attempts} failed: {e}')
+            client = redis.from_url(redis_url)
+            client.ping()
+        except Exception as exc:  # noqa: BLE001 - surface any failure
+            print(
+                f"🔄 Redis connection attempt {attempt}/{max_attempts} failed: {exc}"
+            )
             time.sleep(2)
-    
-    print('❌ Failed to connect to Redis after all attempts')
+            continue
+
+        print("✅ Redis connection successful")
+        return True
+
+    print("❌ Failed to connect to Redis after all attempts")
     return False
 
-wait_for_redis()
-"
+
+if __name__ == "__main__":
+    success = wait_for_redis()
+    raise SystemExit(0 if success else 1)
+PYTHON
     if [ $? -ne 0 ]; then
         echo "❌ Redis connection failed"
         return 1
