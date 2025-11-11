@@ -326,9 +326,18 @@ async def get_scan_status(
                 # initial lookup and resolving the cache key (avoids transient race conditions).
                 cached_entry = await user_opportunity_discovery._peek_cached_scan_entry(cache_key)
 
+        not_found_response = {
+            "success": False,
+            "status": "not_found",
+            "message": "No scan found for this user. Please initiate a new scan.",
+        }
+
         if not cached_entry:
             if cache_key:
                 in_progress = await user_opportunity_discovery.has_active_scan_task(cache_key)
+                if not in_progress:
+                    return not_found_response
+
                 progress_payload = {
                     "strategies_completed": 0,
                     "total_strategies": 0,
@@ -351,11 +360,7 @@ async def get_scan_status(
                     "estimated_time_remaining_seconds": 120,
                 }
 
-            return {
-                "success": False,
-                "status": "not_found",
-                "message": "No scan found for this user. Please initiate a new scan."
-            }
+            return not_found_response
 
         # Check if scan is still in progress
         if cached_entry.partial:
