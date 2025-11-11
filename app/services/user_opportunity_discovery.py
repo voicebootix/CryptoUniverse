@@ -215,7 +215,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     def _calculate_strategy_stage_timeout(
         self,
         stage_remaining_budget: float,
-        discovery_start_time: float
+        discovery_start_time: Optional[float] = None,
     ) -> float:
         """Bound the strategy stage timeout beneath the REMAINING worker budget.
 
@@ -239,9 +239,12 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             except (TypeError, ValueError):
                 gunicorn_timeout = 180.0
         gunicorn_timeout = float(gunicorn_timeout)
+        if gunicorn_timeout <= 0:
+            gunicorn_timeout = 180.0
 
         # CRITICAL FIX: Calculate how much time has already elapsed
-        elapsed_total = time.monotonic() - discovery_start_time
+        reference_start = discovery_start_time if discovery_start_time is not None else time.monotonic()
+        elapsed_total = max(0.0, time.monotonic() - reference_start)
         worker_budget_remaining = max(0.0, gunicorn_timeout - elapsed_total)
 
         # Cap strategy stage timeout to remaining worker budget with dynamic safety buffer
@@ -256,6 +259,69 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             0.0,
             min(remaining + 15.0, stage_timeout_cap),
         )
+
+    def _build_scan_placeholder_payload(
+        self,
+        *,
+        user_id: str,
+        scan_id: str,
+        filter_summary: Optional[Dict[str, List[str]]] = None,
+        symbols: Optional[List[str]] = None,
+        asset_tiers: Optional[List[str]] = None,
+        strategy_ids: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        summary = filter_summary or self._summarize_scan_filters(
+            symbols=symbols,
+            asset_tiers=asset_tiers,
+            strategy_ids=strategy_ids,
+        )
+
+        return {
+            "success": True,
+            "scan_id": scan_id,
+            "user_id": user_id,
+            "opportunities": [],
+            "total_opportunities": 0,
+            "message": "Opportunity scan started. Analyzing your strategies for opportunities...",
+            "scan_state": "pending",
+            "metadata": {
+                "scan_state": "pending",
+                "message": "Scanning your active strategies for new opportunities...",
+                "strategies_completed": 0,
+                "total_strategies": 0,
+                "generated_at": self._current_timestamp().isoformat(),
+                "filters": summary,
+            },
+            "background_scan": True,
+        }
+
+    async def _prime_scan_placeholder(
+        self,
+        *,
+        cache_key: str,
+        user_id: str,
+        scan_id: str,
+        filter_summary: Optional[Dict[str, List[str]]] = None,
+        symbols: Optional[List[str]] = None,
+        asset_tiers: Optional[List[str]] = None,
+        strategy_ids: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        placeholder_payload = self._build_scan_placeholder_payload(
+            user_id=user_id,
+            scan_id=scan_id,
+            filter_summary=filter_summary,
+            symbols=symbols,
+            asset_tiers=asset_tiers,
+            strategy_ids=strategy_ids,
+        )
+
+        await self._update_cached_scan_result(
+            cache_key,
+            placeholder_payload,
+            partial=True,
+        )
+
+        return placeholder_payload
 
     async def _get_cached_scan_entry(
         self,
@@ -380,6 +446,15 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             asyncio.create_task(_cleanup_async())
 
         task.add_done_callback(_cleanup)
+
+    async def has_active_scan_task(self, cache_key: str) -> bool:
+        """Check if a scan task is still active for the given cache key."""
+
+        async with self._scan_tasks_lock:
+            task = self._scan_tasks.get(cache_key)
+            if not task:
+                return False
+            return not task.done()
 
     async def _register_scan_lookup(self, user_id: str, cache_key: str, scan_id: str) -> None:
         async with self._scan_lookup_lock:
@@ -1101,33 +1176,13 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             except asyncio.TimeoutError:
                 pass
 
-        placeholder_payload = {
-            "success": True,
-            "scan_id": scan_id_local,
-            "user_id": user_id,
-            "opportunities": [],
-            "total_opportunities": 0,
-            "message": "Opportunity scan started. Analyzing your strategies for opportunities...",
-            "scan_state": "pending",
-            "metadata": {
-                "scan_state": "pending",
-                "message": "Scanning your active strategies for new opportunities...",
-                "strategies_completed": 0,
-                "total_strategies": 0,
-                "generated_at": self._current_timestamp().isoformat(),
-                "filters": self._summarize_scan_filters(
-                    symbols=symbols,
-                    asset_tiers=asset_tiers,
-                    strategy_ids=strategy_ids,
-                ),
-            },
-            "background_scan": True,
-        }
-
-        await self._update_cached_scan_result(
-            cache_key,
-            placeholder_payload,
-            partial=True,
+        placeholder_payload = await self._prime_scan_placeholder(
+            cache_key=cache_key,
+            user_id=user_id,
+            scan_id=scan_id_local,
+            symbols=symbols,
+            asset_tiers=asset_tiers,
+            strategy_ids=strategy_ids,
         )
 
         self.logger.info(

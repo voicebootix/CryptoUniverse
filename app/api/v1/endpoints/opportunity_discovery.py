@@ -232,6 +232,16 @@ async def discover_opportunities(
             scan_id,
         )
 
+        await user_opportunity_discovery._prime_scan_placeholder(
+            cache_key=cache_key,
+            user_id=user_id_str,
+            scan_id=scan_id,
+            filter_summary=filter_summary,
+            symbols=symbols or None,
+            asset_tiers=asset_tiers or None,
+            strategy_ids=strategy_ids or None,
+        )
+
         # Start background scan (don't await!)
         async def run_discovery_background():
             try:
@@ -294,19 +304,59 @@ async def get_scan_status(
     - partial_results: First 10 opportunities (if available)
     """
     try:
+        user_id_str = str(current_user.id)
+
         # Get cached scan entry
         cached_entry = await user_opportunity_discovery._get_cached_scan_entry(
-            str(current_user.id),
+            user_id_str,
             scan_id=scan_id,
         )
-        
+
+        cache_key: Optional[str] = None
         if not cached_entry:
+            # Attempt to resolve the cache key even if cached entry is missing. This allows us to
+            # detect scans that are still warming up or whose placeholder has not been written yet.
+            cache_key = await user_opportunity_discovery._resolve_scan_cache_key(
+                user_id=user_id_str,
+                scan_id=scan_id,
+            )
+
+            if cache_key:
+                # Re-check using the cache key directly in case the entry was created between the
+                # initial lookup and resolving the cache key (avoids transient race conditions).
+                cached_entry = await user_opportunity_discovery._peek_cached_scan_entry(cache_key)
+
+        if not cached_entry:
+            if cache_key:
+                in_progress = await user_opportunity_discovery.has_active_scan_task(cache_key)
+                progress_payload = {
+                    "strategies_completed": 0,
+                    "total_strategies": 0,
+                    "opportunities_found_so_far": 0,
+                    "percentage": 0,
+                }
+
+                message = (
+                    "Scan is initializing. No results are available yet." if in_progress else
+                    "Scan registration found but no cached progress yet."
+                )
+
+                return {
+                    "success": True,
+                    "status": "scanning",
+                    "scan_id": scan_id,
+                    "message": message,
+                    "progress": progress_payload,
+                    "partial_results": [],
+                    "estimated_time_remaining_seconds": 120,
+                }
+
             return {
                 "success": False,
                 "status": "not_found",
                 "message": "No scan found for this user. Please initiate a new scan."
             }
-        
+
         # Check if scan is still in progress
         if cached_entry.partial:
             metadata = cached_entry.payload.get("metadata", {})
