@@ -207,6 +207,56 @@ async def test_portfolio_optimization_normalizes_non_percent_improvement(monkeyp
 
 
 @pytest.mark.asyncio
+async def test_resolve_scan_cache_key_rejects_cross_user_entries():
+    service = UserOpportunityDiscoveryService()
+    service.redis = AsyncMock()
+
+    user_id = "user-1"
+    scan_id = "scan-abc"
+    invalid_cache_key = "user-2:cache-token"
+
+    async def fake_get(key: str):
+        lookup_map = {
+            f"opportunity_scan_lookup:{scan_id}": invalid_cache_key,
+            f"opportunity_scan_result_index:{scan_id}": None,
+        }
+        return lookup_map.get(key)
+
+    service.redis.get.side_effect = fake_get
+
+    resolved_key = await service._resolve_scan_cache_key(user_id=user_id, scan_id=scan_id)
+
+    assert resolved_key is None
+    assert scan_id not in service._scan_lookup
+    assert user_id not in service._user_latest_scan_key
+
+
+@pytest.mark.asyncio
+async def test_resolve_scan_cache_key_restores_valid_lookup_from_index():
+    service = UserOpportunityDiscoveryService()
+    service.redis = AsyncMock()
+
+    user_id = "user-42"
+    scan_id = "scan-xyz"
+    valid_cache_key = f"{user_id}:cache-token"
+
+    async def fake_get(key: str):
+        lookup_map = {
+            f"opportunity_scan_lookup:{scan_id}": None,
+            f"opportunity_scan_result_index:{scan_id}": valid_cache_key,
+        }
+        return lookup_map.get(key)
+
+    service.redis.get.side_effect = fake_get
+
+    resolved_key = await service._resolve_scan_cache_key(user_id=user_id, scan_id=scan_id)
+
+    assert resolved_key == valid_cache_key
+    assert service._scan_lookup[scan_id] == valid_cache_key
+    assert service._user_latest_scan_key[user_id] == valid_cache_key
+
+
+@pytest.mark.asyncio
 async def test_portfolio_optimization_uses_cash_balance_when_portfolio_zero(monkeypatch):
     service = UserOpportunityDiscoveryService()
 

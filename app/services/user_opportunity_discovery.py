@@ -368,11 +368,11 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     # Ensure lookup caches remain consistent when results are fetched from Redis
                     scan_id = result.payload.get("scan_id") if isinstance(result.payload, dict) else None
                     if scan_id:
-                        async with self._scan_lookup_lock:
-                            self._scan_lookup[scan_id] = cache_key
-                            user_from_key, *_ = cache_key.split(":", 1)
-                            if user_from_key:
-                                self._user_latest_scan_key[user_from_key] = cache_key
+                        user_from_key, *_ = cache_key.split(":", 1)
+                        if user_from_key == user_id:
+                            async with self._scan_lookup_lock:
+                                self._scan_lookup[scan_id] = cache_key
+                                self._user_latest_scan_key[user_id] = cache_key
 
                     self.logger.debug("Scan result retrieved from Redis",
                                     cache_key=cache_key,

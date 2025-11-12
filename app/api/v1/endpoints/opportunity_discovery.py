@@ -413,7 +413,7 @@ async def get_scan_status(
         if isinstance(strategies_completed_value, (int, float)):
             strategies_completed = int(strategies_completed_value)
         else:
-            strategies_completed = int(min(total_strategies, 0))
+            strategies_completed = 0
         # Clamp completed strategies to the valid range of [0, total_strategies].
         strategies_completed = max(0, min(strategies_completed, total_strategies))
 
