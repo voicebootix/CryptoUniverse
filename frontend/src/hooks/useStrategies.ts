@@ -83,24 +83,136 @@ export const useStrategies = () => {
       setError(null);
 
       const response = await apiClient.get('/strategies/my-portfolio');
-      const activeStrategies = Array.isArray(response.data?.active_strategies)
-        ? response.data.active_strategies
-        : [];
+      const data = response.data ?? {};
 
-      const normalized = activeStrategies.map((strategy: any) => ({
-        strategy_id: strategy.strategy_id,
-        name: strategy.name || strategy.strategy_id,
-        status: strategy.is_active ? 'active' : 'inactive',
-        is_active: strategy.is_active ?? true,
-        total_trades: strategy.total_trades ?? 0,
-        winning_trades: strategy.winning_trades ?? 0,
-        win_rate: strategy.win_rate ?? 0,
-        total_pnl: strategy.total_pnl_usd ?? 0,
-        created_at: strategy.activated_at || '1970-01-01T00:00:00.000Z',
-        last_executed_at: strategy.last_executed_at || undefined,
-      }));
+      const candidateLists: any[][] = [];
 
-      setPortfolioStrategies(normalized);
+      if (Array.isArray(data.active_strategies)) {
+        candidateLists.push(data.active_strategies);
+      }
+
+      if (Array.isArray(data.strategies)) {
+        candidateLists.push(data.strategies);
+      }
+
+      if (Array.isArray(data.provisioned_strategies)) {
+        candidateLists.push(data.provisioned_strategies);
+      }
+
+      if (Array.isArray(data.available_strategies)) {
+        candidateLists.push(data.available_strategies);
+      }
+
+      if (Array.isArray(data.summary?.strategies)) {
+        candidateLists.push(data.summary.strategies);
+      }
+
+      if (Array.isArray(data.portfolio?.strategies)) {
+        candidateLists.push(data.portfolio.strategies);
+      }
+
+      if (Array.isArray(data.portfolio?.active_strategies)) {
+        candidateLists.push(data.portfolio.active_strategies);
+      }
+
+      const formatStrategyId = (strategyId: string) =>
+        strategyId
+          .split('_')
+          .map((segment) => {
+            if (segment.length <= 3 && segment.toLowerCase() === 'ai') {
+              return segment.toUpperCase();
+            }
+            if (!segment) {
+              return segment;
+            }
+            return segment.charAt(0).toUpperCase() + segment.slice(1);
+          })
+          .join(' ');
+
+      const normalizedMap = new Map<string, TradingStrategy>();
+
+      candidateLists.flat().forEach((strategy: any) => {
+        if (!strategy || typeof strategy !== 'object') {
+          return;
+        }
+
+        const rawId =
+          strategy.strategy_id ||
+          strategy.strategyId ||
+          strategy.id ||
+          strategy.strategy_name ||
+          strategy.name ||
+          null;
+
+        const strategyId = typeof rawId === 'string' ? rawId : null;
+
+        if (!strategyId) {
+          return;
+        }
+
+        const existing = normalizedMap.get(strategyId) ?? {};
+        const rawName =
+          strategy.name ||
+          strategy.strategy_name ||
+          existing.name ||
+          formatStrategyId(strategyId);
+
+        const rawStatus =
+          typeof strategy.status === 'string'
+            ? strategy.status
+            : strategy.is_active === false
+              ? 'inactive'
+              : 'active';
+
+        const normalized: TradingStrategy = {
+          strategy_id: strategyId,
+          name: rawName,
+          status: rawStatus,
+          is_active: strategy.is_active ?? existing.is_active ?? rawStatus === 'active',
+          total_trades:
+            strategy.total_trades ??
+            strategy.metrics?.total_trades ??
+            existing.total_trades ??
+            0,
+          winning_trades:
+            strategy.winning_trades ??
+            strategy.metrics?.winning_trades ??
+            existing.winning_trades ??
+            0,
+          win_rate:
+            strategy.win_rate ??
+            strategy.metrics?.win_rate ??
+            existing.win_rate ??
+            0,
+          total_pnl:
+            strategy.total_pnl_usd ??
+            strategy.total_pnl ??
+            strategy.metrics?.total_pnl_usd ??
+            existing.total_pnl ??
+            0,
+          sharpe_ratio:
+            strategy.sharpe_ratio ??
+            strategy.metrics?.sharpe_ratio ??
+            existing.sharpe_ratio,
+          created_at:
+            strategy.activated_at ||
+            strategy.created_at ||
+            existing.created_at ||
+            '1970-01-01T00:00:00.000Z',
+          last_executed_at:
+            strategy.last_executed_at ||
+            strategy.last_execution_at ||
+            existing.last_executed_at,
+        };
+
+        normalizedMap.set(strategyId, normalized);
+      });
+
+      const normalizedStrategies = Array.from(normalizedMap.values()).sort((a, b) =>
+        a.name.localeCompare(b.name)
+      );
+
+      setPortfolioStrategies(normalizedStrategies);
     } catch (err: any) {
       const errorMsg = err.response?.data?.detail || 'Failed to fetch portfolio strategies';
       setError(errorMsg);
