@@ -365,6 +365,15 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     async with self._scan_cache_lock:
                         self.opportunity_cache[cache_key] = result
 
+                    # Ensure lookup caches remain consistent when results are fetched from Redis
+                    scan_id = result.payload.get("scan_id") if isinstance(result.payload, dict) else None
+                    if scan_id:
+                        async with self._scan_lookup_lock:
+                            self._scan_lookup.setdefault(scan_id, cache_key)
+                            user_from_key, *_ = cache_key.split(":", 1)
+                            if user_from_key:
+                                self._user_latest_scan_key.setdefault(user_from_key, cache_key)
+
                     self.logger.debug("Scan result retrieved from Redis",
                                     cache_key=cache_key,
                                     scan_id=scan_data["payload"].get("scan_id"),
@@ -408,6 +417,33 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 ttl_seconds = int(ttl)
                 await self.redis.setex(redis_key, ttl_seconds, json.dumps(scan_data))
                 await self._refresh_scan_activity(cache_key)
+
+                # Maintain lookup consistency even if registration happens on another worker.
+                scan_id = cached_payload.get("scan_id")
+                user_id = cached_payload.get("user_id")
+                lookup_ttl = max(ttl_seconds, self._partial_cache_ttl, self._scan_cache_ttl) + 300
+
+                if scan_id:
+                    await self.redis.setex(
+                        f"opportunity_scan_result_index:{scan_id}",
+                        lookup_ttl,
+                        cache_key,
+                    )
+
+                if scan_id and user_id:
+                    await self.redis.setex(
+                        f"opportunity_scan_lookup:{scan_id}",
+                        lookup_ttl,
+                        cache_key,
+                    )
+
+                if user_id:
+                    await self.redis.setex(
+                        f"opportunity_user_latest_scan:{user_id}",
+                        lookup_ttl,
+                        cache_key,
+                    )
+
                 self.logger.info(
                     "Scan result persisted to Redis",
                     cache_key=cache_key,
@@ -545,10 +581,10 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             try:
                 redis_lookup_key = f"opportunity_scan_lookup:{scan_id}"
                 redis_user_key = f"opportunity_user_latest_scan:{user_id}"
-                ttl_seconds = max(self._partial_cache_ttl, self._scan_cache_ttl)
+                lookup_ttl = max(self._partial_cache_ttl, self._scan_cache_ttl) + 300
 
-                await self.redis.setex(redis_lookup_key, ttl_seconds, cache_key)
-                await self.redis.setex(redis_user_key, ttl_seconds, cache_key)
+                await self.redis.setex(redis_lookup_key, lookup_ttl, cache_key)
+                await self.redis.setex(redis_user_key, lookup_ttl, cache_key)
 
                 await self._mark_scan_active(cache_key, scan_id)
 
@@ -673,7 +709,21 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         # Restore to in-memory lookup for faster subsequent access
                         async with self._scan_lookup_lock:
                             self._scan_lookup[scan_id] = cache_key
+                            if cache_key.startswith(f"{user_id}:"):
+                                self._user_latest_scan_key[user_id] = cache_key
                         return cache_key
+
+                    # Fallback: direct result index maintained when cache updates succeed but
+                    # the lookup mapping was not yet persisted.
+                    index_lookup_key = f"opportunity_scan_result_index:{scan_id}"
+                    cached_key = await self.redis.get(index_lookup_key)
+                    if cached_key:
+                        cache_key = cached_key.decode('utf-8') if isinstance(cached_key, bytes) else cached_key
+                        if cache_key.startswith(f"{user_id}:"):
+                            async with self._scan_lookup_lock:
+                                self._scan_lookup[scan_id] = cache_key
+                                self._user_latest_scan_key[user_id] = cache_key
+                            return cache_key
                 else:
                     redis_user_key = f"opportunity_user_latest_scan:{user_id}"
                     cached_key = await self.redis.get(redis_user_key)
