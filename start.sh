@@ -20,7 +20,7 @@ import random
 import time
 import traceback
 from typing import Optional, Tuple
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 from app.core.config import get_settings
 from app.core.database import create_ssl_context
@@ -87,11 +87,21 @@ async def wait_for_db() -> bool:
     pool_min_size = int(os.getenv("DB_POOL_MIN_SIZE", "1"))
     pool_max_size = int(os.getenv("DB_POOL_MAX_SIZE", "5"))
 
-    host = parsed.hostname or "localhost"
-    port = parsed.port or 5432
+    query_params = parse_qs(parsed.query)
+
+    host = parsed.hostname
+    port = parsed.port if host else None
+    socket_host = None
+    if not host:
+        socket_host = (query_params.get("host") or [None])[0]
+    if host and port is None:
+        port = 5432
+    tcp_probe_supported = host is not None
+
+    target_host = host or socket_host or "(unspecified)"
     target_details = {
-        "host": host,
-        "port": port,
+        "host": target_host,
+        "port": port if port is not None else "(n/a)",
         "database": (parsed.path.lstrip("/") or "(default)") if parsed.path else "(default)",
         "ssl": "enabled" if ssl_context else "disabled",
     }
@@ -103,8 +113,11 @@ async def wait_for_db() -> bool:
     for attempt in range(1, max_attempts + 1):
         connect_timeout = min(base_connect_timeout + (attempt - 1) * 5, max_connect_timeout)
         start_time = time.monotonic()
-        tcp_ok, tcp_error = await tcp_probe(host, port, tcp_probe_timeout)
-        if not tcp_ok:
+        tcp_ok = True
+        tcp_error = None
+        if tcp_probe_supported:
+            tcp_ok, tcp_error = await tcp_probe(host, port, tcp_probe_timeout)
+        if tcp_probe_supported and not tcp_ok:
             elapsed = time.monotonic() - start_time
             print(
                 f"🚫 Database port probe failed ({elapsed:.2f}s) on attempt "
