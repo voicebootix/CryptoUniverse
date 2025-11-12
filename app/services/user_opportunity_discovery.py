@@ -215,7 +215,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
     def _calculate_strategy_stage_timeout(
         self,
         stage_remaining_budget: float,
-        discovery_start_time: float
+        discovery_start_time: Optional[float] = None,
     ) -> float:
         """Bound the strategy stage timeout beneath the REMAINING worker budget.
 
@@ -239,9 +239,12 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             except (TypeError, ValueError):
                 gunicorn_timeout = 180.0
         gunicorn_timeout = float(gunicorn_timeout)
+        if gunicorn_timeout <= 0:
+            gunicorn_timeout = 180.0
 
         # CRITICAL FIX: Calculate how much time has already elapsed
-        elapsed_total = time.monotonic() - discovery_start_time
+        reference_start = discovery_start_time if discovery_start_time is not None else time.monotonic()
+        elapsed_total = max(0.0, time.monotonic() - reference_start)
         worker_budget_remaining = max(0.0, gunicorn_timeout - elapsed_total)
 
         # Cap strategy stage timeout to remaining worker budget with dynamic safety buffer
@@ -256,6 +259,69 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             0.0,
             min(remaining + 15.0, stage_timeout_cap),
         )
+
+    def _build_scan_placeholder_payload(
+        self,
+        *,
+        user_id: str,
+        scan_id: str,
+        filter_summary: Optional[Dict[str, List[str]]] = None,
+        symbols: Optional[List[str]] = None,
+        asset_tiers: Optional[List[str]] = None,
+        strategy_ids: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        summary = filter_summary or self._summarize_scan_filters(
+            symbols=symbols,
+            asset_tiers=asset_tiers,
+            strategy_ids=strategy_ids,
+        )
+
+        return {
+            "success": True,
+            "scan_id": scan_id,
+            "user_id": user_id,
+            "opportunities": [],
+            "total_opportunities": 0,
+            "message": "Opportunity scan started. Analyzing your strategies for opportunities...",
+            "scan_state": "pending",
+            "metadata": {
+                "scan_state": "pending",
+                "message": "Scanning your active strategies for new opportunities...",
+                "strategies_completed": 0,
+                "total_strategies": 0,
+                "generated_at": self._current_timestamp().isoformat(),
+                "filters": summary,
+            },
+            "background_scan": True,
+        }
+
+    async def _prime_scan_placeholder(
+        self,
+        *,
+        cache_key: str,
+        user_id: str,
+        scan_id: str,
+        filter_summary: Optional[Dict[str, List[str]]] = None,
+        symbols: Optional[List[str]] = None,
+        asset_tiers: Optional[List[str]] = None,
+        strategy_ids: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        placeholder_payload = self._build_scan_placeholder_payload(
+            user_id=user_id,
+            scan_id=scan_id,
+            filter_summary=filter_summary,
+            symbols=symbols,
+            asset_tiers=asset_tiers,
+            strategy_ids=strategy_ids,
+        )
+
+        await self._update_cached_scan_result(
+            cache_key,
+            placeholder_payload,
+            partial=True,
+        )
+
+        return placeholder_payload
 
     async def _get_cached_scan_entry(
         self,
@@ -341,15 +407,20 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 }
                 ttl_seconds = int(ttl)
                 await self.redis.setex(redis_key, ttl_seconds, json.dumps(scan_data))
-                self.logger.debug("Scan result persisted to Redis",
-                                cache_key=cache_key,
-                                scan_id=cached_payload.get("scan_id"),
-                                partial=partial,
-                                ttl=ttl_seconds)
+                await self._refresh_scan_activity(cache_key)
+                self.logger.info(
+                    "Scan result persisted to Redis",
+                    cache_key=cache_key,
+                    scan_id=cached_payload.get("scan_id"),
+                    partial=partial,
+                    ttl=ttl_seconds,
+                )
             except Exception as redis_error:
-                self.logger.warning("Failed to persist scan result to Redis",
-                                  error=str(redis_error),
-                                  cache_key=cache_key)
+                self.logger.warning(
+                    "Failed to persist scan result to Redis",
+                    error=str(redis_error),
+                    cache_key=cache_key,
+                )
 
     def _schedule_scan_cleanup(self, cache_key: str, task: asyncio.Task) -> None:
         user_id_hint = cache_key.split(":", 1)[0] if cache_key else None
@@ -364,6 +435,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 scan_id_value = getattr(task, "scan_id", None)
                 if scan_id_value:
                     await self._unregister_scan_lookup(scan_id_value)
+
+                await self._clear_scan_activity(cache_key)
 
                 if done.cancelled():
                     return
@@ -381,6 +454,87 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
         task.add_done_callback(_cleanup)
 
+    async def _mark_scan_active(self, cache_key: str, scan_id: str) -> None:
+        if not self.redis:
+            return
+
+        ttl_seconds = max(int(self._scan_response_budget) + 60, self._partial_cache_ttl)
+        redis_key = f"opportunity_scan_active:{cache_key}"
+
+        try:
+            await self.redis.setex(redis_key, ttl_seconds, scan_id)
+            self.logger.info(
+                "Scan activity registered in Redis",
+                cache_key=cache_key,
+                scan_id=scan_id,
+                ttl=ttl_seconds,
+            )
+        except Exception as redis_error:
+            self.logger.warning(
+                "Failed to mark scan as active in Redis",
+                error=str(redis_error),
+                cache_key=cache_key,
+                scan_id=scan_id,
+            )
+
+    async def _refresh_scan_activity(self, cache_key: str) -> None:
+        if not self.redis:
+            return
+
+        ttl_seconds = max(int(self._scan_response_budget) + 60, self._partial_cache_ttl)
+        redis_key = f"opportunity_scan_active:{cache_key}"
+
+        try:
+            # expire returns False if the key was missing; that's safe to ignore.
+            await self.redis.expire(redis_key, ttl_seconds)
+        except Exception as redis_error:
+            self.logger.warning(
+                "Failed to refresh scan activity TTL in Redis",
+                error=str(redis_error),
+                cache_key=cache_key,
+            )
+
+    async def _clear_scan_activity(self, cache_key: str) -> None:
+        if not self.redis:
+            return
+
+        redis_key = f"opportunity_scan_active:{cache_key}"
+        try:
+            await self.redis.delete(redis_key)
+            self.logger.info(
+                "Cleared scan activity flag in Redis",
+                cache_key=cache_key,
+            )
+        except Exception as redis_error:
+            self.logger.warning(
+                "Failed to clear scan activity flag in Redis",
+                error=str(redis_error),
+                cache_key=cache_key,
+            )
+
+    async def has_active_scan_task(self, cache_key: str) -> bool:
+        """Check if a scan task is still active for the given cache key."""
+
+        async with self._scan_tasks_lock:
+            task = self._scan_tasks.get(cache_key)
+            if task and not task.done():
+                return True
+
+        if self.redis:
+            try:
+                redis_key = f"opportunity_scan_active:{cache_key}"
+                exists = await self.redis.exists(redis_key)
+                if exists:
+                    return True
+            except Exception as redis_error:
+                self.logger.warning(
+                    "Failed to check Redis for active scan",
+                    error=str(redis_error),
+                    cache_key=cache_key,
+                )
+
+        return False
+
     async def _register_scan_lookup(self, user_id: str, cache_key: str, scan_id: str) -> None:
         async with self._scan_lookup_lock:
             self._scan_lookup[scan_id] = cache_key
@@ -396,14 +550,20 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 await self.redis.setex(redis_lookup_key, ttl_seconds, cache_key)
                 await self.redis.setex(redis_user_key, ttl_seconds, cache_key)
 
-                self.logger.debug("Scan lookup persisted to Redis",
-                                scan_id=scan_id,
-                                cache_key=cache_key,
-                                user_id=user_id)
+                await self._mark_scan_active(cache_key, scan_id)
+
+                self.logger.info(
+                    "Scan lookup persisted to Redis",
+                    scan_id=scan_id,
+                    cache_key=cache_key,
+                    user_id=user_id,
+                )
             except Exception as redis_error:
-                self.logger.warning("Failed to persist scan lookup to Redis",
-                                  error=str(redis_error),
-                                  scan_id=scan_id)
+                self.logger.warning(
+                    "Failed to persist scan lookup to Redis",
+                    error=str(redis_error),
+                    scan_id=scan_id,
+                )
 
     async def _unregister_scan_lookup(self, scan_id: str) -> None:
         """Unregister scan lookup only if cache entry has expired.
@@ -1101,33 +1261,13 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             except asyncio.TimeoutError:
                 pass
 
-        placeholder_payload = {
-            "success": True,
-            "scan_id": scan_id_local,
-            "user_id": user_id,
-            "opportunities": [],
-            "total_opportunities": 0,
-            "message": "Opportunity scan started. Analyzing your strategies for opportunities...",
-            "scan_state": "pending",
-            "metadata": {
-                "scan_state": "pending",
-                "message": "Scanning your active strategies for new opportunities...",
-                "strategies_completed": 0,
-                "total_strategies": 0,
-                "generated_at": self._current_timestamp().isoformat(),
-                "filters": self._summarize_scan_filters(
-                    symbols=symbols,
-                    asset_tiers=asset_tiers,
-                    strategy_ids=strategy_ids,
-                ),
-            },
-            "background_scan": True,
-        }
-
-        await self._update_cached_scan_result(
-            cache_key,
-            placeholder_payload,
-            partial=True,
+        placeholder_payload = await self._prime_scan_placeholder(
+            cache_key=cache_key,
+            user_id=user_id,
+            scan_id=scan_id_local,
+            symbols=symbols,
+            asset_tiers=asset_tiers,
+            strategy_ids=strategy_ids,
         )
 
         self.logger.info(

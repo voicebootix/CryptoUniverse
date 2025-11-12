@@ -12,84 +12,345 @@ echo "Port: $PORT"
 # Function to wait for database
 wait_for_db() {
     echo "⏳ Waiting for database connection..."
-    python -c "
+    python - <<'PYTHON'
 import asyncio
 import asyncpg
 import os
+import random
 import time
-from urllib.parse import urlparse
+import traceback
+from typing import Optional, Tuple
+from urllib.parse import parse_qs, urlparse
 
-async def wait_for_db():
-    database_url = os.getenv('DATABASE_URL')
-    if not database_url:
-        print('❌ DATABASE_URL not set')
+from app.core.config import get_settings
+from app.core.database import create_ssl_context
+
+
+def parse_bool(value: Optional[str]) -> bool:
+    if value is None:
         return False
-    
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+async def tcp_probe(host: str, port: int, timeout: float) -> Tuple[bool, Optional[BaseException]]:
+    try:
+        _reader, writer = await asyncio.wait_for(
+            asyncio.open_connection(host, port), timeout=timeout
+        )
+    except BaseException as exc:  # noqa: BLE001 - surface any failure
+        return False, exc
+
+    writer.close()
+    try:
+        await writer.wait_closed()
+    except Exception:  # noqa: BLE001 - ignore close errors during probe
+        pass
+    return True, None
+
+
+async def wait_for_db() -> bool:
+    settings = get_settings()
+    database_url = (settings.DATABASE_URL or os.getenv("DATABASE_URL") or "").strip()
+    if not database_url:
+        print("❌ DATABASE_URL not set")
+        return False
+
     parsed = urlparse(database_url)
-    max_attempts = 30
-    attempt = 0
-    
-    while attempt < max_attempts:
+
+    ssl_required = (
+        parse_bool(os.getenv("DATABASE_SSL_REQUIRE"))
+        or getattr(settings, "DATABASE_SSL_REQUIRE", False)
+        or getattr(settings, "DATABASE_SSL_ROOT_CERT", None) is not None
+        or "sslmode=require" in database_url
+        or "supabase" in database_url.lower()
+    )
+
+    ssl_context = None
+    if ssl_required:
         try:
-            conn = await asyncpg.connect(database_url)
-            await conn.execute('SELECT 1')
+            ssl_context = create_ssl_context()
+            print("🔐 SSL context initialized for database connection")
+        except Exception as ssl_error:
+            print(f"❌ Failed to create SSL context: {ssl_error}")
+            traceback.print_exc()
+            return False
+    else:
+        print("ℹ️ Database SSL not required by configuration")
+
+    max_attempts = int(os.getenv("DB_MAX_ATTEMPTS", "15"))
+    base_connect_timeout = float(os.getenv("DB_CONNECT_TIMEOUT", "10"))
+    max_connect_timeout = float(os.getenv("DB_MAX_CONNECT_TIMEOUT", "30"))
+    command_timeout = float(os.getenv("DB_COMMAND_TIMEOUT", "30"))
+    max_retry_delay = float(os.getenv("DB_MAX_RETRY_DELAY", "30"))
+    tcp_probe_timeout = float(os.getenv("DB_TCP_TIMEOUT", "3"))
+    warm_pool = parse_bool(os.getenv("DB_WARM_POOL", "true"))
+    pool_min_size = int(os.getenv("DB_POOL_MIN_SIZE", "1"))
+    pool_max_size = int(os.getenv("DB_POOL_MAX_SIZE", "5"))
+
+    query_params = parse_qs(parsed.query)
+
+    host = parsed.hostname
+    port = parsed.port if host else None
+    socket_host = None
+    if not host:
+        socket_host = (query_params.get("host") or [None])[0]
+    if host and port is None:
+        port = 5432
+    tcp_probe_supported = host is not None
+
+    target_host = host or socket_host or "(unspecified)"
+    target_details = {
+        "host": target_host,
+        "port": port if port is not None else "(n/a)",
+        "database": (parsed.path.lstrip("/") or "(default)") if parsed.path else "(default)",
+        "ssl": "enabled" if ssl_context else "disabled",
+    }
+    print(
+        "🔎 Database target:",
+        ", ".join(f"{key}={value}" for key, value in target_details.items()),
+    )
+
+    for attempt in range(1, max_attempts + 1):
+        connect_timeout = min(base_connect_timeout + (attempt - 1) * 5, max_connect_timeout)
+        start_time = time.monotonic()
+        tcp_ok = True
+        tcp_error = None
+        if tcp_probe_supported:
+            tcp_ok, tcp_error = await tcp_probe(host, port, tcp_probe_timeout)
+        if tcp_probe_supported and not tcp_ok:
+            elapsed = time.monotonic() - start_time
+            print(
+                f"🚫 Database port probe failed ({elapsed:.2f}s) on attempt "
+                f"{attempt}/{max_attempts}: {type(tcp_error).__name__}: {tcp_error}"
+            )
+            if attempt == max_attempts:
+                break
+
+            delay = min(max_retry_delay, (2 ** (attempt - 1)) + random.uniform(0, 1))
+            await asyncio.sleep(delay)
+            continue
+        try:
+            conn = await asyncpg.connect(
+                database_url,
+                ssl=ssl_context,
+                timeout=connect_timeout,
+                command_timeout=command_timeout,
+                server_settings={"application_name": "cryptouniverse_startup"},
+            )
+            await conn.execute("SELECT 1")
             await conn.close()
-            print('✅ Database connection successful')
+            if warm_pool:
+                pool = None
+                try:
+                    pool = await asyncpg.create_pool(
+                        database_url,
+                        ssl=ssl_context,
+                        min_size=pool_min_size,
+                        max_size=pool_max_size,
+                        command_timeout=command_timeout,
+                        timeout=connect_timeout,
+                        server_settings={"application_name": "cryptouniverse_startup_pool"},
+                    )
+                    async with pool.acquire() as pooled_conn:
+                        await pooled_conn.execute("SELECT 1")
+                except Exception as pool_exc:  # noqa: BLE001
+                    print(
+                        "⚠️ Database pool warm-up failed: "
+                        f"{type(pool_exc).__name__}: {pool_exc}"
+                    )
+                else:
+                    print(
+                        "💠 Database pool warm-up successful "
+                        f"(min_size={pool_min_size}, max_size={pool_max_size})"
+                    )
+                finally:
+                    if pool is not None:
+                        await pool.close()
+            elapsed = time.monotonic() - start_time
+            print(
+                f"✅ Database connection successful after {elapsed:.2f}s "
+                f"(attempt {attempt}/{max_attempts})"
+            )
             return True
-        except Exception as e:
-            attempt += 1
-            print(f'🔄 Database connection attempt {attempt}/{max_attempts} failed: {e}')
-            await asyncio.sleep(2)
-    
-    print('❌ Failed to connect to database after all attempts')
+        except Exception as exc:
+            elapsed = time.monotonic() - start_time
+            error_type = type(exc).__name__
+            module = type(exc).__module__
+            if module and module != "builtins":
+                error_type = f"{module}.{error_type}"
+            error_message = str(exc) or repr(exc)
+            print(
+                f"🔄 Database connection attempt {attempt}/{max_attempts} failed "
+                f"({elapsed:.2f}s): {error_type}: {error_message}"
+            )
+            if attempt == max_attempts:
+                break
+
+            delay = min(max_retry_delay, (2 ** (attempt - 1)) + random.uniform(0, 1))
+            await asyncio.sleep(delay)
+
+    print("❌ Failed to connect to database after all attempts")
     return False
 
-asyncio.run(wait_for_db())
-"
+
+if __name__ == "__main__":
+    success = asyncio.run(wait_for_db())
+    raise SystemExit(0 if success else 1)
+PYTHON
     if [ $? -ne 0 ]; then
         echo "❌ Database connection failed"
-        exit 1
+        return 1
     fi
+
+    return 0
 }
 
 # Function to wait for Redis
 wait_for_redis() {
     echo "⏳ Waiting for Redis connection..."
-    python -c "
-import redis
+    python - <<'PYTHON'
 import os
+import random
+import ssl
 import time
+from typing import Optional
 from urllib.parse import urlparse
 
-def wait_for_redis():
-    redis_url = os.getenv('REDIS_URL')
-    if not redis_url:
-        print('❌ REDIS_URL not set')
+import redis
+
+from app.core.config import get_settings
+
+
+def parse_bool(value: Optional[str]) -> bool:
+    if value is None:
         return False
-    
-    max_attempts = 30
-    attempt = 0
-    
-    while attempt < max_attempts:
-        try:
-            r = redis.from_url(redis_url)
-            r.ping()
-            print('✅ Redis connection successful')
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def wait_for_redis() -> bool:
+    settings = get_settings()
+    redis_url = (os.getenv("REDIS_URL") or getattr(settings, "REDIS_URL", "")).strip()
+
+    redis_optional = parse_bool(os.getenv("REDIS_OPTIONAL"))
+
+    if not redis_url:
+        if redis_optional:
+            print("⚠️ REDIS_URL not configured but Redis marked optional; skipping readiness check")
             return True
-        except Exception as e:
-            attempt += 1
-            print(f'🔄 Redis connection attempt {attempt}/{max_attempts} failed: {e}')
-            time.sleep(2)
-    
-    print('❌ Failed to connect to Redis after all attempts')
+
+        print("❌ REDIS_URL not set")
+        return False
+
+    parsed = urlparse(redis_url)
+    scheme = (parsed.scheme or "redis").lower()
+
+    ssl_required = scheme in {"rediss", "redis+ssl"} or parse_bool(os.getenv("REDIS_SSL_REQUIRE"))
+    ssl_insecure = parse_bool(os.getenv("REDIS_SSL_INSECURE"))
+    ssl_ca_file = os.getenv("REDIS_SSL_ROOT_CERT") or os.getenv("REDIS_SSL_CA_FILE")
+
+    if ssl_required:
+        print("🔐 Redis SSL/TLS required for connection")
+        if ssl_insecure:
+            print("   ⚠️ TLS certificate verification disabled for Redis (REDIS_SSL_INSECURE)")
+        elif ssl_ca_file:
+            print(f"   📁 Using Redis CA bundle from {ssl_ca_file}")
+
+    max_attempts = int(os.getenv("REDIS_MAX_ATTEMPTS", "20"))
+    base_connect_timeout = float(os.getenv("REDIS_CONNECT_TIMEOUT", "5"))
+    max_connect_timeout = float(os.getenv("REDIS_MAX_CONNECT_TIMEOUT", "20"))
+    command_timeout = float(os.getenv("REDIS_COMMAND_TIMEOUT", "5"))
+    base_delay = float(os.getenv("REDIS_BASE_DELAY", "1"))
+    max_retry_delay = float(os.getenv("REDIS_MAX_RETRY_DELAY", "15"))
+
+    target_details = {
+        "host": parsed.hostname or "localhost",
+        "port": parsed.port or (6380 if scheme in {"rediss", "redis+ssl"} else 6379),
+        "ssl": "enabled" if ssl_required else "disabled",
+    }
+    print(
+        "🔎 Redis target:",
+        ", ".join(f"{key}={value}" for key, value in target_details.items()),
+    )
+
+    for attempt in range(1, max_attempts + 1):
+        connect_timeout = min(base_connect_timeout + (attempt - 1) * 1.5, max_connect_timeout)
+        start_time = time.monotonic()
+
+        try:
+            connection_kwargs = {
+                "socket_connect_timeout": connect_timeout,
+                "socket_timeout": command_timeout,
+                "retry_on_timeout": True,
+                "health_check_interval": 10,
+            }
+
+            if ssl_required:
+                connection_kwargs["connection_class"] = redis.connection.SSLConnection
+                connection_kwargs["ssl_cert_reqs"] = (
+                    ssl.CERT_NONE if ssl_insecure else ssl.CERT_REQUIRED
+                )
+                if ssl_ca_file and not ssl_insecure:
+                    connection_kwargs["ssl_ca_certs"] = ssl_ca_file
+
+            client = redis.from_url(
+                redis_url,
+                **connection_kwargs,
+            )
+
+            client.ping()
+        except Exception as exc:  # noqa: BLE001 - surface any failure
+            elapsed = time.monotonic() - start_time
+            error_type = type(exc).__name__
+            module = type(exc).__module__
+            if module and module != "builtins":
+                error_type = f"{module}.{error_type}"
+
+            print(
+                f"🔄 Redis connection attempt {attempt}/{max_attempts} failed "
+                f"({elapsed:.2f}s): {error_type}: {exc}"
+            )
+
+            if attempt == max_attempts:
+                break
+
+            delay = min(
+                max_retry_delay,
+                base_delay * (2 ** (attempt - 1)) + random.uniform(0, 0.75),
+            )
+            time.sleep(delay)
+            continue
+
+        else:
+            elapsed = time.monotonic() - start_time
+            print(
+                f"✅ Redis connection successful after {elapsed:.2f}s "
+                f"(attempt {attempt}/{max_attempts})"
+            )
+            try:
+                client.close()
+            except Exception:
+                pass
+            return True
+
+    print("❌ Failed to connect to Redis after all attempts")
+
+    if redis_optional:
+        print("⚠️ Continuing startup without Redis because REDIS_OPTIONAL is enabled")
+        return True
+
     return False
 
-wait_for_redis()
-"
+
+if __name__ == "__main__":
+    success = wait_for_redis()
+    raise SystemExit(0 if success else 1)
+PYTHON
     if [ $? -ne 0 ]; then
         echo "❌ Redis connection failed"
-        exit 1
+        return 1
     fi
+
+    return 0
 }
 
 # Function to run database migrations
@@ -106,9 +367,28 @@ run_migrations() {
 # Pre-flight checks
 echo "🔍 Running pre-flight checks..."
 
-# Wait for dependencies
-wait_for_db
-wait_for_redis
+# Wait for dependencies in parallel
+wait_for_db &
+DB_PID=$!
+wait_for_redis &
+REDIS_PID=$!
+
+set +e
+wait "$DB_PID"
+DB_STATUS=$?
+wait "$REDIS_PID"
+REDIS_STATUS=$?
+set -e
+
+if [ "$DB_STATUS" -ne 0 ]; then
+    echo "❌ Database readiness checks failed"
+    exit "$DB_STATUS"
+fi
+
+if [ "$REDIS_STATUS" -ne 0 ]; then
+    echo "❌ Redis readiness checks failed"
+    exit "$REDIS_STATUS"
+fi
 
 # Run migrations in production
 if [ "$ENVIRONMENT" = "production" ]; then
