@@ -400,8 +400,11 @@ async def get_scan_status(
             strategies_perf_count = 0
 
         total_strategies = metadata.get("total_strategies")
-        # Prefer explicit metadata totals, fall back to performance count, then the default constant.
-        if not isinstance(total_strategies, (int, float)) or total_strategies <= 0:
+        # Prefer explicit metadata totals when they are numeric and non-negative; otherwise fall back.
+        if isinstance(total_strategies, (int, float)):
+            if total_strategies < 0:
+                total_strategies = strategies_perf_count or DEFAULT_TOTAL_STRATEGIES
+        else:
             total_strategies = strategies_perf_count or DEFAULT_TOTAL_STRATEGIES
         total_strategies = max(int(total_strategies), 0)
 

@@ -706,12 +706,12 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     cached_key = await self.redis.get(redis_lookup_key)
                     if cached_key:
                         cache_key = cached_key.decode('utf-8') if isinstance(cached_key, bytes) else cached_key
-                        # Restore to in-memory lookup for faster subsequent access
-                        async with self._scan_lookup_lock:
-                            self._scan_lookup[scan_id] = cache_key
-                            if cache_key.startswith(f"{user_id}:"):
+                        if cache_key.startswith(f"{user_id}:"):
+                            # Restore to in-memory lookup for faster subsequent access
+                            async with self._scan_lookup_lock:
+                                self._scan_lookup[scan_id] = cache_key
                                 self._user_latest_scan_key[user_id] = cache_key
-                        return cache_key
+                            return cache_key
 
                     # Fallback: direct result index maintained when cache updates succeed but
                     # the lookup mapping was not yet persisted.
@@ -729,10 +729,11 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     cached_key = await self.redis.get(redis_user_key)
                     if cached_key:
                         cache_key = cached_key.decode('utf-8') if isinstance(cached_key, bytes) else cached_key
-                        # Restore to in-memory lookup for faster subsequent access
-                        async with self._scan_lookup_lock:
-                            self._user_latest_scan_key[user_id] = cache_key
-                        return cache_key
+                        if cache_key.startswith(f"{user_id}:"):
+                            # Restore to in-memory lookup for faster subsequent access
+                            async with self._scan_lookup_lock:
+                                self._user_latest_scan_key[user_id] = cache_key
+                            return cache_key
             except Exception as redis_error:
                 self.logger.warning("Failed to resolve scan cache key from Redis",
                                   error=str(redis_error),
