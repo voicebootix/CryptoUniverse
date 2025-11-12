@@ -150,11 +150,11 @@ export const useStrategies = () => {
           return;
         }
 
-        const existing = normalizedMap.get(strategyId) ?? {};
+        const existing = normalizedMap.get(strategyId);
         const rawName =
           strategy.name ||
           strategy.strategy_name ||
-          existing.name ||
+          existing?.name ||
           formatStrategyId(strategyId);
 
         const rawStatus =
@@ -168,41 +168,41 @@ export const useStrategies = () => {
           strategy_id: strategyId,
           name: rawName,
           status: rawStatus,
-          is_active: strategy.is_active ?? existing.is_active ?? rawStatus === 'active',
+          is_active: strategy.is_active ?? existing?.is_active ?? rawStatus === 'active',
           total_trades:
             strategy.total_trades ??
             strategy.metrics?.total_trades ??
-            existing.total_trades ??
+            existing?.total_trades ??
             0,
           winning_trades:
             strategy.winning_trades ??
             strategy.metrics?.winning_trades ??
-            existing.winning_trades ??
+            existing?.winning_trades ??
             0,
           win_rate:
             strategy.win_rate ??
             strategy.metrics?.win_rate ??
-            existing.win_rate ??
+            existing?.win_rate ??
             0,
           total_pnl:
             strategy.total_pnl_usd ??
             strategy.total_pnl ??
             strategy.metrics?.total_pnl_usd ??
-            existing.total_pnl ??
+            existing?.total_pnl ??
             0,
           sharpe_ratio:
             strategy.sharpe_ratio ??
             strategy.metrics?.sharpe_ratio ??
-            existing.sharpe_ratio,
+            existing?.sharpe_ratio,
           created_at:
             strategy.activated_at ||
             strategy.created_at ||
-            existing.created_at ||
+            existing?.created_at ||
             '1970-01-01T00:00:00.000Z',
           last_executed_at:
             strategy.last_executed_at ||
             strategy.last_execution_at ||
-            existing.last_executed_at,
+            existing?.last_executed_at,
         };
 
         normalizedMap.set(strategyId, normalized);
