@@ -277,15 +277,24 @@ def wait_for_redis() -> bool:
         start_time = time.monotonic()
 
         try:
+            connection_kwargs = {
+                "socket_connect_timeout": connect_timeout,
+                "socket_timeout": command_timeout,
+                "retry_on_timeout": True,
+                "health_check_interval": 10,
+            }
+
+            if ssl_required:
+                connection_kwargs["connection_class"] = redis.connection.SSLConnection
+                connection_kwargs["ssl_cert_reqs"] = (
+                    ssl.CERT_NONE if ssl_insecure else ssl.CERT_REQUIRED
+                )
+                if ssl_ca_file and not ssl_insecure:
+                    connection_kwargs["ssl_ca_certs"] = ssl_ca_file
+
             client = redis.from_url(
                 redis_url,
-                socket_connect_timeout=connect_timeout,
-                socket_timeout=command_timeout,
-                retry_on_timeout=True,
-                health_check_interval=10,
-                ssl=ssl_required,
-                ssl_cert_reqs=ssl.CERT_NONE if ssl_required and ssl_insecure else ssl.CERT_REQUIRED if ssl_required else None,
-                ssl_ca_certs=ssl_ca_file if ssl_required and ssl_ca_file and not ssl_insecure else None,
+                **connection_kwargs,
             )
 
             client.ping()
