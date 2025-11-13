@@ -399,13 +399,13 @@ async def get_scan_status(
         else:
             strategies_perf_count = 0
 
+        # Use consistent fallback logic matching the scanning branch
         total_strategies = metadata.get("total_strategies")
-        # Prefer explicit metadata totals when they are numeric and non-negative; otherwise fall back.
-        if isinstance(total_strategies, (int, float)):
-            if total_strategies < 0:
-                total_strategies = strategies_perf_count or DEFAULT_TOTAL_STRATEGIES
-        else:
-            total_strategies = strategies_perf_count or DEFAULT_TOTAL_STRATEGIES
+        if total_strategies in (None, 0):
+            total_strategies = max(
+                metadata.get("strategies_completed", 0),
+                strategies_perf_count or DEFAULT_TOTAL_STRATEGIES,
+            )
         total_strategies = max(int(total_strategies), 0)
 
         strategies_completed_value = metadata.get("strategies_completed")
