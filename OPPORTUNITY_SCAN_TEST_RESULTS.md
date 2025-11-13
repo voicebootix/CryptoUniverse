@@ -33,7 +33,7 @@
 ### ❌ Results Endpoint: FAILURE
 
 **Error:**
-```
+```text
 404 Not Found: "No scan results found. Please initiate a new scan."
 ```
 
