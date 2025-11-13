@@ -403,7 +403,8 @@ async def get_scan_status(
         # Note: This uses max() logic which differs from scanning branch's simple fallback
         total_strategies = metadata.get("total_strategies")
         if total_strategies in (None, 0):
-            # Preserve explicit zero counts by checking None instead of truthiness
+            # Recalculate when total_strategies is None or 0 (treat 0 as invalid/incomplete)
+            # Preserve explicit zero counts in strategies_perf_count by checking None instead of truthiness
             strategies_count = strategies_perf_count if strategies_perf_count is not None else DEFAULT_TOTAL_STRATEGIES
             total_strategies = max(
                 metadata.get("strategies_completed", 0),
