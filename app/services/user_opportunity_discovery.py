@@ -355,8 +355,20 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     ttl = await self.redis.ttl(redis_key)
                     expires_at = time.monotonic() + max(0, ttl) if ttl > 0 else time.monotonic() + 60
 
+                    # Security: validate payload.user_id belongs to provided user_id (strict)
+                    payload = scan_data.get("payload")
+                    if not isinstance(payload, dict) or payload.get("user_id") != user_id:
+                        self.logger.warning(
+                            "Payload user_id mismatch or missing; refusing to return cached entry",
+                            cache_key=cache_key,
+                            expected_user_id=user_id,
+                            payload_user_id=(payload or {}).get("user_id") if isinstance(payload, dict) else None,
+                            scan_id=(payload or {}).get("scan_id") if isinstance(payload, dict) else None
+                        )
+                        return None
+
                     result = _CachedOpportunityResult(
-                        payload=scan_data["payload"],
+                        payload=payload,
                         expires_at=expires_at,
                         partial=scan_data.get("partial", False)
                     )
@@ -374,10 +386,12 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                 self._scan_lookup[scan_id] = cache_key
                                 self._user_latest_scan_key[user_id] = cache_key
 
-                    self.logger.debug("Scan result retrieved from Redis",
-                                    cache_key=cache_key,
-                                    scan_id=scan_data["payload"].get("scan_id"),
-                                    partial=result.partial)
+                    self.logger.debug(
+                        "Scan result retrieved from Redis",
+                        cache_key=cache_key,
+                        scan_id=(payload or {}).get("scan_id") if isinstance(payload, dict) else None,
+                        partial=result.partial
+                    )
                     return result
             except Exception as redis_error:
                 self.logger.warning("Failed to retrieve scan result from Redis",
@@ -706,12 +720,20 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     cached_key = await self.redis.get(redis_lookup_key)
                     if cached_key:
                         cache_key = cached_key.decode('utf-8') if isinstance(cached_key, bytes) else cached_key
-                        if cache_key.startswith(f"{user_id}:"):
-                            # Restore to in-memory lookup for faster subsequent access
-                            async with self._scan_lookup_lock:
-                                self._scan_lookup[scan_id] = cache_key
-                                self._user_latest_scan_key[user_id] = cache_key
-                            return cache_key
+                        # Security: enforce user isolation - reject if cache_key doesn't belong to user_id
+                        if not cache_key.startswith(f"{user_id}:"):
+                            self.logger.warning(
+                                "scan_id does not belong to user; refusing to resolve",
+                                scan_id=scan_id,
+                                user_id=user_id,
+                                cache_key=cache_key
+                            )
+                            return None
+                        # Restore to in-memory lookup for faster subsequent access
+                        async with self._scan_lookup_lock:
+                            self._scan_lookup[scan_id] = cache_key
+                            self._user_latest_scan_key[user_id] = cache_key
+                        return cache_key
 
                     # Fallback: direct result index maintained when cache updates succeed but
                     # the lookup mapping was not yet persisted.
@@ -719,11 +741,19 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     cached_key = await self.redis.get(index_lookup_key)
                     if cached_key:
                         cache_key = cached_key.decode('utf-8') if isinstance(cached_key, bytes) else cached_key
-                        if cache_key.startswith(f"{user_id}:"):
-                            async with self._scan_lookup_lock:
-                                self._scan_lookup[scan_id] = cache_key
-                                self._user_latest_scan_key[user_id] = cache_key
-                            return cache_key
+                        # Security: enforce user isolation - reject if cache_key doesn't belong to user_id
+                        if not cache_key.startswith(f"{user_id}:"):
+                            self.logger.warning(
+                                "index lookup points to another user; refusing to resolve",
+                                scan_id=scan_id,
+                                user_id=user_id,
+                                cache_key=cache_key
+                            )
+                            return None
+                        async with self._scan_lookup_lock:
+                            self._scan_lookup[scan_id] = cache_key
+                            self._user_latest_scan_key[user_id] = cache_key
+                        return cache_key
                 else:
                     redis_user_key = f"opportunity_user_latest_scan:{user_id}"
                     cached_key = await self.redis.get(redis_user_key)
