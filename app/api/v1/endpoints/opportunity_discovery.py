@@ -33,6 +33,7 @@ logger = structlog.get_logger(__name__)
 
 router = APIRouter()
 
+DEFAULT_TOTAL_STRATEGIES = 14
 
 # Request/Response Models
 class OpportunityDiscoveryRequest(BaseModel):
@@ -374,9 +375,9 @@ async def get_scan_status(
                 "message": "Scan in progress",
                 "progress": {
                     "strategies_completed": metadata.get("strategies_completed", 0),
-                    "total_strategies": metadata.get("total_strategies", 14),
+                    "total_strategies": metadata.get("total_strategies", DEFAULT_TOTAL_STRATEGIES),
                     "opportunities_found_so_far": len(opportunities),
-                    "percentage": int((metadata.get("strategies_completed", 0) / max(1, metadata.get("total_strategies", 14))) * 100)
+                    "percentage": int((metadata.get("strategies_completed", 0) / max(1, metadata.get("total_strategies", DEFAULT_TOTAL_STRATEGIES))) * 100)
                 },
                 "partial_results": opportunities[:10],  # First 10 opportunities
                 "estimated_time_remaining_seconds": max(0, 120 - metadata.get("elapsed_seconds", 0))
@@ -384,22 +385,45 @@ async def get_scan_status(
         
         # Scan is complete
         metadata = cached_entry.payload.get("metadata", {})
+        if not isinstance(metadata, dict):
+            metadata = {}
+
+        strategy_performance = cached_entry.payload.get("strategy_performance")
+        # Count the number of strategy performance entries when the structure is indexable.
+        if isinstance(strategy_performance, dict):
+            strategies_perf_count = len(strategy_performance)
+        elif isinstance(strategy_performance, list):
+            strategies_perf_count = len(strategy_performance)
+        else:
+            strategies_perf_count = 0
+
+        # Use consistent fallback logic matching the scanning branch
         total_strategies = metadata.get("total_strategies")
         if total_strategies in (None, 0):
             total_strategies = max(
                 metadata.get("strategies_completed", 0),
-                len(cached_entry.payload.get("strategy_performance", {})) or 14,
+                strategies_perf_count or DEFAULT_TOTAL_STRATEGIES,
             )
+        total_strategies = max(int(total_strategies), 0)
 
-        strategies_completed = metadata.get("strategies_completed", total_strategies)
+        strategies_completed_value = metadata.get("strategies_completed")
+        # Use the reported completed strategies when numeric; otherwise default to zero.
+        if isinstance(strategies_completed_value, (int, float)):
+            strategies_completed = int(strategies_completed_value)
+        else:
+            strategies_completed = 0
+        # Clamp completed strategies to the valid range of [0, total_strategies].
+        strategies_completed = max(0, min(strategies_completed, total_strategies))
+
         opportunities = cached_entry.payload.get("opportunities", [])
+        # Avoid division by zero and cap final percentage at 100.
+        percentage = int((strategies_completed / max(1, total_strategies)) * 100)
+        percentage = min(100, percentage)
         progress_payload = {
             "strategies_completed": strategies_completed,
             "total_strategies": total_strategies,
             "opportunities_found_so_far": len(opportunities),
-            "percentage": int(
-                (strategies_completed / max(1, total_strategies)) * 100
-            ),
+            "percentage": percentage,
         }
 
         return {
