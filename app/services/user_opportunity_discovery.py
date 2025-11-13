@@ -433,29 +433,64 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 await self._refresh_scan_activity(cache_key)
 
                 # Maintain lookup consistency even if registration happens on another worker.
+                # CRITICAL: Always persist lookup keys when updating cache to ensure cross-worker visibility
                 scan_id = cached_payload.get("scan_id")
                 user_id = cached_payload.get("user_id")
-                lookup_ttl = max(ttl_seconds, self._partial_cache_ttl, self._scan_cache_ttl) + 300
+                
+                # Calculate TTL: ensure lookup keys live longer than cache entries
+                # Use the same calculation as _register_scan_lookup for consistency
+                base_ttl = max(self._partial_cache_ttl, self._scan_cache_ttl)
+                lookup_ttl = max(ttl_seconds, base_ttl) + 300  # Ensure lookup keys outlive cache entries
+                
+                lookup_update_context = {
+                    "scan_id": scan_id,
+                    "user_id": user_id,
+                    "cache_key": cache_key,
+                    "lookup_ttl": lookup_ttl,
+                    "cache_ttl": ttl_seconds,
+                    "base_ttl": base_ttl,
+                    "partial": partial,
+                }
 
                 if scan_id:
-                    await self.redis.setex(
-                        f"opportunity_scan_result_index:{scan_id}",
-                        lookup_ttl,
-                        cache_key,
+                    # Persist index key for fallback lookup
+                    index_key = f"opportunity_scan_result_index:{scan_id}"
+                    await self.redis.setex(index_key, lookup_ttl, cache_key)
+                    lookup_update_context["index_key_persisted"] = True
+                    self.logger.debug(
+                        "Scan result index key persisted during cache update",
+                        **lookup_update_context,
+                        redis_key=index_key
                     )
 
                 if scan_id and user_id:
-                    await self.redis.setex(
-                        f"opportunity_scan_lookup:{scan_id}",
-                        lookup_ttl,
-                        cache_key,
+                    # Persist primary lookup key
+                    lookup_key = f"opportunity_scan_lookup:{scan_id}"
+                    await self.redis.setex(lookup_key, lookup_ttl, cache_key)
+                    lookup_update_context["primary_lookup_persisted"] = True
+                    self.logger.debug(
+                        "Scan lookup key persisted during cache update",
+                        **lookup_update_context,
+                        redis_key=lookup_key
                     )
 
                 if user_id:
-                    await self.redis.setex(
-                        f"opportunity_user_latest_scan:{user_id}",
-                        lookup_ttl,
-                        cache_key,
+                    # Persist user's latest scan key
+                    user_latest_key = f"opportunity_user_latest_scan:{user_id}"
+                    await self.redis.setex(user_latest_key, lookup_ttl, cache_key)
+                    lookup_update_context["user_latest_persisted"] = True
+                    self.logger.debug(
+                        "User latest scan key persisted during cache update",
+                        **lookup_update_context,
+                        redis_key=user_latest_key
+                    )
+                
+                # Log summary if all keys were persisted
+                if scan_id and user_id:
+                    self.logger.info(
+                        "Scan lookup keys persisted during cache update",
+                        **lookup_update_context,
+                        all_keys_persisted=True
                     )
 
                 self.logger.info(
@@ -586,34 +621,80 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         return False
 
     async def _register_scan_lookup(self, user_id: str, cache_key: str, scan_id: str) -> None:
+        # DETAILED LOGGING: Track lookup registration for debugging
+        registration_context = {
+            "user_id": user_id,
+            "scan_id": scan_id,
+            "cache_key": cache_key,
+            "success": False,
+            "failure_reason": None,
+        }
+        
+        # Register in-memory lookup first
         async with self._scan_lookup_lock:
             self._scan_lookup[scan_id] = cache_key
             self._user_latest_scan_key[user_id] = cache_key
+        
+        registration_context["in_memory_registered"] = True
 
         # CRITICAL FIX: Also persist scan_id ? cache_key mapping to Redis for cross-worker access
-        if self.redis:
-            try:
-                redis_lookup_key = f"opportunity_scan_lookup:{scan_id}"
-                redis_user_key = f"opportunity_user_latest_scan:{user_id}"
-                lookup_ttl = max(self._partial_cache_ttl, self._scan_cache_ttl) + 300
+        if not self.redis:
+            registration_context["failure_reason"] = "redis_not_available"
+            self.logger.warning(
+                "Failed to persist scan lookup - Redis not available",
+                **registration_context
+            )
+            return
+            
+        try:
+            redis_lookup_key = f"opportunity_scan_lookup:{scan_id}"
+            redis_user_key = f"opportunity_user_latest_scan:{user_id}"
+            redis_index_key = f"opportunity_scan_result_index:{scan_id}"
+            
+            # Calculate TTL: ensure lookup keys live longer than cache entries
+            # Base TTL: max of partial and full cache TTLs
+            base_ttl = max(self._partial_cache_ttl, self._scan_cache_ttl)
+            # Add buffer to ensure lookup keys outlive cache entries
+            lookup_ttl = base_ttl + 300  # 300s = 5 minutes buffer
+            
+            registration_context["lookup_ttl"] = lookup_ttl
+            registration_context["base_ttl"] = base_ttl
+            registration_context["partial_cache_ttl"] = self._partial_cache_ttl
+            registration_context["scan_cache_ttl"] = self._scan_cache_ttl
 
-                await self.redis.setex(redis_lookup_key, lookup_ttl, cache_key)
-                await self.redis.setex(redis_user_key, lookup_ttl, cache_key)
+            # Persist primary lookup key
+            await self.redis.setex(redis_lookup_key, lookup_ttl, cache_key)
+            registration_context["primary_lookup_persisted"] = True
+            
+            # Persist user's latest scan key
+            await self.redis.setex(redis_user_key, lookup_ttl, cache_key)
+            registration_context["user_latest_persisted"] = True
+            
+            # Also persist index key for fallback lookup
+            await self.redis.setex(redis_index_key, lookup_ttl, cache_key)
+            registration_context["index_key_persisted"] = True
 
-                await self._mark_scan_active(cache_key, scan_id)
+            # Mark scan as active
+            await self._mark_scan_active(cache_key, scan_id)
+            registration_context["scan_active_marked"] = True
 
-                self.logger.info(
-                    "Scan lookup persisted to Redis",
-                    scan_id=scan_id,
-                    cache_key=cache_key,
-                    user_id=user_id,
-                )
-            except Exception as redis_error:
-                self.logger.warning(
-                    "Failed to persist scan lookup to Redis",
-                    error=str(redis_error),
-                    scan_id=scan_id,
-                )
+            registration_context["success"] = True
+            self.logger.info(
+                "Scan lookup persisted to Redis",
+                **registration_context,
+                redis_keys={
+                    "lookup": redis_lookup_key,
+                    "user_latest": redis_user_key,
+                    "index": redis_index_key,
+                }
+            )
+        except Exception as redis_error:
+            registration_context["failure_reason"] = f"redis_error: {str(redis_error)}"
+            registration_context["error_type"] = type(redis_error).__name__
+            self.logger.warning(
+                "Failed to persist scan lookup to Redis",
+                **registration_context
+            )
 
     async def _unregister_scan_lookup(self, scan_id: str) -> None:
         """Unregister scan lookup only if cache entry has expired.
@@ -701,74 +782,185 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         user_id: str,
         scan_id: Optional[str] = None,
     ) -> Optional[str]:
+        # DETAILED LOGGING: Track lookup attempts for debugging
+        lookup_context = {
+            "user_id": user_id,
+            "scan_id": scan_id,
+            "lookup_method": None,
+            "success": False,
+            "failure_reason": None,
+        }
+        
         # Check in-memory lookup first
         async with self._scan_lookup_lock:
             if scan_id:
                 cache_key = self._scan_lookup.get(scan_id)
                 if cache_key:
+                    lookup_context["lookup_method"] = "in_memory_scan_id"
+                    lookup_context["success"] = True
+                    self.logger.debug(
+                        "Scan cache key resolved from in-memory lookup",
+                        **lookup_context,
+                        cache_key=cache_key
+                    )
                     return cache_key
             else:
                 cache_key = self._user_latest_scan_key.get(user_id)
                 if cache_key:
+                    lookup_context["lookup_method"] = "in_memory_user_latest"
+                    lookup_context["success"] = True
+                    self.logger.debug(
+                        "Scan cache key resolved from in-memory user latest",
+                        **lookup_context,
+                        cache_key=cache_key
+                    )
                     return cache_key
 
         # CRITICAL FIX: Check Redis if not found in memory (cross-worker access)
-        if self.redis:
-            try:
-                if scan_id:
-                    redis_lookup_key = f"opportunity_scan_lookup:{scan_id}"
-                    cached_key = await self.redis.get(redis_lookup_key)
-                    if cached_key:
-                        cache_key = cached_key.decode('utf-8') if isinstance(cached_key, bytes) else cached_key
-                        # Security: enforce user isolation - reject if cache_key doesn't belong to user_id
-                        if not cache_key.startswith(f"{user_id}:"):
-                            self.logger.warning(
-                                "scan_id does not belong to user; refusing to resolve",
-                                scan_id=scan_id,
-                                user_id=user_id,
-                                cache_key=cache_key
-                            )
-                            return None
+        if not self.redis:
+            lookup_context["failure_reason"] = "redis_not_available"
+            self.logger.warning(
+                "Failed to resolve scan cache key - Redis not available",
+                **lookup_context
+            )
+            return None
+            
+        try:
+            if scan_id:
+                # Method 1: Primary lookup via opportunity_scan_lookup:{scan_id}
+                redis_lookup_key = f"opportunity_scan_lookup:{scan_id}"
+                lookup_context["lookup_method"] = "redis_primary_lookup"
+                
+                cached_key = await self.redis.get(redis_lookup_key)
+                lookup_ttl = await self.redis.ttl(redis_lookup_key) if cached_key else -2
+                
+                if cached_key:
+                    cache_key = cached_key.decode('utf-8') if isinstance(cached_key, bytes) else cached_key
+                    # Security: enforce user isolation - reject if cache_key doesn't belong to user_id
+                    if not cache_key.startswith(f"{user_id}:"):
+                        lookup_context["failure_reason"] = "user_id_mismatch"
+                        lookup_context["cache_key_found"] = cache_key
+                        self.logger.warning(
+                            "scan_id does not belong to user; refusing to resolve",
+                            **lookup_context
+                        )
+                        return None
+                    # Restore to in-memory lookup for faster subsequent access
+                    async with self._scan_lookup_lock:
+                        self._scan_lookup[scan_id] = cache_key
+                        self._user_latest_scan_key[user_id] = cache_key
+                    lookup_context["success"] = True
+                    self.logger.info(
+                        "Scan cache key resolved from Redis primary lookup",
+                        **lookup_context,
+                        cache_key=cache_key,
+                        redis_ttl=lookup_ttl
+                    )
+                    return cache_key
+                else:
+                    self.logger.debug(
+                        "Primary lookup key not found in Redis",
+                        **lookup_context,
+                        redis_key=redis_lookup_key,
+                        redis_ttl=lookup_ttl
+                    )
+
+                # Method 2: Fallback lookup via opportunity_scan_result_index:{scan_id}
+                index_lookup_key = f"opportunity_scan_result_index:{scan_id}"
+                lookup_context["lookup_method"] = "redis_fallback_index"
+                
+                cached_key = await self.redis.get(index_lookup_key)
+                index_ttl = await self.redis.ttl(index_lookup_key) if cached_key else -2
+                
+                if cached_key:
+                    cache_key = cached_key.decode('utf-8') if isinstance(cached_key, bytes) else cached_key
+                    # Security: enforce user isolation - reject if cache_key doesn't belong to user_id
+                    if not cache_key.startswith(f"{user_id}:"):
+                        lookup_context["failure_reason"] = "user_id_mismatch_index"
+                        lookup_context["cache_key_found"] = cache_key
+                        self.logger.warning(
+                            "index lookup points to another user; refusing to resolve",
+                            **lookup_context
+                        )
+                        return None
+                    async with self._scan_lookup_lock:
+                        self._scan_lookup[scan_id] = cache_key
+                        self._user_latest_scan_key[user_id] = cache_key
+                    lookup_context["success"] = True
+                    self.logger.info(
+                        "Scan cache key resolved from Redis fallback index",
+                        **lookup_context,
+                        cache_key=cache_key,
+                        redis_ttl=index_ttl
+                    )
+                    return cache_key
+                else:
+                    self.logger.debug(
+                        "Fallback index key not found in Redis",
+                        **lookup_context,
+                        redis_key=index_lookup_key,
+                        redis_ttl=index_ttl
+                    )
+                
+                # Method 3: Check if result exists directly (last resort)
+                # Try to find any cache_key for this user that might contain the scan_id
+                lookup_context["lookup_method"] = "redis_direct_result_check"
+                # This is expensive, so we'll skip it for now and log the failure
+                lookup_context["failure_reason"] = "all_lookup_methods_failed"
+                self.logger.warning(
+                    "Failed to resolve scan cache key - all lookup methods exhausted",
+                    **lookup_context,
+                    primary_key_exists=(lookup_ttl != -2),
+                    fallback_key_exists=(index_ttl != -2),
+                    primary_key_ttl=lookup_ttl,
+                    fallback_key_ttl=index_ttl
+                )
+            else:
+                # No scan_id provided - use user's latest scan
+                redis_user_key = f"opportunity_user_latest_scan:{user_id}"
+                lookup_context["lookup_method"] = "redis_user_latest"
+                
+                cached_key = await self.redis.get(redis_user_key)
+                user_ttl = await self.redis.ttl(redis_user_key) if cached_key else -2
+                
+                if cached_key:
+                    cache_key = cached_key.decode('utf-8') if isinstance(cached_key, bytes) else cached_key
+                    if cache_key.startswith(f"{user_id}:"):
                         # Restore to in-memory lookup for faster subsequent access
                         async with self._scan_lookup_lock:
-                            self._scan_lookup[scan_id] = cache_key
                             self._user_latest_scan_key[user_id] = cache_key
+                        lookup_context["success"] = True
+                        self.logger.info(
+                            "Scan cache key resolved from Redis user latest",
+                            **lookup_context,
+                            cache_key=cache_key,
+                            redis_ttl=user_ttl
+                        )
                         return cache_key
-
-                    # Fallback: direct result index maintained when cache updates succeed but
-                    # the lookup mapping was not yet persisted.
-                    index_lookup_key = f"opportunity_scan_result_index:{scan_id}"
-                    cached_key = await self.redis.get(index_lookup_key)
-                    if cached_key:
-                        cache_key = cached_key.decode('utf-8') if isinstance(cached_key, bytes) else cached_key
-                        # Security: enforce user isolation - reject if cache_key doesn't belong to user_id
-                        if not cache_key.startswith(f"{user_id}:"):
-                            self.logger.warning(
-                                "index lookup points to another user; refusing to resolve",
-                                scan_id=scan_id,
-                                user_id=user_id,
-                                cache_key=cache_key
-                            )
-                            return None
-                        async with self._scan_lookup_lock:
-                            self._scan_lookup[scan_id] = cache_key
-                            self._user_latest_scan_key[user_id] = cache_key
-                        return cache_key
+                    else:
+                        lookup_context["failure_reason"] = "user_id_mismatch_user_latest"
+                        self.logger.warning(
+                            "User latest scan key does not belong to user",
+                            **lookup_context,
+                            cache_key_found=cache_key
+                        )
                 else:
-                    redis_user_key = f"opportunity_user_latest_scan:{user_id}"
-                    cached_key = await self.redis.get(redis_user_key)
-                    if cached_key:
-                        cache_key = cached_key.decode('utf-8') if isinstance(cached_key, bytes) else cached_key
-                        if cache_key.startswith(f"{user_id}:"):
-                            # Restore to in-memory lookup for faster subsequent access
-                            async with self._scan_lookup_lock:
-                                self._user_latest_scan_key[user_id] = cache_key
-                            return cache_key
-            except Exception as redis_error:
-                self.logger.warning("Failed to resolve scan cache key from Redis",
-                                  error=str(redis_error),
-                                  scan_id=scan_id,
-                                  user_id=user_id)
+                    lookup_context["failure_reason"] = "user_latest_key_not_found"
+                    self.logger.debug(
+                        "User latest scan key not found in Redis",
+                        **lookup_context,
+                        redis_key=redis_user_key,
+                        redis_ttl=user_ttl
+                    )
+                    
+        except Exception as redis_error:
+            lookup_context["failure_reason"] = f"redis_error: {str(redis_error)}"
+            self.logger.warning(
+                "Failed to resolve scan cache key from Redis",
+                **lookup_context,
+                error=str(redis_error),
+                error_type=type(redis_error).__name__
+            )
 
         return None
 
