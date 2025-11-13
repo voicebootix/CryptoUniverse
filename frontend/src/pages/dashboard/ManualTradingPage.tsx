@@ -232,10 +232,6 @@ const ManualTradingPage: React.FC = () => {
       options.set(normalizedId, next);
     };
 
-    Object.values(portfolioStrategySet).forEach((strategy) => upsert(strategy.strategy_id, strategy));
-    portfolioStrategies.forEach((strategy) => upsert(strategy.strategy_id, strategy));
-    strategies.forEach((strategy) => upsert(strategy.strategy_id, strategy));
-
     Object.entries(availableStrategies).forEach(([strategyId, metadata]) => {
       upsert(
         strategyId,
@@ -256,6 +252,10 @@ const ManualTradingPage: React.FC = () => {
         { preferExisting: true }
       );
     });
+
+    Object.values(portfolioStrategySet).forEach((strategy) => upsert(strategy.strategy_id, strategy));
+    portfolioStrategies.forEach((strategy) => upsert(strategy.strategy_id, strategy));
+    strategies.forEach((strategy) => upsert(strategy.strategy_id, strategy));
 
     return Array.from(options.values()).sort((a, b) => a.name.localeCompare(b.name));
   }, [portfolioStrategySet, portfolioStrategies, strategies, availableStrategies]);

@@ -247,7 +247,10 @@ export const useStrategies = () => {
           return;
         }
 
-        const candidate = typeof entry.strategy === 'object' ? entry.strategy : entry;
+        const candidate =
+          entry && entry.strategy !== null && typeof entry.strategy === 'object'
+            ? entry.strategy
+            : entry;
         const rawId =
           candidate.strategy_id ||
           candidate.strategyId ||
@@ -290,11 +293,18 @@ export const useStrategies = () => {
                 ? 'inactive'
                 : existing?.status ?? 'active';
 
+        const normalizedStatus =
+          typeof derivedStatus === 'string' ? derivedStatus.toLowerCase() : 'active';
+
         const normalized: TradingStrategy = {
           strategy_id: strategyId,
           name: formatStrategyDisplayName(strategyId, candidate.name || candidate.strategy_name || entry.name),
           status: derivedStatus,
-          is_active: candidate.is_active ?? entry.is_active ?? existing?.is_active ?? derivedStatus !== 'inactive',
+          is_active:
+            candidate.is_active ??
+            entry.is_active ??
+            existing?.is_active ??
+            normalizedStatus !== 'inactive',
           total_trades: coerceNumber(
             candidate.total_trades ??
               entry.total_trades ??
