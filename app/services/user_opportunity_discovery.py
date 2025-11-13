@@ -355,16 +355,15 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     ttl = await self.redis.ttl(redis_key)
                     expires_at = time.monotonic() + max(0, ttl) if ttl > 0 else time.monotonic() + 60
 
-                    # Security: validate payload.user_id matches the provided user_id
-                    payload = scan_data.get("payload", {})
-                    payload_user_id = payload.get("user_id") if isinstance(payload, dict) else None
-                    if payload_user_id and payload_user_id != user_id:
+                    # Security: validate payload.user_id belongs to provided user_id (strict)
+                    payload = scan_data.get("payload")
+                    if not isinstance(payload, dict) or payload.get("user_id") != user_id:
                         self.logger.warning(
-                            "Payload user_id mismatch; refusing to return cached entry",
+                            "Payload user_id mismatch or missing; refusing to return cached entry",
                             cache_key=cache_key,
                             expected_user_id=user_id,
-                            payload_user_id=payload_user_id,
-                            scan_id=payload.get("scan_id") if isinstance(payload, dict) else None
+                            payload_user_id=(payload or {}).get("user_id") if isinstance(payload, dict) else None,
+                            scan_id=(payload or {}).get("scan_id") if isinstance(payload, dict) else None
                         )
                         return None
 
@@ -387,10 +386,12 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                 self._scan_lookup[scan_id] = cache_key
                                 self._user_latest_scan_key[user_id] = cache_key
 
-                    self.logger.debug("Scan result retrieved from Redis",
-                                    cache_key=cache_key,
-                                    scan_id=scan_data["payload"].get("scan_id"),
-                                    partial=result.partial)
+                    self.logger.debug(
+                        "Scan result retrieved from Redis",
+                        cache_key=cache_key,
+                        scan_id=(payload or {}).get("scan_id") if isinstance(payload, dict) else None,
+                        partial=result.partial
+                    )
                     return result
             except Exception as redis_error:
                 self.logger.warning("Failed to retrieve scan result from Redis",
