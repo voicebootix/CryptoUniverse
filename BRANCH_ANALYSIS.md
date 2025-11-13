@@ -1,196 +1,173 @@
-# Branch Analysis: `codex/verify-opportunity-scanning-analysis-89eunv`
+# Branch Analysis: `codex/fix-opportunity-scan-lookup-and-results-issues`
 
-## What This Branch Does
+## Branch Overview
 
-This branch makes several changes to the opportunity discovery system:
+**Commit:** `6c595583` - "Improve opportunity scan cache resolution"  
+**Files Changed:** 
+- `app/services/user_opportunity_discovery.py` (+56 lines)
+- `app/api/v1/endpoints/opportunity_discovery.py` (+22 lines)
 
-### 1. **Moved Race Condition Fix Location** ⚠️
-- **Removed:** The placeholder cache entry that was synchronously created in `opportunity_discovery.py` (API endpoint)
-- **Moved to:** Placeholder cache entry is now created in `discover_opportunities_for_user()` (line 871), which runs in the background task
-- **Impact:** Race condition window reintroduced - there's a gap between API response and background task execution where status endpoint may return "not_found"
-- **Timing:** The placeholder is created AFTER the background task starts, not before the API returns
+## Issues Identified vs. Branch Fixes
 
-### 2. **Added Overall SLA Enforcement** ✅
-- **Added:** Overall timeout wrapper around `asyncio.gather()` for strategy scans
-- **Implementation:** Lines 1232-1258 in `user_opportunity_discovery.py`
-- **Logic:** Calculates remaining budget and wraps gather() in `asyncio.wait_for()` with that timeout
-- **On Timeout:** Collects completed results and cancels unfinished tasks
+### ✅ Issue 1: Intermittent "not_found" Status Responses
 
-### 3. **Changed Timeout Calculation** ⚠️
-- **Changed:** Per-strategy timeout now uses "remaining budget" instead of full budget
-- **Calculation:** `remaining_budget = max(0.0, self._scan_response_budget - elapsed_since_start)`
-- **Per-strategy timeout:** `max(10.0, min(240.0, remaining_budget / batches))`
-- **Problem:** Increased max timeout from 180s to 240s (opposite of recommendation)
+**Problem:** Status endpoint intermittently returns `"status": "not_found"` due to cross-worker visibility issues.
 
-### 4. **Added Partial Result Preservation** ✅
-- **Added:** When overall timeout occurs, collects completed results before cancelling
-- **Logic:** Iterates through tasks, extracts completed results, marks unfinished as TimeoutError
+**Branch Fixes:**
 
----
-
-## What Issue From Logs Is It Fixing?
-
-### Issue Addressed: **Overall Scan Performance Degradation**
-
-**From Logs:**
-```
-OPPORTUNITY DISCOVERY PERFORMANCE DEGRADED
-alert_threshold=10s
-total_time_ms=168280.2951335907  (≈ 2.8 minutes)
-total_time_ms=168967.8919315338  (≈ 2.8 minutes)
-```
-
-**What the fix does:**
-- Adds overall SLA enforcement to prevent scans from exceeding the budget (150s)
-- Preserves partial results when timeout occurs
-- Uses remaining budget calculation to allocate time more efficiently
-
-### Issue NOT Addressed: **Strategy Execution Timeouts**
-
-**From Logs:**
-```
-❌ STEP X: Strategy: AI Breakout Trading error_type=TimeoutError ... status=failed
-❌ STEP X: Strategy: AI Scalping error_type=TimeoutError ... status=failed
-Timeout duration: 150-160 seconds
-```
-
-**What the fix does:**
-- **INCREASES** per-strategy timeout from 180s to 240s (line 1143)
-- This makes the problem WORSE, not better
-- Individual strategies can still run for up to 240 seconds before timing out
-
----
-
-## Is The Fix Correct?
-
-### ✅ **Correct Aspects:**
-
-1. **Overall SLA Enforcement:**
-   - ✅ Good: Prevents entire scan from exceeding budget
-   - ✅ Good: Preserves partial results instead of losing everything
-   - ✅ Good: Uses remaining budget calculation for dynamic allocation
-
-2. **Partial Result Preservation:**
-   - ✅ Good: Collects completed results before cancelling
-   - ✅ Good: Maintains input order for result-index mapping
-
-### ❌ **Incorrect Aspects:**
-
-1. **Race Condition Fix Location Changed:**
-   - ⚠️ **CONCERN:** Placeholder cache entry moved from API endpoint to background task
-   - ⚠️ **Impact:** Small race condition window exists between API response and background task execution
-   - ⚠️ **Timing:** Background task creates placeholder at line 871, but API returns scan_id at line 258 before task executes
-   - **Fix Needed:** Restore synchronous placeholder creation in API endpoint BEFORE scheduling background task
-
-2. **Increased Per-Strategy Timeout:**
-   - ❌ **WRONG DIRECTION:** Increased from 180s to 240s
-   - ❌ **Problem:** Logs show strategies timing out at 150-160s, causing incomplete results
-   - ❌ **Recommendation:** Should REDUCE to 30s, not increase to 240s
-   - **Impact:** Strategies will run even longer, causing more timeouts and worse performance
-
-3. **Overall Budget Still Too High:**
-   - ⚠️ **CONCERN:** Budget is 150s, but target is 10s
-   - ⚠️ **Problem:** Even with enforcement, 150s is 15x slower than target
-   - **Recommendation:** Reduce overall budget to 60s or less
-
-### ⚠️ **Potential Issues:**
-
-1. **Race Condition Regression:**
-   - The removed placeholder cache entry was fixing a real issue
-   - Without it, status endpoint may return "not_found" again
-   - This was validated as working in production logs
-
-2. **Timeout Logic Conflict:**
-   - Per-strategy timeout: 240s max
-   - Overall budget: 150s
-   - If multiple strategies run concurrently, overall timeout will cancel them before per-strategy timeout
-   - This creates inconsistent behavior
-
----
-
-## Comparison with Log Issues
-
-| Log Issue | Addressed? | Fix Correct? | Notes |
-|-----------|------------|--------------|-------|
-| Overall scan duration (2.8 min) | ✅ Yes | ⚠️ Partial | Overall Scan Budget added (150s), but target is <60s |
-| Strategy timeouts (150-160s) | ✅ Yes | ✅ Correct | Per-strategy timeout set to 180s (matches gunicorn). See TIMEOUT_ARCHITECTURE_EXPLANATION.md for rationale. The 150-160s timeouts in logs are from Overall Scan Budget enforcement, not per-strategy limits. |
-| Status endpoint "not_found" | ✅ Yes | ✅ Fixed | Placeholder cache entry restored (race condition fix) |
-| Database slow queries | ❌ No | N/A | Not addressed in this branch (addressed in codex/implement-critical-performance-fixes) |
-| Kraken API nonce errors | ❌ No | N/A | Not addressed in this branch (addressed in codex/implement-critical-performance-fixes) |
-| External API rate limits | ❌ No | N/A | Not addressed in this branch (addressed in codex/implement-critical-performance-fixes) |
-
----
-
-## Recommendations
-
-### Must Fix Before Merging:
-
-1. **Restore Race Condition Fix:**
+1. **Fallback Lookup Mechanism** (Lines 712-722):
    ```python
-   # In app/api/v1/endpoints/opportunity_discovery.py, after line 233:
-   placeholder_payload = {
-       "success": True,
-       "scan_id": scan_id,
-       "user_id": user_id_str,
-       "opportunities": [],
-       "total_opportunities": 0,
-       "metadata": {
-           "scan_state": "initiated",
-           "message": "Scan initiated, processing in background...",
-           "strategies_completed": 0,
-           "total_strategies": 14,
-           "elapsed_seconds": 0
-       },
-       # ... rest of placeholder
+   # Fallback: direct result index maintained when cache updates succeed but
+   # the lookup mapping was not yet persisted.
+   index_lookup_key = f"opportunity_scan_result_index:{scan_id}"
+   cached_key = await self.redis.get(index_lookup_key)
+   ```
+   - Adds a new Redis key `opportunity_scan_result_index:{scan_id}` as a fallback
+   - This is maintained independently when cache updates succeed
+
+2. **Lookup Cache Consistency** (Lines 368-375):
+   ```python
+   # Ensure lookup caches remain consistent when results are fetched from Redis
+   scan_id = result.payload.get("scan_id") if isinstance(result.payload, dict) else None
+   if scan_id:
+       async with self._scan_lookup_lock:
+           self._scan_lookup.setdefault(scan_id, cache_key)
+   ```
+   - Restores in-memory lookup when fetching from Redis
+   - Ensures consistency across workers
+
+3. **Extended TTL** (Line 584):
+   ```python
+   lookup_ttl = max(self._partial_cache_ttl, self._scan_cache_ttl) + 300
+   ```
+   - Increases lookup TTL by 300 seconds (5 minutes)
+   - Reduces expiration-related failures
+
+**Verdict:** ✅ **FIXED** - Multiple fallback mechanisms address cross-worker visibility
+
+---
+
+### ✅ Issue 2: Results Endpoint Returns 404
+
+**Problem:** Results endpoint cannot find completed scans, returns 404.
+
+**Branch Fixes:**
+
+1. **Multiple Lookup Persistence Points** (Lines 422-444):
+   ```python
+   # Maintain lookup consistency even if registration happens on another worker.
+   if scan_id:
+       await self.redis.setex(
+           f"opportunity_scan_result_index:{scan_id}",
+           lookup_ttl,
+           cache_key,
+       )
+   
+   if scan_id and user_id:
+       await self.redis.setex(
+           f"opportunity_scan_lookup:{scan_id}",
+           lookup_ttl,
+           cache_key,
+       )
+   ```
+   - Persists lookup mappings at **three different points**:
+     - `opportunity_scan_result_index:{scan_id}` (new fallback)
+     - `opportunity_scan_lookup:{scan_id}` (existing)
+     - `opportunity_user_latest_scan:{user_id}` (existing)
+   - Ensures lookup is available even if registration happens on different worker
+
+2. **Lookup Restoration on Fetch** (Lines 368-375):
+   - When fetching from Redis, restores in-memory lookup
+   - Prevents future lookup failures
+
+3. **Extended TTL** (Line 584):
+   - Longer TTL reduces chance of expiration before results are fetched
+
+**Verdict:** ✅ **FIXED** - Multiple persistence points and fallbacks ensure results are findable
+
+---
+
+### ✅ Issue 3: Status Shows 0/0 Strategies After Completion
+
+**Problem:** Status endpoint shows `strategies_completed: 0` and `total_strategies: 0` after completion.
+
+**Branch Fixes:**
+
+1. **Explicit Metadata Extraction** (Lines 386-400):
+   ```python
+   metadata = cached_entry.payload.get("metadata", {})
+   total_strategies = metadata.get("total_strategies")
+   if total_strategies in (None, 0):
+       total_strategies = max(
+           metadata.get("strategies_completed", 0),
+           len(cached_entry.payload.get("strategy_performance", {})) or 14,
+       )
+   
+   strategies_completed = metadata.get("strategies_completed", total_strategies)
+   opportunities = cached_entry.payload.get("opportunities", [])
+   progress_payload = {
+       "strategies_completed": strategies_completed,
+       "total_strategies": total_strategies,
+       "opportunities_found_so_far": len(opportunities),
+       "percentage": int((strategies_completed / max(1, total_strategies)) * 100),
    }
-   await user_opportunity_discovery._update_cached_scan_result(
-       cache_key,
-       placeholder_payload,
-       partial=True,
-   )
    ```
+   - Extracts metadata properly
+   - Falls back to multiple sources if `total_strategies` is missing:
+     - `strategies_completed` from metadata
+     - Count from `strategy_performance` dict
+     - Default to 14 if all else fails
+   - Calculates percentage correctly
+   - **Includes progress payload in response** (line 407)
 
-2. **Reduce Per-Strategy Timeout:**
-   ```python
-   # In app/services/user_opportunity_discovery.py, line 1143:
-   # Change from:
-   per_strategy_timeout_s = max(10.0, min(240.0, remaining_budget / batches))
-   # To:
-   per_strategy_timeout_s = max(10.0, min(30.0, remaining_budget / batches))
-   ```
-
-3. **Reduce Overall Budget:**
-   ```python
-   # In app/services/user_opportunity_discovery.py, line 133:
-   # Change from:
-   self._scan_response_budget = 150.0
-   # To:
-   self._scan_response_budget = 60.0  # 1 minute max
-   ```
-
-### Optional Improvements:
-
-1. Add timeout checks within strategy execution loops (as recommended in implementation prompt)
-2. Add database query optimization (separate issue)
-3. Fix Kraken API nonce errors (separate issue)
+**Verdict:** ✅ **FIXED** - Explicit metadata handling ensures correct progress display
 
 ---
+
+## Additional Improvements
+
+### 1. Scan Activity Tracking
+
+**New Methods:**
+- `_mark_scan_active()` - Marks scan as active in Redis
+- `_refresh_scan_activity()` - Refreshes activity TTL
+- `_clear_scan_activity()` - Clears activity flag
+
+**Benefit:** Better tracking of active scans across workers
+
+### 2. Improved `has_active_scan_task()`
+
+**Enhancement:** Now checks Redis for active scans, not just in-memory tasks
+
+**Benefit:** Cross-worker visibility for active scan detection
+
+### 3. Better Logging
+
+**Changes:**
+- Changed `logger.debug()` to `logger.info()` for important operations
+- More detailed error messages
+
+**Benefit:** Better observability and debugging
+
+---
+
+## Summary
+
+| Issue | Status | Fix Quality |
+|-------|--------|-------------|
+| Intermittent "not_found" status | ✅ FIXED | Excellent - Multiple fallbacks |
+| Results endpoint 404 | ✅ FIXED | Excellent - Triple persistence |
+| Status shows 0/0 strategies | ✅ FIXED | Excellent - Explicit handling |
 
 ## Conclusion
 
-**Status:** ⚠️ **PARTIALLY CORRECT, BUT HAS CRITICAL REGRESSIONS**
+**✅ YES, this branch fixes all three identified issues.**
 
-**What's Good:**
-- Overall SLA enforcement is a good addition
-- Partial result preservation is valuable
-- Remaining budget calculation is smart
+The branch implements:
+1. **Robust fallback mechanisms** for lookup resolution
+2. **Multiple persistence points** to ensure cross-worker visibility
+3. **Explicit metadata handling** for status responses
+4. **Extended TTLs** to reduce expiration issues
+5. **Better activity tracking** for improved reliability
 
-**What's Wrong:**
-- ⚠️ Race condition fix moved to background task (reintroduces small timing window)
-- ❌ Increased per-strategy timeout (wrong direction)
-- ⚠️ Overall budget still too high (150s vs 10s target)
-
-**Recommendation:** **REVIEW CAREFULLY** before merging:
-1. Race condition fix should be in API endpoint (synchronous) not background task
-2. Per-strategy timeout should be reduced to 30s (not increased to 240s)
-3. Overall budget should be reduced to 60s or less (currently 150s)
+**Recommendation:** ✅ **MERGE THIS BRANCH** - It addresses all the issues we identified and adds additional reliability improvements.
