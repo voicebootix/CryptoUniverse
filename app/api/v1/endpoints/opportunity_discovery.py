@@ -383,13 +383,33 @@ async def get_scan_status(
             }
         
         # Scan is complete
+        metadata = cached_entry.payload.get("metadata", {})
+        total_strategies = metadata.get("total_strategies")
+        if total_strategies in (None, 0):
+            total_strategies = max(
+                metadata.get("strategies_completed", 0),
+                len(cached_entry.payload.get("strategy_performance", {})) or 14,
+            )
+
+        strategies_completed = metadata.get("strategies_completed", total_strategies)
+        opportunities = cached_entry.payload.get("opportunities", [])
+        progress_payload = {
+            "strategies_completed": strategies_completed,
+            "total_strategies": total_strategies,
+            "opportunities_found_so_far": len(opportunities),
+            "percentage": int(
+                (strategies_completed / max(1, total_strategies)) * 100
+            ),
+        }
+
         return {
             "success": True,
             "status": "complete",
             "scan_id": cached_entry.payload.get("scan_id", scan_id),
             "message": "Scan completed successfully",
-            "total_opportunities": len(cached_entry.payload.get("opportunities", [])),
-            "results_url": f"/api/v1/opportunities/results/{scan_id}"
+            "total_opportunities": len(opportunities),
+            "results_url": f"/api/v1/opportunities/results/{scan_id}",
+            "progress": progress_payload,
         }
         
     except Exception as e:
