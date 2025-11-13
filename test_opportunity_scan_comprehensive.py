@@ -244,6 +244,22 @@ async def main():
         # Step 3: Poll status
         final_status = await poll_scan_status(client, token, scan_id)
         
+        # Validate final status
+        if final_status:
+            final_status_value = final_status.get("status", "unknown")
+            final_progress = final_status.get("progress", {})
+            final_strategies = final_progress.get("strategies_completed", 0)
+            final_total = final_progress.get("total_strategies", 0)
+            final_opportunities = final_progress.get("opportunities_found_so_far", 0)
+            
+            print(f"\n[VALIDATION] Final scan status: {final_status_value}")
+            print(f"[VALIDATION] Final progress: {final_strategies}/{final_total} strategies, {final_opportunities} opportunities")
+            
+            if final_status_value not in ["completed", "finished"]:
+                print(f"[WARN] Scan did not complete successfully. Final status: {final_status_value}")
+        else:
+            print(f"\n[WARN] Could not determine final scan status")
+        
         # Step 4: Get results
         print(f"\n[RESULTS] Fetching final results...")
         results = await get_results(client, token, scan_id)
