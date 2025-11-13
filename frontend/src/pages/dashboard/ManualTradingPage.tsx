@@ -48,8 +48,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { useUser } from '@/store/authStore';
 import { UserRole } from '@/types/auth';
 import { useExchanges } from '@/hooks/useExchanges';
-import { useStrategies } from '@/hooks/useStrategies';
-import type { TradingStrategy } from '@/hooks/useStrategies';
+import { useStrategies, type TradingStrategy, formatStrategyDisplayName } from '@/hooks/useStrategies';
 import { usePortfolioStore } from '@/hooks/usePortfolio';
 import { useAIConsensus } from '@/hooks/useAIConsensus';
 import { useCredits } from '@/hooks/useCredits';
@@ -181,61 +180,85 @@ const ManualTradingPage: React.FC = () => {
   const {
     strategies,
     portfolioStrategies,
+    portfolioStrategySet,
     availableStrategies,
     actions: strategyActions,
     executing: strategyExecuting
   } = useStrategies();
   const strategyOptions = useMemo<TradingStrategy[]>(() => {
-    const formatStrategyName = (strategyId: string) =>
-      strategyId
-        .split('_')
-        .map((segment) => {
-          if (segment.length <= 3 && segment.toLowerCase() === 'ai') {
-            return segment.toUpperCase();
-          }
-          if (!segment) {
-            return segment;
-          }
-          return segment.charAt(0).toUpperCase() + segment.slice(1);
-        })
-        .join(' ');
-
     const options = new Map<string, TradingStrategy>();
-
-    portfolioStrategies.forEach((strategy) => {
-      options.set(strategy.strategy_id, strategy);
-    });
-
-    strategies.forEach((strategy) => {
-      options.set(strategy.strategy_id, strategy);
-    });
-
-    Object.entries(availableStrategies).forEach(([strategyId, metadata]) => {
-      const fallbackName = metadata.name || formatStrategyName(strategyId);
-      const existing = options.get(strategyId);
-
-      if (existing) {
-        if (!existing.name || existing.name === existing.strategy_id || existing.name !== fallbackName) {
-          options.set(strategyId, { ...existing, name: fallbackName });
-        }
+    const upsert = (
+      strategyId: string,
+      data?: Partial<TradingStrategy>,
+      { preferExisting = false }: { preferExisting?: boolean } = {}
+    ) => {
+      const normalizedId = strategyId?.trim();
+      if (!normalizedId) {
         return;
       }
 
-      options.set(strategyId, {
-        strategy_id: strategyId,
-        name: fallbackName,
-        status: 'available',
-        is_active: false,
-        total_trades: 0,
-        winning_trades: 0,
-        win_rate: 0,
-        total_pnl: 0,
-        created_at: '1970-01-01T00:00:00.000Z',
-      });
+      const existing = options.get(normalizedId);
+      const pickValue = <K extends keyof TradingStrategy>(
+        key: K,
+        fallback: TradingStrategy[K]
+      ) => {
+        const existingValue = existing?.[key];
+        const providedValue = data?.[key];
+        if (preferExisting) {
+          return (existingValue ?? providedValue ?? fallback) as TradingStrategy[K];
+        }
+        return (providedValue ?? existingValue ?? fallback) as TradingStrategy[K];
+      };
+      const preferredName = preferExisting
+        ? existing?.name ?? data?.name
+        : data?.name ?? existing?.name;
+      const next: TradingStrategy = {
+        strategy_id: normalizedId,
+        name: formatStrategyDisplayName(normalizedId, preferredName),
+        status: pickValue('status', 'available'),
+        is_active: pickValue('is_active', false),
+        total_trades: pickValue('total_trades', 0),
+        winning_trades: pickValue('winning_trades', 0),
+        win_rate: pickValue('win_rate', 0),
+        total_pnl: pickValue('total_pnl', 0),
+        created_at: pickValue('created_at', '1970-01-01T00:00:00.000Z'),
+        last_executed_at: pickValue('last_executed_at', undefined),
+        sharpe_ratio: pickValue('sharpe_ratio', undefined),
+        category: pickValue('category', undefined),
+        risk_level: pickValue('risk_level', undefined),
+        description: pickValue('description', undefined),
+      };
+
+      options.set(normalizedId, next);
+    };
+
+    Object.entries(availableStrategies).forEach(([strategyId, metadata]) => {
+      upsert(
+        strategyId,
+        {
+          strategy_id: strategyId,
+          name: metadata.name,
+          status: 'available',
+          is_active: false,
+          total_trades: 0,
+          winning_trades: 0,
+          win_rate: 0,
+          total_pnl: 0,
+          created_at: '1970-01-01T00:00:00.000Z',
+          category: metadata.category,
+          risk_level: metadata.risk_level,
+          description: metadata.description,
+        },
+        { preferExisting: true }
+      );
     });
 
+    Object.values(portfolioStrategySet).forEach((strategy) => upsert(strategy.strategy_id, strategy));
+    portfolioStrategies.forEach((strategy) => upsert(strategy.strategy_id, strategy));
+    strategies.forEach((strategy) => upsert(strategy.strategy_id, strategy));
+
     return Array.from(options.values()).sort((a, b) => a.name.localeCompare(b.name));
-  }, [portfolioStrategies, strategies, availableStrategies]);
+  }, [portfolioStrategySet, portfolioStrategies, strategies, availableStrategies]);
   const {
     totalValue,
     availableBalance,
@@ -344,8 +367,8 @@ const ManualTradingPage: React.FC = () => {
     if (!workflowConfig.strategyId || workflowConfig.strategyId === 'manual') {
       return undefined;
     }
-    return availableStrategies[workflowConfig.strategyId];
-  }, [workflowConfig.strategyId, availableStrategies]);
+    return strategyOptions.find((strategy) => strategy.strategy_id === workflowConfig.strategyId);
+  }, [workflowConfig.strategyId, strategyOptions]);
 
   const sanitizedTargetSymbols = useMemo(() => {
     return workflowConfig.targetSymbolsText
