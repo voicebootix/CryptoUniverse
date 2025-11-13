@@ -1,17 +1,28 @@
 """
 Comprehensive Opportunity Scan Test
 Tests the opportunity discovery endpoint and monitors logs in parallel.
+
+Environment Variables Required:
+- OPPORTUNITY_SCAN_TEST_EMAIL: Email for test account
+- OPPORTUNITY_SCAN_TEST_PASSWORD: Password for test account
 """
 import asyncio
 import httpx
 import json
+import os
 import sys
 from datetime import datetime
 from typing import Optional, Dict, Any
 
 BASE_URL = "https://cryptouniverse.onrender.com"
-EMAIL = "admin@cryptouniverse.com"
-PASSWORD = "AdminPass123!"
+EMAIL = os.environ.get("OPPORTUNITY_SCAN_TEST_EMAIL")
+PASSWORD = os.environ.get("OPPORTUNITY_SCAN_TEST_PASSWORD")
+
+if not EMAIL or not PASSWORD:
+    raise RuntimeError(
+        "Set OPPORTUNITY_SCAN_TEST_EMAIL and OPPORTUNITY_SCAN_TEST_PASSWORD "
+        "environment variables before running this script."
+    )
 
 # Fix Windows console encoding
 if sys.platform == 'win32':
@@ -30,7 +41,7 @@ async def login(client: httpx.AsyncClient) -> Optional[str]:
         data = response.json()
         token = data.get("access_token")
         if token:
-            print(f"[OK] Login successful! Token: {token[:50]}...")
+            print("[OK] Login successful! Received access token.")
             return token
         else:
             print(f"[ERROR] No token in response: {data}")

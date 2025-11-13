@@ -61,7 +61,7 @@ async def _get_cached_scan_entry(self, user_id: str, scan_id: Optional[str] = No
 **Symptom:** After scan completion, `/api/v1/opportunities/results/{scan_id}` returns 404.
 
 **Error Message:**
-```
+```text
 "No scan results found. Please initiate a new scan."
 ```
 
