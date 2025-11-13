@@ -2,6 +2,66 @@ import { useState, useEffect } from 'react';
 import { apiClient } from '@/lib/api/client';
 import { useToast } from '@/components/ui/use-toast';
 
+const AI_ACRONYMS = new Set(['ai', 'ml', 'gpt', 'llm', 'nlp', 'mft']);
+const STRATEGY_ID_HINTS = [
+  'ai_',
+  'spot_',
+  'futures_',
+  'options_',
+  'risk_',
+  'portfolio_',
+  'hedge_',
+  'pairs_',
+  'scalping_',
+  'statistical_',
+  'strategy'
+];
+
+const looksLikeStrategyId = (value: unknown): boolean => {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return true;
+  }
+
+  if (typeof value !== 'string') {
+    return false;
+  }
+
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) {
+    return false;
+  }
+
+  return STRATEGY_ID_HINTS.some((hint) => normalized.includes(hint));
+};
+
+export const formatStrategyDisplayName = (strategyId?: string, providedName?: string): string => {
+  const normalizedId = strategyId?.trim();
+  const preferredName = providedName?.trim();
+
+  if (preferredName && preferredName.toLowerCase() !== normalizedId?.toLowerCase()) {
+    return preferredName;
+  }
+
+  if (!normalizedId) {
+    return preferredName || 'Strategy';
+  }
+
+  return normalizedId
+    .split(/[_\-\s]+/)
+    .filter(Boolean)
+    .map((segment) => {
+      const lower = segment.toLowerCase();
+      if (AI_ACRONYMS.has(lower) || (segment.length <= 3 && /^[a-z]+$/i.test(segment))) {
+        return segment.toUpperCase();
+      }
+      if (/^\d+$/.test(segment)) {
+        return segment;
+      }
+      return segment.charAt(0).toUpperCase() + segment.slice(1);
+    })
+    .join(' ');
+};
+
 export interface TradingStrategy {
   strategy_id: string;
   name: string;
@@ -14,6 +74,9 @@ export interface TradingStrategy {
   sharpe_ratio?: number;
   created_at: string;
   last_executed_at?: string;
+  category?: string;
+  risk_level?: string;
+  description?: string;
 }
 
 export interface AvailableStrategy {
@@ -48,6 +111,7 @@ export interface StrategyConfigRequest {
 export const useStrategies = () => {
   const [strategies, setStrategies] = useState<TradingStrategy[]>([]);
   const [portfolioStrategies, setPortfolioStrategies] = useState<TradingStrategy[]>([]);
+  const [portfolioStrategySet, setPortfolioStrategySet] = useState<Record<string, TradingStrategy>>({});
   const [availableStrategies, setAvailableStrategies] = useState<Record<string, AvailableStrategy>>({});
   const [loading, setLoading] = useState(false);
   const [portfolioLoading, setPortfolioLoading] = useState(false);
@@ -86,132 +150,219 @@ export const useStrategies = () => {
       const data = response.data ?? {};
 
       const candidateLists: any[][] = [];
+      const registerList = (list?: any) => {
+        if (Array.isArray(list) && list.length) {
+          candidateLists.push(list);
+        }
+      };
 
-      if (Array.isArray(data.active_strategies)) {
-        candidateLists.push(data.active_strategies);
-      }
+      registerList(data.active_strategies);
+      registerList(data.strategies);
+      registerList(data.provisioned_strategies);
+      registerList(data.available_strategies);
+      registerList(data.summary?.strategies);
+      registerList(data.portfolio?.strategies);
+      registerList(data.portfolio?.active_strategies);
+      registerList(data.portfolio?.available_strategies);
+      registerList(data.collections?.strategies);
+      registerList(data.collections?.active_strategies);
 
-      if (Array.isArray(data.strategies)) {
-        candidateLists.push(data.strategies);
-      }
+      const discoverStrategyArrays = (value: any, keyHint?: string) => {
+        if (Array.isArray(value)) {
+          if (!value.length) {
+            return;
+          }
+          const keyIncludesStrategy = (keyHint || '').toLowerCase().includes('strategy');
+          const hasStrategyLikeObject = value.some((item) =>
+            item && typeof item === 'object' && (
+              'strategy_id' in item ||
+              'strategyId' in item ||
+              'strategy_name' in item ||
+              'strategy' in item ||
+              'name' in item
+            )
+          );
+          const hasStrategyStrings = value.some(
+            (item) => typeof item === 'string' && (keyIncludesStrategy || looksLikeStrategyId(item))
+          );
 
-      if (Array.isArray(data.provisioned_strategies)) {
-        candidateLists.push(data.provisioned_strategies);
-      }
+          if (hasStrategyLikeObject || hasStrategyStrings) {
+            candidateLists.push(value);
+            return;
+          }
 
-      if (Array.isArray(data.available_strategies)) {
-        candidateLists.push(data.available_strategies);
-      }
-
-      if (Array.isArray(data.summary?.strategies)) {
-        candidateLists.push(data.summary.strategies);
-      }
-
-      if (Array.isArray(data.portfolio?.strategies)) {
-        candidateLists.push(data.portfolio.strategies);
-      }
-
-      if (Array.isArray(data.portfolio?.active_strategies)) {
-        candidateLists.push(data.portfolio.active_strategies);
-      }
-
-      const formatStrategyId = (strategyId: string) =>
-        strategyId
-          .split('_')
-          .map((segment) => {
-            if (segment.length <= 3 && segment.toLowerCase() === 'ai') {
-              return segment.toUpperCase();
-            }
-            if (!segment) {
-              return segment;
-            }
-            return segment.charAt(0).toUpperCase() + segment.slice(1);
-          })
-          .join(' ');
-
-      const normalizedMap = new Map<string, TradingStrategy>();
-
-      candidateLists.flat().forEach((strategy: any) => {
-        if (!strategy || typeof strategy !== 'object') {
+          value.forEach((child) => discoverStrategyArrays(child, keyHint));
           return;
         }
 
-        const rawId =
-          strategy.strategy_id ||
-          strategy.strategyId ||
-          strategy.id ||
-          strategy.strategy_name ||
-          strategy.name ||
-          null;
+        if (value && typeof value === 'object') {
+          Object.entries(value).forEach(([key, child]) => discoverStrategyArrays(child, key));
+        }
+      };
 
-        const strategyId = typeof rawId === 'string' ? rawId : null;
+      discoverStrategyArrays(data);
+
+      const normalizedMap = new Map<string, TradingStrategy>();
+
+      const coerceNumber = (value: any, fallback = 0) => {
+        if (value === undefined || value === null) {
+          return fallback;
+        }
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : fallback;
+      };
+
+      const processCandidate = (entry: any) => {
+        if (!entry) {
+          return;
+        }
+
+        if (Array.isArray(entry)) {
+          entry.forEach(processCandidate);
+          return;
+        }
+
+        if (typeof entry === 'string') {
+          const strategyId = entry.trim();
+          if (!strategyId) {
+            return;
+          }
+          if (!normalizedMap.has(strategyId)) {
+            normalizedMap.set(strategyId, {
+              strategy_id: strategyId,
+              name: formatStrategyDisplayName(strategyId),
+              status: 'active',
+              is_active: true,
+              total_trades: 0,
+              winning_trades: 0,
+              win_rate: 0,
+              total_pnl: 0,
+              created_at: '1970-01-01T00:00:00.000Z',
+            });
+          }
+          return;
+        }
+
+        if (typeof entry !== 'object') {
+          return;
+        }
+
+        const candidate = typeof entry.strategy === 'object' ? entry.strategy : entry;
+        const rawId =
+          candidate.strategy_id ||
+          candidate.strategyId ||
+          candidate.strategy_identifier ||
+          candidate.id ||
+          entry.strategy_id ||
+          entry.strategyId ||
+          entry.strategy_identifier ||
+          entry.id ||
+          (typeof entry.strategy === 'string' ? entry.strategy : null);
+
+        const strategyId =
+          typeof rawId === 'string'
+            ? rawId
+            : typeof rawId === 'number' && Number.isFinite(rawId)
+              ? String(rawId)
+              : null;
 
         if (!strategyId) {
           return;
         }
 
         const existing = normalizedMap.get(strategyId);
-        const rawName =
-          strategy.name ||
-          strategy.strategy_name ||
-          existing?.name ||
-          formatStrategyId(strategyId);
+        const metricsSources = [candidate.metrics, candidate.performance, candidate.stats, entry.metrics, entry.performance, entry.stats];
+        const pickMetric = (key: string) => {
+          for (const source of metricsSources) {
+            if (source && source[key] !== undefined && source[key] !== null) {
+              return source[key];
+            }
+          }
+          return undefined;
+        };
 
-        const rawStatus =
-          typeof strategy.status === 'string'
-            ? strategy.status
-            : strategy.is_active === false
-              ? 'inactive'
-              : 'active';
+        const derivedStatus =
+          typeof candidate.status === 'string'
+            ? candidate.status
+            : typeof entry.status === 'string'
+              ? entry.status
+              : candidate.is_active === false || entry.is_active === false
+                ? 'inactive'
+                : existing?.status ?? 'active';
 
         const normalized: TradingStrategy = {
           strategy_id: strategyId,
-          name: rawName,
-          status: rawStatus,
-          is_active: strategy.is_active ?? existing?.is_active ?? rawStatus === 'active',
-          total_trades:
-            strategy.total_trades ??
-            strategy.metrics?.total_trades ??
-            existing?.total_trades ??
-            0,
-          winning_trades:
-            strategy.winning_trades ??
-            strategy.metrics?.winning_trades ??
-            existing?.winning_trades ??
-            0,
-          win_rate:
-            strategy.win_rate ??
-            strategy.metrics?.win_rate ??
-            existing?.win_rate ??
-            0,
-          total_pnl:
-            strategy.total_pnl_usd ??
-            strategy.total_pnl ??
-            strategy.metrics?.total_pnl_usd ??
-            existing?.total_pnl ??
-            0,
+          name: formatStrategyDisplayName(strategyId, candidate.name || candidate.strategy_name || entry.name),
+          status: derivedStatus,
+          is_active: candidate.is_active ?? entry.is_active ?? existing?.is_active ?? derivedStatus !== 'inactive',
+          total_trades: coerceNumber(
+            candidate.total_trades ??
+              entry.total_trades ??
+              pickMetric('total_trades') ??
+              existing?.total_trades,
+            0
+          ),
+          winning_trades: coerceNumber(
+            candidate.winning_trades ??
+              entry.winning_trades ??
+              pickMetric('winning_trades') ??
+              existing?.winning_trades,
+            0
+          ),
+          win_rate: coerceNumber(
+            candidate.win_rate ??
+              entry.win_rate ??
+              pickMetric('win_rate') ??
+              existing?.win_rate,
+            0
+          ),
+          total_pnl: coerceNumber(
+            candidate.total_pnl_usd ??
+              candidate.total_pnl ??
+              entry.total_pnl_usd ??
+              entry.total_pnl ??
+              pickMetric('total_pnl_usd') ??
+              pickMetric('total_pnl') ??
+              existing?.total_pnl,
+            0
+          ),
           sharpe_ratio:
-            strategy.sharpe_ratio ??
-            strategy.metrics?.sharpe_ratio ??
+            candidate.sharpe_ratio ??
+            pickMetric('sharpe_ratio') ??
             existing?.sharpe_ratio,
           created_at:
-            strategy.activated_at ||
-            strategy.created_at ||
+            candidate.activated_at ||
+            candidate.created_at ||
+            entry.activated_at ||
+            entry.created_at ||
             existing?.created_at ||
             '1970-01-01T00:00:00.000Z',
           last_executed_at:
-            strategy.last_executed_at ||
-            strategy.last_execution_at ||
+            candidate.last_executed_at ||
+            candidate.last_execution_at ||
+            entry.last_executed_at ||
+            entry.last_execution_at ||
             existing?.last_executed_at,
+          category: candidate.category || entry.category || existing?.category,
+          risk_level: candidate.risk_level || entry.risk_level || existing?.risk_level,
+          description: candidate.description || entry.description || existing?.description,
         };
 
         normalizedMap.set(strategyId, normalized);
+      };
+
+      candidateLists.forEach((list) => list.forEach(processCandidate));
+
+      const normalizedRecord: Record<string, TradingStrategy> = {};
+      normalizedMap.forEach((value, key) => {
+        normalizedRecord[key] = value;
       });
 
-      const normalizedStrategies = Array.from(normalizedMap.values()).sort((a, b) =>
+      const normalizedStrategies = Object.values(normalizedRecord).sort((a, b) =>
         a.name.localeCompare(b.name)
       );
 
+      setPortfolioStrategySet(normalizedRecord);
       setPortfolioStrategies(normalizedStrategies);
     } catch (err: any) {
       const errorMsg = err.response?.data?.detail || 'Failed to fetch portfolio strategies';
@@ -434,6 +585,7 @@ export const useStrategies = () => {
   return {
     strategies,
     portfolioStrategies,
+    portfolioStrategySet,
     availableStrategies,
     loading,
     executing,

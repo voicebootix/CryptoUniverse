@@ -48,8 +48,7 @@ import { useToast } from '@/components/ui/use-toast';
 import { useUser } from '@/store/authStore';
 import { UserRole } from '@/types/auth';
 import { useExchanges } from '@/hooks/useExchanges';
-import { useStrategies } from '@/hooks/useStrategies';
-import type { TradingStrategy } from '@/hooks/useStrategies';
+import { useStrategies, type TradingStrategy, formatStrategyDisplayName } from '@/hooks/useStrategies';
 import { usePortfolioStore } from '@/hooks/usePortfolio';
 import { useAIConsensus } from '@/hooks/useAIConsensus';
 import { useCredits } from '@/hooks/useCredits';
@@ -181,49 +180,48 @@ const ManualTradingPage: React.FC = () => {
   const {
     strategies,
     portfolioStrategies,
+    portfolioStrategySet,
     availableStrategies,
     actions: strategyActions,
     executing: strategyExecuting
   } = useStrategies();
   const strategyOptions = useMemo<TradingStrategy[]>(() => {
-    const formatStrategyName = (strategyId: string) =>
-      strategyId
-        .split('_')
-        .map((segment) => {
-          if (segment.length <= 3 && segment.toLowerCase() === 'ai') {
-            return segment.toUpperCase();
-          }
-          if (!segment) {
-            return segment;
-          }
-          return segment.charAt(0).toUpperCase() + segment.slice(1);
-        })
-        .join(' ');
-
     const options = new Map<string, TradingStrategy>();
-
-    portfolioStrategies.forEach((strategy) => {
-      options.set(strategy.strategy_id, strategy);
-    });
-
-    strategies.forEach((strategy) => {
-      options.set(strategy.strategy_id, strategy);
-    });
-
-    Object.entries(availableStrategies).forEach(([strategyId, metadata]) => {
-      const fallbackName = metadata.name || formatStrategyName(strategyId);
-      const existing = options.get(strategyId);
-
-      if (existing) {
-        if (!existing.name || existing.name === existing.strategy_id || existing.name !== fallbackName) {
-          options.set(strategyId, { ...existing, name: fallbackName });
-        }
+    const upsert = (strategyId: string, data?: Partial<TradingStrategy>) => {
+      const normalizedId = strategyId?.trim();
+      if (!normalizedId) {
         return;
       }
 
-      options.set(strategyId, {
+      const existing = options.get(normalizedId);
+      const next: TradingStrategy = {
+        strategy_id: normalizedId,
+        name: formatStrategyDisplayName(normalizedId, data?.name ?? existing?.name),
+        status: data?.status ?? existing?.status ?? 'available',
+        is_active: data?.is_active ?? existing?.is_active ?? false,
+        total_trades: data?.total_trades ?? existing?.total_trades ?? 0,
+        winning_trades: data?.winning_trades ?? existing?.winning_trades ?? 0,
+        win_rate: data?.win_rate ?? existing?.win_rate ?? 0,
+        total_pnl: data?.total_pnl ?? existing?.total_pnl ?? 0,
+        created_at: data?.created_at ?? existing?.created_at ?? '1970-01-01T00:00:00.000Z',
+        last_executed_at: data?.last_executed_at ?? existing?.last_executed_at,
+        sharpe_ratio: data?.sharpe_ratio ?? existing?.sharpe_ratio,
+        category: data?.category ?? existing?.category,
+        risk_level: data?.risk_level ?? existing?.risk_level,
+        description: data?.description ?? existing?.description,
+      };
+
+      options.set(normalizedId, next);
+    };
+
+    Object.values(portfolioStrategySet).forEach((strategy) => upsert(strategy.strategy_id, strategy));
+    portfolioStrategies.forEach((strategy) => upsert(strategy.strategy_id, strategy));
+    strategies.forEach((strategy) => upsert(strategy.strategy_id, strategy));
+
+    Object.entries(availableStrategies).forEach(([strategyId, metadata]) => {
+      upsert(strategyId, {
         strategy_id: strategyId,
-        name: fallbackName,
+        name: metadata.name,
         status: 'available',
         is_active: false,
         total_trades: 0,
@@ -231,11 +229,14 @@ const ManualTradingPage: React.FC = () => {
         win_rate: 0,
         total_pnl: 0,
         created_at: '1970-01-01T00:00:00.000Z',
+        category: metadata.category,
+        risk_level: metadata.risk_level,
+        description: metadata.description,
       });
     });
 
     return Array.from(options.values()).sort((a, b) => a.name.localeCompare(b.name));
-  }, [portfolioStrategies, strategies, availableStrategies]);
+  }, [portfolioStrategySet, portfolioStrategies, strategies, availableStrategies]);
   const {
     totalValue,
     availableBalance,
@@ -344,8 +345,8 @@ const ManualTradingPage: React.FC = () => {
     if (!workflowConfig.strategyId || workflowConfig.strategyId === 'manual') {
       return undefined;
     }
-    return availableStrategies[workflowConfig.strategyId];
-  }, [workflowConfig.strategyId, availableStrategies]);
+    return strategyOptions.find((strategy) => strategy.strategy_id === workflowConfig.strategyId);
+  }, [workflowConfig.strategyId, strategyOptions]);
 
   const sanitizedTargetSymbols = useMemo(() => {
     return workflowConfig.targetSymbolsText
