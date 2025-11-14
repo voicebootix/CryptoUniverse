@@ -30,6 +30,7 @@ async def wait_for_db() -> bool:
     attempt = 0
     
     while attempt < max_attempts:
+        conn = None
         try:
             # OLD WORKING CODE: Simple connection, no SSL context, no timeouts, no TCP probe
             # This is what worked before all the "optimizations"
@@ -44,20 +45,22 @@ async def wait_for_db() -> bool:
             attempt += 1
             # SECURITY FIX: Don't log exception message - might contain sensitive connection details
             print(f'🔄 Database connection attempt {attempt}/{max_attempts} failed: Query timeout ({query_timeout}s)')
-            try:
-                await conn.close()
-            except Exception:
-                pass
+            if conn:
+                try:
+                    await conn.close()
+                except Exception:
+                    pass
             await asyncio.sleep(2)
         except Exception as e:
             attempt += 1
             # SECURITY FIX: Log only exception type, not message (may contain credentials/URLs)
             error_type = type(e).__name__
             print(f'🔄 Database connection attempt {attempt}/{max_attempts} failed: {error_type}')
-            try:
-                await conn.close()
-            except Exception:
-                pass
+            if conn:
+                try:
+                    await conn.close()
+                except Exception:
+                    pass
             await asyncio.sleep(2)
     
     print('❌ Failed to connect to database after all attempts')
