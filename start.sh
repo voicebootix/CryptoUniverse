@@ -25,7 +25,7 @@ async def wait_for_db() -> bool:
         print('❌ DATABASE_URL not set')
         return False
     
-    max_attempts = 30
+    max_attempts = 3  # OLD WORKING CODE: Only 3 attempts, not 30
     query_timeout = 5.0  # 5s timeout for health check query
     attempt = 0
     
