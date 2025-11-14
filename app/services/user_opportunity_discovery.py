@@ -1284,6 +1284,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 # Quick ping to verify connection is still alive
                 await asyncio.wait_for(self.redis.ping(), timeout=2.0)
                 return True
+            except asyncio.CancelledError:
+                # Preserve cancellation for proper async task cancellation
+                raise
             except (asyncio.TimeoutError, Exception) as e:
                 # Connection is stale or failed, reset and try to re-initialize
                 self.logger.debug(
@@ -1292,7 +1295,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     error_type=type(e).__name__
                 )
                 self.redis = None
-        
+
         # Redis is None or disconnected, attempt to re-initialize
         try:
             self.redis = await get_redis_client()
@@ -1302,6 +1305,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     await asyncio.wait_for(self.redis.ping(), timeout=2.0)
                     self.logger.info("Redis client re-initialized successfully")
                     return True
+                except asyncio.CancelledError:
+                    # Preserve cancellation for proper async task cancellation
+                    raise
                 except (asyncio.TimeoutError, Exception) as ping_error:
                     self.logger.warning(
                         "Redis client obtained but ping failed",
@@ -1312,6 +1318,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             else:
                 self.logger.debug("Redis client unavailable after re-initialization attempt")
                 return False
+        except asyncio.CancelledError:
+            # Preserve cancellation for proper async task cancellation
+            raise
         except Exception as redis_error:
             self.logger.debug(
                 "Failed to re-initialize Redis client",
