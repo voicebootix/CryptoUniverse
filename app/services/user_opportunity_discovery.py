@@ -341,8 +341,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 else:
                     self.opportunity_cache.pop(cache_key, None)
 
-        # CRITICAL FIX: Check Redis if not found in memory (cross-worker access)
-        if self.redis:
+        # CRITICAL FIX: Ensure Redis is available before checking (handles reconnection if needed)
+        redis_available = await self._ensure_redis_available()
+        if redis_available:
             try:
                 redis_key = f"opportunity_scan_result:{cache_key}"
                 cached_data = await self.redis.get(redis_key)
@@ -419,8 +420,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 partial=partial,
             )
 
-        # CRITICAL FIX: Also persist to Redis for cross-worker access
-        if self.redis:
+        # CRITICAL FIX: Ensure Redis is available before persisting (handles reconnection if needed)
+        redis_available = await self._ensure_redis_available()
+        if redis_available:
             try:
                 redis_key = f"opportunity_scan_result:{cache_key}"
                 scan_data = {
@@ -638,8 +640,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         
         registration_context["in_memory_registered"] = True
 
-        # CRITICAL FIX: Also persist scan_id ? cache_key mapping to Redis for cross-worker access
-        if not self.redis:
+        # CRITICAL FIX: Ensure Redis is available before persisting lookup (handles reconnection if needed)
+        redis_available = await self._ensure_redis_available()
+        if not redis_available:
             registration_context["failure_reason"] = "redis_not_available"
             self.logger.warning(
                 "Failed to persist scan lookup - Redis not available",
@@ -818,8 +821,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     )
                     return cache_key
 
-        # CRITICAL FIX: Check Redis if not found in memory (cross-worker access)
-        if not self.redis:
+        # CRITICAL FIX: Ensure Redis is available (handles reconnection if needed)
+        redis_available = await self._ensure_redis_available()
+        if not redis_available:
             lookup_context["failure_reason"] = "redis_not_available"
             self.logger.warning(
                 "Failed to resolve scan cache key - Redis not available",
@@ -1078,8 +1082,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 else:
                     self.opportunity_cache.pop(cache_key, None)
 
-        # CRITICAL FIX: Check Redis if not found in memory (cross-worker access)
-        if self.redis:
+        # CRITICAL FIX: Ensure Redis is available before checking (handles reconnection if needed)
+        redis_available = await self._ensure_redis_available()
+        if redis_available:
             try:
                 redis_key = f"opportunity_scan_result:{cache_key}"
                 cached_data = await self.redis.get(redis_key)
@@ -1262,6 +1267,59 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         metadata["generated_at"] = self._current_timestamp().isoformat()
 
         return response
+
+    async def _ensure_redis_available(self) -> bool:
+        """
+        Ensure Redis client is available, re-initializing if needed.
+        
+        This method handles cases where Redis connection may have dropped
+        after initial service startup, especially in multi-worker environments.
+        
+        Returns:
+            bool: True if Redis is available, False otherwise
+        """
+        # If Redis is already available, verify it's still connected
+        if self.redis:
+            try:
+                # Quick ping to verify connection is still alive
+                await asyncio.wait_for(self.redis.ping(), timeout=2.0)
+                return True
+            except (asyncio.TimeoutError, Exception) as e:
+                # Connection is stale or failed, reset and try to re-initialize
+                self.logger.debug(
+                    "Redis connection check failed, attempting re-initialization",
+                    error=str(e),
+                    error_type=type(e).__name__
+                )
+                self.redis = None
+        
+        # Redis is None or disconnected, attempt to re-initialize
+        try:
+            self.redis = await get_redis_client()
+            if self.redis:
+                # Verify the new connection works
+                try:
+                    await asyncio.wait_for(self.redis.ping(), timeout=2.0)
+                    self.logger.info("Redis client re-initialized successfully")
+                    return True
+                except (asyncio.TimeoutError, Exception) as ping_error:
+                    self.logger.warning(
+                        "Redis client obtained but ping failed",
+                        error=str(ping_error)
+                    )
+                    self.redis = None
+                    return False
+            else:
+                self.logger.debug("Redis client unavailable after re-initialization attempt")
+                return False
+        except Exception as redis_error:
+            self.logger.debug(
+                "Failed to re-initialize Redis client",
+                error=str(redis_error),
+                error_type=type(redis_error).__name__
+            )
+            self.redis = None
+            return False
 
     async def async_init(self):
         """Initialize async components."""
