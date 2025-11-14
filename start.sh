@@ -26,6 +26,7 @@ async def wait_for_db() -> bool:
         return False
     
     max_attempts = 30
+    query_timeout = 5.0  # 5s timeout for health check query
     attempt = 0
     
     while attempt < max_attempts:
@@ -33,13 +34,30 @@ async def wait_for_db() -> bool:
             # OLD WORKING CODE: Simple connection, no SSL context, no timeouts, no TCP probe
             # This is what worked before all the "optimizations"
             conn = await asyncpg.connect(database_url)
-            await conn.execute('SELECT 1')
+            # SECURITY FIX: Add timeout to health check query to fail fast if DB is unresponsive
+            # Also prevents hanging on unresponsive database
+            await asyncio.wait_for(conn.execute('SELECT 1'), timeout=query_timeout)
             await conn.close()
             print('✅ Database connection successful')
             return True
+        except asyncio.TimeoutError:
+            attempt += 1
+            # SECURITY FIX: Don't log exception message - might contain sensitive connection details
+            print(f'🔄 Database connection attempt {attempt}/{max_attempts} failed: Query timeout ({query_timeout}s)')
+            try:
+                await conn.close()
+            except Exception:
+                pass
+            await asyncio.sleep(2)
         except Exception as e:
             attempt += 1
-            print(f'🔄 Database connection attempt {attempt}/{max_attempts} failed: {e}')
+            # SECURITY FIX: Log only exception type, not message (may contain credentials/URLs)
+            error_type = type(e).__name__
+            print(f'🔄 Database connection attempt {attempt}/{max_attempts} failed: {error_type}')
+            try:
+                await conn.close()
+            except Exception:
+                pass
             await asyncio.sleep(2)
     
     print('❌ Failed to connect to database after all attempts')
