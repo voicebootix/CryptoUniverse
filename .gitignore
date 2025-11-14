@@ -1,6 +1,7 @@
 .env
 .env.local
 .env.render.local
+.env.test
 testsprite_tests/.env.test
 __pycache__/
 

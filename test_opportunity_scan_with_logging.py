@@ -2,6 +2,30 @@
 """
 Test opportunity scan and monitor logs in real-time.
 This script initiates a scan and monitors the status/results endpoints to identify issues.
+
+Required Environment Variables:
+    BASE_URL: API base URL (e.g., https://cryptouniverse.onrender.com)
+    ADMIN_EMAIL: Admin user email for authentication
+    ADMIN_PASSWORD: Admin user password for authentication
+
+Optional: Create a .env.test file in the project root with these variables.
+The .env.test file is automatically loaded if present and is ignored by git.
+
+Example .env.test:
+    BASE_URL=https://cryptouniverse.onrender.com
+    ADMIN_EMAIL=admin@example.com
+    ADMIN_PASSWORD=your-secure-password
+
+Usage:
+    export BASE_URL=https://cryptouniverse.onrender.com
+    export ADMIN_EMAIL=admin@example.com
+    export ADMIN_PASSWORD=your-password
+    python test_opportunity_scan_with_logging.py
+
+    OR
+
+    # Create .env.test file and run:
+    python test_opportunity_scan_with_logging.py
 """
 
 import os
@@ -13,10 +37,41 @@ import requests
 from datetime import datetime
 from typing import Dict, Optional
 
-# Configuration
-BASE_URL = os.environ.get("BASE_URL", "https://cryptouniverse.onrender.com")
-ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL", "admin@cryptouniverse.com")
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "AdminPass123!")
+# Try to load from .env.test file if it exists (for local testing)
+# This file should be added to .gitignore
+_env_test_path = os.path.join(os.path.dirname(__file__), ".env.test")
+if os.path.exists(_env_test_path):
+    try:
+        with open(_env_test_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    key, value = line.split('=', 1)
+                    os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+    except Exception as e:
+        print(f"⚠️  Warning: Could not load .env.test: {e}")
+
+# Configuration - require environment variables (no hardcoded defaults)
+BASE_URL = os.environ.get("BASE_URL")
+ADMIN_EMAIL = os.environ.get("ADMIN_EMAIL")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD")
+
+# Validate required environment variables
+if not all([BASE_URL, ADMIN_EMAIL, ADMIN_PASSWORD]):
+    print("❌ Error: Required environment variables are missing")
+    print("")
+    print("Please set the following environment variables:")
+    print("  - BASE_URL: API base URL (e.g., https://cryptouniverse.onrender.com)")
+    print("  - ADMIN_EMAIL: Admin user email")
+    print("  - ADMIN_PASSWORD: Admin user password")
+    print("")
+    print("Alternatively, create a .env.test file in the project root with:")
+    print("  BASE_URL=https://cryptouniverse.onrender.com")
+    print("  ADMIN_EMAIL=your-email@example.com")
+    print("  ADMIN_PASSWORD=your-password")
+    print("")
+    print("Note: .env.test should be added to .gitignore to prevent committing credentials")
+    sys.exit(1)
 
 class OpportunityScanTester:
     def __init__(self, base_url: str, email: str, password: str):
