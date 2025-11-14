@@ -16,185 +16,54 @@ wait_for_db() {
 import asyncio
 import asyncpg
 import os
-import random
-import time
-import traceback
-from typing import Optional, Tuple
-from urllib.parse import parse_qs, urlparse
-
-from app.core.config import get_settings
-# Removed create_ssl_context import - let asyncpg handle SSL from URL
-
-
-def parse_bool(value: Optional[str]) -> bool:
-    if value is None:
-        return False
-    return value.strip().lower() in {"1", "true", "yes", "on"}
-
-
-async def tcp_probe(host: str, port: int, timeout: float) -> Tuple[bool, Optional[BaseException]]:
-    try:
-        _reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(host, port), timeout=timeout
-        )
-    except BaseException as exc:  # noqa: BLE001 - surface any failure
-        return False, exc
-
-    writer.close()
-    try:
-        await writer.wait_closed()
-    except Exception:  # noqa: BLE001 - ignore close errors during probe
-        pass
-    return True, None
 
 
 async def wait_for_db() -> bool:
-    settings = get_settings()
-    database_url = (settings.DATABASE_URL or os.getenv("DATABASE_URL") or "").strip()
+    """Simple database connection check - matches old working code exactly."""
+    database_url = os.getenv('DATABASE_URL')
     if not database_url:
-        print("❌ DATABASE_URL not set")
+        print('❌ DATABASE_URL not set')
         return False
-
-    parsed = urlparse(database_url)
-
-    # CRITICAL FIX: Don't create SSL context - let asyncpg handle SSL from URL
-    # Previous working code didn't create SSL context at all
-    # The database URL already contains SSL parameters (sslmode=require)
-    # Creating SSL context may interfere with asyncpg's SSL handling
-    # asyncpg will automatically use SSL based on URL parameters
-    print("ℹ️ Database SSL will be handled by asyncpg from URL parameters")
-
-    # CRITICAL FIX: Increase timeout values for Supabase SSL handshake
-    # TCP connectivity test confirms database is reachable, but SSL handshake takes time
-    # Previous working code: conn = await asyncpg.connect(database_url) (no timeout = 60s default)
-    # Supabase pooler needs more time for SSL handshake + connection establishment
-    max_attempts = int(os.getenv("DB_MAX_ATTEMPTS", "5"))
-    base_connect_timeout = float(os.getenv("DB_CONNECT_TIMEOUT", "15"))  # Increased from 5 to 15 for SSL handshake
-    max_connect_timeout = float(os.getenv("DB_MAX_CONNECT_TIMEOUT", "30"))  # Increased from 15 to 30
-    command_timeout = float(os.getenv("DB_COMMAND_TIMEOUT", "30"))  # Increased from 10 to 30
-    max_retry_delay = float(os.getenv("DB_MAX_RETRY_DELAY", "5"))
-    tcp_probe_timeout = float(os.getenv("DB_TCP_TIMEOUT", "2"))
-    warm_pool = parse_bool(os.getenv("DB_WARM_POOL", "false"))  # Disabled by default
-    pool_min_size = int(os.getenv("DB_POOL_MIN_SIZE", "1"))
-    pool_max_size = int(os.getenv("DB_POOL_MAX_SIZE", "5"))
-
-    query_params = parse_qs(parsed.query)
-
-    host = parsed.hostname
-    port = parsed.port if host else None
-    socket_host = None
-    if not host:
-        socket_host = (query_params.get("host") or [None])[0]
-    if host and port is None:
-        port = 5432
-    tcp_probe_supported = host is not None
-
-    target_host = host or socket_host or "(unspecified)"
-    target_details = {
-        "host": target_host,
-        "port": port if port is not None else "(n/a)",
-        "database": (parsed.path.lstrip("/") or "(default)") if parsed.path else "(default)",
-        "ssl": "handled_by_asyncpg",
-    }
-    print(
-        "🔎 Database target:",
-        ", ".join(f"{key}={value}" for key, value in target_details.items()),
-    )
-
-    for attempt in range(1, max_attempts + 1):
-        connect_timeout = min(base_connect_timeout + (attempt - 1) * 5, max_connect_timeout)
-        start_time = time.monotonic()
-        
-        # CRITICAL FIX: TCP probe is optional and should not block connection attempts
-        # Supabase connection pooler may not respond to TCP probes the same way as direct PostgreSQL
-        # Always attempt actual connection even if TCP probe fails
-        tcp_ok = True
-        tcp_error = None
-        if tcp_probe_supported:
-            try:
-                tcp_ok, tcp_error = await asyncio.wait_for(
-                    tcp_probe(host, port, tcp_probe_timeout),
-                    timeout=tcp_probe_timeout + 1.0
-                )
-                if not tcp_ok:
-                    print(
-                        f"⚠️ Database port probe failed on attempt {attempt}/{max_attempts}: "
-                        f"{type(tcp_error).__name__}: {tcp_error} (will still attempt connection)"
-                    )
-            except Exception as probe_exc:
-                # TCP probe failure is not fatal - continue to actual connection attempt
-                print(
-                    f"⚠️ Database port probe error on attempt {attempt}/{max_attempts}: "
-                    f"{type(probe_exc).__name__}: {probe_exc} (will still attempt connection)"
-                )
-                tcp_ok = False
-        
-        # Always attempt actual connection regardless of TCP probe result
+    
+    max_attempts = 30
+    query_timeout = 5.0  # 5s timeout for health check query
+    attempt = 0
+    
+    while attempt < max_attempts:
+        conn = None
         try:
-            # CRITICAL FIX: Match previous working code exactly
-            # Previous working code: conn = await asyncpg.connect(database_url)
-            # No timeout parameters = asyncpg uses default 60s timeout
-            # This allows enough time for Supabase SSL handshake + connection establishment
-            # The database URL already contains SSL parameters (sslmode=require)
-            conn = await asyncpg.connect(
-                database_url,
-                server_settings={"application_name": "cryptouniverse_startup"},
-            )
-            await conn.execute("SELECT 1")
+            # OLD WORKING CODE: Simple connection, no SSL context, no timeouts, no TCP probe
+            # This is what worked before all the "optimizations"
+            conn = await asyncpg.connect(database_url)
+            # SECURITY FIX: Add timeout to health check query to fail fast if DB is unresponsive
+            # Also prevents hanging on unresponsive database
+            await asyncio.wait_for(conn.execute('SELECT 1'), timeout=query_timeout)
             await conn.close()
-            
-            # CRITICAL FIX: Disable warm_pool by default - it adds unnecessary overhead
-            # and can cause connection issues during deployment
-            # Connection pooling is handled by the application runtime, not startup
-            if warm_pool and attempt == 1:  # Only try warm pool on first successful connection
-                pool = None
-                try:
-                    pool = await asyncpg.create_pool(
-                        database_url,
-                        min_size=pool_min_size,
-                        max_size=pool_max_size,
-                        server_settings={"application_name": "cryptouniverse_startup_pool"},
-                    )
-                    async with pool.acquire() as pooled_conn:
-                        await pooled_conn.execute("SELECT 1")
-                    print(
-                        "💠 Database pool warm-up successful "
-                        f"(min_size={pool_min_size}, max_size={pool_max_size})"
-                    )
-                except Exception as pool_exc:  # noqa: BLE001
-                    # Pool warm-up failure is not fatal - connection succeeded
-                    print(
-                        "⚠️ Database pool warm-up failed (non-fatal): "
-                        f"{type(pool_exc).__name__}: {pool_exc}"
-                    )
-                finally:
-                    if pool is not None:
-                        await pool.close()
-            
-            elapsed = time.monotonic() - start_time
-            print(
-                f"✅ Database connection successful after {elapsed:.2f}s "
-                f"(attempt {attempt}/{max_attempts})"
-            )
+            print('✅ Database connection successful')
             return True
-        except Exception as exc:
-            elapsed = time.monotonic() - start_time
-            error_type = type(exc).__name__
-            module = type(exc).__module__
-            if module and module != "builtins":
-                error_type = f"{module}.{error_type}"
-            error_message = str(exc) or repr(exc)
-            print(
-                f"🔄 Database connection attempt {attempt}/{max_attempts} failed "
-                f"({elapsed:.2f}s): {error_type}: {error_message}"
-            )
-            if attempt == max_attempts:
-                break
-
-            delay = min(max_retry_delay, (2 ** (attempt - 1)) + random.uniform(0, 1))
-            await asyncio.sleep(delay)
-
-    print("❌ Failed to connect to database after all attempts")
+        except asyncio.TimeoutError:
+            attempt += 1
+            # SECURITY FIX: Don't log exception message - might contain sensitive connection details
+            print(f'🔄 Database connection attempt {attempt}/{max_attempts} failed: Query timeout ({query_timeout}s)')
+            if conn:
+                try:
+                    await conn.close()
+                except Exception:
+                    pass
+            await asyncio.sleep(2)
+        except Exception as e:
+            attempt += 1
+            # SECURITY FIX: Log only exception type, not message (may contain credentials/URLs)
+            error_type = type(e).__name__
+            print(f'🔄 Database connection attempt {attempt}/{max_attempts} failed: {error_type}')
+            if conn:
+                try:
+                    await conn.close()
+                except Exception:
+                    pass
+            await asyncio.sleep(2)
+    
+    print('❌ Failed to connect to database after all attempts')
     return False
 
 
