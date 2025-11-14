@@ -440,7 +440,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 # Calculate TTL: ensure lookup keys live longer than cache entries
                 # Use the same calculation as _register_scan_lookup for consistency
                 base_ttl = max(self._partial_cache_ttl, self._scan_cache_ttl)
-                lookup_ttl = max(ttl_seconds, base_ttl) + 300  # Ensure lookup keys outlive cache entries
+                # Increased from 300s to 600s to match _register_scan_lookup and handle delays
+                lookup_ttl = max(ttl_seconds, base_ttl) + 600  # Ensure lookup keys outlive cache entries
                 
                 lookup_update_context = {
                     "scan_id": scan_id,
@@ -655,7 +656,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             # Base TTL: max of partial and full cache TTLs
             base_ttl = max(self._partial_cache_ttl, self._scan_cache_ttl)
             # Add buffer to ensure lookup keys outlive cache entries
-            lookup_ttl = base_ttl + 300  # 300s = 5 minutes buffer
+            # Increased from 300s to 600s (10 minutes) to handle cross-worker delays
+            lookup_ttl = base_ttl + 600  # 600s = 10 minutes buffer
             
             registration_context["lookup_ttl"] = lookup_ttl
             registration_context["base_ttl"] = base_ttl
@@ -905,7 +907,70 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 # Method 3: Check if result exists directly (last resort)
                 # Try to find any cache_key for this user that might contain the scan_id
                 lookup_context["lookup_method"] = "redis_direct_result_check"
-                # This is expensive, so we'll skip it for now and log the failure
+                
+                # CRITICAL FIX: Implement direct result search as fallback
+                # This helps recover from cases where lookup keys are missing but results exist
+                if self.redis:
+                    try:
+                        # Search for scan results by scanning user's cache keys
+                        pattern = f"opportunity_scan_result:{user_id}:*"
+                        cursor = 0
+                        found_cache_key = None
+                        max_iterations = 10  # Limit iterations to avoid performance issues
+                        iteration = 0
+                        
+                        while iteration < max_iterations:
+                            cursor, keys = await self.redis.scan(cursor, match=pattern, count=50)
+                            iteration += 1
+                            
+                            for key in keys:
+                                if isinstance(key, bytes):
+                                    key = key.decode('utf-8')
+                                # Get the result and check if scan_id matches
+                                try:
+                                    result_data = await self.redis.get(key)
+                                    if result_data:
+                                        if isinstance(result_data, bytes):
+                                            result_data = result_data.decode('utf-8')
+                                        scan_data = json.loads(result_data)
+                                        payload = scan_data.get("payload", {})
+                                        if payload.get("scan_id") == scan_id:
+                                            found_cache_key = key.replace("opportunity_scan_result:", "")
+                                            break
+                                except Exception:
+                                    continue
+                            
+                            if cursor == 0 or found_cache_key:
+                                break
+                        
+                        if found_cache_key:
+                            # Restore lookup keys to prevent future lookups from failing
+                            await self._register_scan_lookup(user_id, found_cache_key, scan_id)
+                            lookup_context["success"] = True
+                            self.logger.info(
+                                "Scan cache key resolved via direct result search (fallback)",
+                                **lookup_context,
+                                cache_key=found_cache_key,
+                                iterations=iteration
+                            )
+                            return found_cache_key
+                        else:
+                            lookup_context["failure_reason"] = "direct_result_search_found_nothing"
+                            self.logger.debug(
+                                "Direct result search completed but no matching scan_id found",
+                                **lookup_context,
+                                iterations=iteration
+                            )
+                    except Exception as scan_error:
+                        lookup_context["failure_reason"] = f"direct_result_search_error: {str(scan_error)}"
+                        self.logger.debug(
+                            "Direct result search failed",
+                            **lookup_context,
+                            error=str(scan_error),
+                            error_type=type(scan_error).__name__
+                        )
+                
+                # All methods exhausted
                 lookup_context["failure_reason"] = "all_lookup_methods_failed"
                 self.logger.warning(
                     "Failed to resolve scan cache key - all lookup methods exhausted",
@@ -1468,6 +1533,28 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             scan_id_local = f"user_discovery_{user_id}_{int(time.time())}"
 
         await self._register_scan_lookup(user_id, cache_key, scan_id_local)
+        
+        # CRITICAL FIX: Verify lookup keys were persisted (especially important for cross-worker visibility)
+        if self.redis and scan_id_local:
+            try:
+                redis_lookup_key = f"opportunity_scan_lookup:{scan_id_local}"
+                verify_key = await self.redis.get(redis_lookup_key)
+                if not verify_key:
+                    self.logger.warning(
+                        "Lookup key not found after registration, retrying",
+                        scan_id=scan_id_local,
+                        cache_key=cache_key,
+                        user_id=user_id
+                    )
+                    # Retry registration
+                    await self._register_scan_lookup(user_id, cache_key, scan_id_local)
+            except Exception as verify_error:
+                self.logger.warning(
+                    "Failed to verify lookup key persistence",
+                    error=str(verify_error),
+                    scan_id=scan_id_local,
+                    cache_key=cache_key
+                )
 
         if cached_entry is None:
             cached_entry = await self._peek_cached_scan_entry(cache_key)
