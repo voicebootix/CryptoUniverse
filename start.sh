@@ -77,13 +77,16 @@ async def wait_for_db() -> bool:
     else:
         print("ℹ️ Database SSL not required by configuration")
 
-    max_attempts = int(os.getenv("DB_MAX_ATTEMPTS", "15"))
-    base_connect_timeout = float(os.getenv("DB_CONNECT_TIMEOUT", "10"))
-    max_connect_timeout = float(os.getenv("DB_MAX_CONNECT_TIMEOUT", "30"))
-    command_timeout = float(os.getenv("DB_COMMAND_TIMEOUT", "30"))
-    max_retry_delay = float(os.getenv("DB_MAX_RETRY_DELAY", "30"))
-    tcp_probe_timeout = float(os.getenv("DB_TCP_TIMEOUT", "3"))
-    warm_pool = parse_bool(os.getenv("DB_WARM_POOL", "true"))
+    # CRITICAL FIX: Reduce default attempts and timeouts to match previous working configuration
+    # Previous working config: 3 attempts, simple retry logic
+    # Current broken config: 15 attempts, complex TCP probe + warm pool
+    max_attempts = int(os.getenv("DB_MAX_ATTEMPTS", "5"))  # Reduced from 15 to 5
+    base_connect_timeout = float(os.getenv("DB_CONNECT_TIMEOUT", "5"))  # Reduced from 10 to 5
+    max_connect_timeout = float(os.getenv("DB_MAX_CONNECT_TIMEOUT", "15"))  # Reduced from 30 to 15
+    command_timeout = float(os.getenv("DB_COMMAND_TIMEOUT", "10"))  # Reduced from 30 to 10
+    max_retry_delay = float(os.getenv("DB_MAX_RETRY_DELAY", "5"))  # Reduced from 30 to 5
+    tcp_probe_timeout = float(os.getenv("DB_TCP_TIMEOUT", "2"))  # Reduced from 3 to 2
+    warm_pool = parse_bool(os.getenv("DB_WARM_POOL", "false"))  # Disabled by default
     pool_min_size = int(os.getenv("DB_POOL_MIN_SIZE", "1"))
     pool_max_size = int(os.getenv("DB_POOL_MAX_SIZE", "5"))
 
@@ -113,22 +116,32 @@ async def wait_for_db() -> bool:
     for attempt in range(1, max_attempts + 1):
         connect_timeout = min(base_connect_timeout + (attempt - 1) * 5, max_connect_timeout)
         start_time = time.monotonic()
+        
+        # CRITICAL FIX: TCP probe is optional and should not block connection attempts
+        # Supabase connection pooler may not respond to TCP probes the same way as direct PostgreSQL
+        # Always attempt actual connection even if TCP probe fails
         tcp_ok = True
         tcp_error = None
         if tcp_probe_supported:
-            tcp_ok, tcp_error = await tcp_probe(host, port, tcp_probe_timeout)
-        if tcp_probe_supported and not tcp_ok:
-            elapsed = time.monotonic() - start_time
-            print(
-                f"🚫 Database port probe failed ({elapsed:.2f}s) on attempt "
-                f"{attempt}/{max_attempts}: {type(tcp_error).__name__}: {tcp_error}"
-            )
-            if attempt == max_attempts:
-                break
-
-            delay = min(max_retry_delay, (2 ** (attempt - 1)) + random.uniform(0, 1))
-            await asyncio.sleep(delay)
-            continue
+            try:
+                tcp_ok, tcp_error = await asyncio.wait_for(
+                    tcp_probe(host, port, tcp_probe_timeout),
+                    timeout=tcp_probe_timeout + 1.0
+                )
+                if not tcp_ok:
+                    print(
+                        f"⚠️ Database port probe failed on attempt {attempt}/{max_attempts}: "
+                        f"{type(tcp_error).__name__}: {tcp_error} (will still attempt connection)"
+                    )
+            except Exception as probe_exc:
+                # TCP probe failure is not fatal - continue to actual connection attempt
+                print(
+                    f"⚠️ Database port probe error on attempt {attempt}/{max_attempts}: "
+                    f"{type(probe_exc).__name__}: {probe_exc} (will still attempt connection)"
+                )
+                tcp_ok = False
+        
+        # Always attempt actual connection regardless of TCP probe result
         try:
             conn = await asyncpg.connect(
                 database_url,
@@ -139,7 +152,11 @@ async def wait_for_db() -> bool:
             )
             await conn.execute("SELECT 1")
             await conn.close()
-            if warm_pool:
+            
+            # CRITICAL FIX: Disable warm_pool by default - it adds unnecessary overhead
+            # and can cause connection issues during deployment
+            # Connection pooling is handled by the application runtime, not startup
+            if warm_pool and attempt == 1:  # Only try warm pool on first successful connection
                 pool = None
                 try:
                     pool = await asyncpg.create_pool(
@@ -153,19 +170,20 @@ async def wait_for_db() -> bool:
                     )
                     async with pool.acquire() as pooled_conn:
                         await pooled_conn.execute("SELECT 1")
-                except Exception as pool_exc:  # noqa: BLE001
-                    print(
-                        "⚠️ Database pool warm-up failed: "
-                        f"{type(pool_exc).__name__}: {pool_exc}"
-                    )
-                else:
                     print(
                         "💠 Database pool warm-up successful "
                         f"(min_size={pool_min_size}, max_size={pool_max_size})"
                     )
+                except Exception as pool_exc:  # noqa: BLE001
+                    # Pool warm-up failure is not fatal - connection succeeded
+                    print(
+                        "⚠️ Database pool warm-up failed (non-fatal): "
+                        f"{type(pool_exc).__name__}: {pool_exc}"
+                    )
                 finally:
                     if pool is not None:
                         await pool.close()
+            
             elapsed = time.monotonic() - start_time
             print(
                 f"✅ Database connection successful after {elapsed:.2f}s "
