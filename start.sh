@@ -144,15 +144,13 @@ async def wait_for_db() -> bool:
         
         # Always attempt actual connection regardless of TCP probe result
         try:
-            # CRITICAL FIX: Simplify connection - let asyncpg handle SSL from URL
+            # CRITICAL FIX: Match previous working code exactly
             # Previous working code: conn = await asyncpg.connect(database_url)
+            # No timeout parameters = asyncpg uses default 60s timeout
+            # This allows enough time for Supabase SSL handshake + connection establishment
             # The database URL already contains SSL parameters (sslmode=require)
-            # Passing explicit ssl_context may conflict or cause timeouts
-            # Only pass timeout and command_timeout for faster failure detection
             conn = await asyncpg.connect(
                 database_url,
-                timeout=connect_timeout,
-                command_timeout=command_timeout,
                 server_settings={"application_name": "cryptouniverse_startup"},
             )
             await conn.execute("SELECT 1")
