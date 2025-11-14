@@ -23,7 +23,7 @@ from typing import Optional, Tuple
 from urllib.parse import parse_qs, urlparse
 
 from app.core.config import get_settings
-from app.core.database import create_ssl_context
+# Removed create_ssl_context import - let asyncpg handle SSL from URL
 
 
 def parse_bool(value: Optional[str]) -> bool:
@@ -57,25 +57,12 @@ async def wait_for_db() -> bool:
 
     parsed = urlparse(database_url)
 
-    ssl_required = (
-        parse_bool(os.getenv("DATABASE_SSL_REQUIRE"))
-        or getattr(settings, "DATABASE_SSL_REQUIRE", False)
-        or getattr(settings, "DATABASE_SSL_ROOT_CERT", None) is not None
-        or "sslmode=require" in database_url
-        or "supabase" in database_url.lower()
-    )
-
-    ssl_context = None
-    if ssl_required:
-        try:
-            ssl_context = create_ssl_context()
-            print("🔐 SSL context initialized for database connection")
-        except Exception as ssl_error:
-            print(f"❌ Failed to create SSL context: {ssl_error}")
-            traceback.print_exc()
-            return False
-    else:
-        print("ℹ️ Database SSL not required by configuration")
+    # CRITICAL FIX: Don't create SSL context - let asyncpg handle SSL from URL
+    # Previous working code didn't create SSL context at all
+    # The database URL already contains SSL parameters (sslmode=require)
+    # Creating SSL context may interfere with asyncpg's SSL handling
+    # asyncpg will automatically use SSL based on URL parameters
+    print("ℹ️ Database SSL will be handled by asyncpg from URL parameters")
 
     # CRITICAL FIX: Increase timeout values for Supabase SSL handshake
     # TCP connectivity test confirms database is reachable, but SSL handshake takes time
@@ -107,7 +94,7 @@ async def wait_for_db() -> bool:
         "host": target_host,
         "port": port if port is not None else "(n/a)",
         "database": (parsed.path.lstrip("/") or "(default)") if parsed.path else "(default)",
-        "ssl": "enabled" if ssl_context else "disabled",
+        "ssl": "handled_by_asyncpg",
     }
     print(
         "🔎 Database target:",
@@ -164,11 +151,8 @@ async def wait_for_db() -> bool:
                 try:
                     pool = await asyncpg.create_pool(
                         database_url,
-                        ssl=ssl_context,
                         min_size=pool_min_size,
                         max_size=pool_max_size,
-                        command_timeout=command_timeout,
-                        timeout=connect_timeout,
                         server_settings={"application_name": "cryptouniverse_startup_pool"},
                     )
                     async with pool.acquire() as pooled_conn:
