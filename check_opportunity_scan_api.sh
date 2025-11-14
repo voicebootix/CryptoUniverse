@@ -16,9 +16,13 @@ echo ""
 
 # Login
 echo "🔐 Logging in..."
+# Use stdin to avoid exposing credentials in process listings
 LOGIN_RESPONSE=$(curl -s -X POST "$BASE_URL/api/v1/auth/login" \
   -H "Content-Type: application/json" \
-  -d "{\"email\":\"$EMAIL\",\"password\":\"$PASSWORD\"}")
+  --data-binary @- <<EOF
+{"email":"$EMAIL","password":"$PASSWORD"}
+EOF
+)
 
 TOKEN=$(echo "$LOGIN_RESPONSE" | grep -o '"access_token":"[^"]*' | cut -d'"' -f4)
 USER_ID=$(echo "$LOGIN_RESPONSE" | grep -o '"id":"[^"]*' | head -1 | cut -d'"' -f4)

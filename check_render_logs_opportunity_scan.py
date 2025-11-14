@@ -50,8 +50,10 @@ def fetch_render_logs_via_api(api_key: str, service_id: Optional[str] = None) ->
                     logs.extend(service_logs.get("logs", []))
         else:
             print(f"Failed to fetch services: {response.status_code}")
-    except Exception as e:
+    except requests.RequestException as e:
         print(f"Error fetching logs via API: {e}")
+    except (KeyError, ValueError, json.JSONDecodeError) as e:
+        print(f"Error parsing API response: {e}")
     
     return logs
 
@@ -205,12 +207,13 @@ def main():
         # Try to read from stdin if available
         print("\n📥 Reading from stdin (if available)...")
         try:
-            import select
-            if select.select([sys.stdin], [], [], 0)[0]:
+            # Cross-platform approach: check if stdin is not a TTY
+            if not sys.stdin.isatty():
                 logs = sys.stdin.readlines()
                 print(f"Read {len(logs)} lines from stdin")
-        except:
-            pass
+        except (IOError, OSError) as e:
+            # stdin not available or not readable
+            print(f"Could not read from stdin: {e}")
     
     if logs:
         print("\n🔬 Analyzing logs...")
