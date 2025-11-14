@@ -2155,6 +2155,7 @@ class UnifiedChatService(LoggerMixin):
             error_response = {
                 "success": False,
                 "error": str(e),
+                "content": f"I'm having trouble processing your request right now. Please try again in a moment. (Error: {str(e)})",
                 "session_id": session_id,
                 "timestamp": datetime.now(timezone.utc)
             }
