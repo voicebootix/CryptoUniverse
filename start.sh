@@ -77,15 +77,16 @@ async def wait_for_db() -> bool:
     else:
         print("ℹ️ Database SSL not required by configuration")
 
-    # CRITICAL FIX: Reduce default attempts and timeouts to match previous working configuration
-    # Previous working config: 3 attempts, simple retry logic
-    # Current broken config: 15 attempts, complex TCP probe + warm pool
-    max_attempts = int(os.getenv("DB_MAX_ATTEMPTS", "5"))  # Reduced from 15 to 5
-    base_connect_timeout = float(os.getenv("DB_CONNECT_TIMEOUT", "5"))  # Reduced from 10 to 5
-    max_connect_timeout = float(os.getenv("DB_MAX_CONNECT_TIMEOUT", "15"))  # Reduced from 30 to 15
-    command_timeout = float(os.getenv("DB_COMMAND_TIMEOUT", "10"))  # Reduced from 30 to 10
-    max_retry_delay = float(os.getenv("DB_MAX_RETRY_DELAY", "5"))  # Reduced from 30 to 5
-    tcp_probe_timeout = float(os.getenv("DB_TCP_TIMEOUT", "2"))  # Reduced from 3 to 2
+    # CRITICAL FIX: Increase timeout values for Supabase SSL handshake
+    # TCP connectivity test confirms database is reachable, but SSL handshake takes time
+    # Previous working code: conn = await asyncpg.connect(database_url) (no timeout = 60s default)
+    # Supabase pooler needs more time for SSL handshake + connection establishment
+    max_attempts = int(os.getenv("DB_MAX_ATTEMPTS", "5"))
+    base_connect_timeout = float(os.getenv("DB_CONNECT_TIMEOUT", "15"))  # Increased from 5 to 15 for SSL handshake
+    max_connect_timeout = float(os.getenv("DB_MAX_CONNECT_TIMEOUT", "30"))  # Increased from 15 to 30
+    command_timeout = float(os.getenv("DB_COMMAND_TIMEOUT", "30"))  # Increased from 10 to 30
+    max_retry_delay = float(os.getenv("DB_MAX_RETRY_DELAY", "5"))
+    tcp_probe_timeout = float(os.getenv("DB_TCP_TIMEOUT", "2"))
     warm_pool = parse_bool(os.getenv("DB_WARM_POOL", "false"))  # Disabled by default
     pool_min_size = int(os.getenv("DB_POOL_MIN_SIZE", "1"))
     pool_max_size = int(os.getenv("DB_POOL_MAX_SIZE", "5"))
