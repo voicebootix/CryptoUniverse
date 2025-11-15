@@ -9,6 +9,7 @@ Real strategy execution with user exchange integration - no mock data.
 """
 
 import asyncio
+import json
 import time
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional, Any
@@ -657,9 +658,19 @@ async def deactivate_strategy(
 async def get_strategy_marketplace(
     current_user: User = Depends(get_current_user),
     include_ai: bool = True,
-    include_community: bool = True
+    include_community: bool = True,
+    include_performance: bool = True,
+    include_backtests: bool = True
 ):
-    """Get unified strategy marketplace with AI strategies and community strategies (cached)."""
+    """
+    Get unified strategy marketplace with AI strategies and community strategies (cached).
+    
+    ENTERPRISE PERFORMANCE OPTIMIZATION:
+    - Performance data can be excluded (include_performance=false) for faster loading
+    - Backtest data can be excluded (include_backtests=false) for faster loading
+    - All data is cached with Redis (10 minute TTL for marketplace, 24h for individual data)
+    - Timeout protection (5s) prevents blocking on slow queries
+    """
 
     await rate_limiter.check_rate_limit(
         key="strategies:marketplace",
@@ -672,31 +683,47 @@ async def get_strategy_marketplace(
         # Import cache manager for performance
         from app.core.redis import cache_manager
 
-        # Create cache key based on user and filters
-        cache_key = f"marketplace:{str(current_user.id)}:ai_{include_ai}:community_{include_community}"
+        # Create cache key based on user and all filters
+        cache_key = (
+            f"marketplace:{str(current_user.id)}:"
+            f"ai_{include_ai}:community_{include_community}:"
+            f"perf_{include_performance}:backtest_{include_backtests}"
+        )
 
         # Try cache first (10 minute TTL for marketplace)
-        cached_result = await cache_manager.redis.get(cache_key)
+        cached_result = None
+        try:
+            if cache_manager.redis is not None:
+                cached_result = await cache_manager.redis.get(cache_key)
+        except Exception as cache_err:
+            logger.warning("Cache check failed, continuing", error=str(cache_err))
+        
         if cached_result:
             try:
                 # Normalize cached result to dict for FastAPI serialization
                 if isinstance(cached_result, bytes):
                     cached_result = cached_result.decode('utf-8')
                 if isinstance(cached_result, str):
-                    import json
                     cached_result = json.loads(cached_result)
 
-                logger.debug("Returning cached marketplace data", user_id=str(current_user.id))
+                logger.debug(
+                    "Returning cached marketplace data",
+                    user_id=str(current_user.id),
+                    include_performance=include_performance,
+                    include_backtests=include_backtests
+                )
                 return cached_result
             except (json.JSONDecodeError, UnicodeDecodeError) as e:
                 logger.warning("Failed to decode cached marketplace data, regenerating", error=str(e))
                 # Continue to regenerate cache
 
-        # Get fresh marketplace data
+        # Get fresh marketplace data with optional performance/backtest data
         marketplace_result = await strategy_marketplace_service.get_marketplace_strategies(
             user_id=str(current_user.id),
             include_ai_strategies=include_ai,
-            include_community_strategies=include_community
+            include_community_strategies=include_community,
+            include_performance=include_performance,
+            include_backtests=include_backtests
         )
 
         if not marketplace_result.get("success"):
@@ -707,14 +734,23 @@ async def get_strategy_marketplace(
 
         # Only cache successful responses
         if marketplace_result.get("success", False):
-            await cache_manager.redis.set(cache_key, marketplace_result, expire=600)
+            try:
+                if cache_manager.redis is not None:
+                    await cache_manager.redis.setex(
+                        cache_key,
+                        600,  # 10 minutes
+                        json.dumps(marketplace_result, default=str)
+                    )
+            except Exception as cache_err:
+                logger.warning("Failed to cache marketplace result", error=str(cache_err))
+                # Continue without caching
 
         return marketplace_result
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error("Strategy marketplace retrieval failed", error=str(e))
+        logger.error("Strategy marketplace retrieval failed", error=str(e), exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to get strategy marketplace: {str(e)}"
