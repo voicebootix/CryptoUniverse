@@ -2398,7 +2398,8 @@ class TradingStrategiesService(LoggerMixin, PriceResolverMixin):
         # Use monotonic time for timeout calculations to avoid issues with system clock changes
         # If start_time is provided, ensure it's already a monotonic timestamp
         execution_start_time = start_time if start_time is not None else time.monotonic()
-        effective_timeout = timeout_seconds or 30.0
+        # Increased default timeout from 30s to 60s to match API timeout and prevent premature failures
+        effective_timeout = timeout_seconds or 60.0
 
         self.logger.info(
             "Executing strategy",

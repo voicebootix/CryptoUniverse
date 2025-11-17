@@ -2683,8 +2683,9 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 return _timeout_response("timeout_no_budget")
 
             try:
+                # Pass timeout_seconds to scanner method so it can pass it to execute_strategy()
                 opportunities = await asyncio.wait_for(
-                    scanner_method(discovered_assets, user_profile, scan_id, portfolio_result),
+                    scanner_method(discovered_assets, user_profile, scan_id, portfolio_result, timeout_seconds=remaining_budget),
                     timeout=remaining_budget,
                 )
             except asyncio.TimeoutError:
@@ -2719,7 +2720,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         discovered_assets: Dict[str, List[Any]],
         user_profile: UserOpportunityProfile,
         scan_id: str,
-        portfolio_result: Dict[str, Any]
+        portfolio_result: Dict[str, Any],
+        timeout_seconds: float = 60.0
     ) -> List[OpportunityResult]:
         """Scan funding rate arbitrage opportunities using REAL trading strategies service."""
 
@@ -2781,6 +2783,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     },
                     user_id=user_profile.user_id,
                     simulation_mode=True,  # Use simulation mode to avoid credit consumption
+                    timeout_seconds=timeout_seconds,  # Pass timeout to prevent premature failures
                 )
 
                 # DEBUG: Log strategy execution response structure
@@ -2877,7 +2880,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         discovered_assets: Dict[str, List[Any]],
         user_profile: UserOpportunityProfile, 
         scan_id: str,
-        portfolio_result: Dict[str, Any]
+        portfolio_result: Dict[str, Any],
+        timeout_seconds: float = 60.0
     ) -> List[OpportunityResult]:
         """Scan statistical arbitrage opportunities using REAL trading strategies service."""
         
@@ -2906,7 +2910,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 function="statistical_arbitrage",
                 strategy_type="mean_reversion",
                 parameters={"universe": universe_str},
-                user_id=user_profile.user_id
+                user_id=user_profile.user_id,
+                timeout_seconds=timeout_seconds
             )
             
             if stat_arb_result.get("success"):
@@ -2950,7 +2955,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         discovered_assets: Dict[str, List[Any]],
         user_profile: UserOpportunityProfile,
         scan_id: str,
-        portfolio_result: Dict[str, Any]
+        portfolio_result: Dict[str, Any],
+        timeout_seconds: float = 60.0
     ) -> List[OpportunityResult]:
         """Scan pairs trading opportunities using REAL trading strategies service."""
         
@@ -2968,7 +2974,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     function="pairs_trading",
                     strategy_type="statistical_arbitrage",
                     parameters={"pair_symbols": pair_str},
-                    user_id=user_profile.user_id
+                    user_id=user_profile.user_id,
+                    timeout_seconds=timeout_seconds
                 )
                 
                 if pairs_result.get("success") and pairs_result.get("trading_signals"):
@@ -3024,7 +3031,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         discovered_assets: Dict[str, List[Any]],
         user_profile: UserOpportunityProfile,
         scan_id: str,
-        portfolio_result: Dict[str, Any]
+        portfolio_result: Dict[str, Any],
+        timeout_seconds: float = 60.0
     ) -> List[OpportunityResult]:
         """Scan spot momentum opportunities using REAL trading strategies service."""
         
@@ -3064,7 +3072,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     symbol=f"{symbol}/USDT",
                     parameters={"timeframe": "4h"},
                     user_id=user_profile.user_id,
-                    simulation_mode=True  # Use simulation mode for opportunity scanning
+                    simulation_mode=True,  # Use simulation mode for opportunity scanning
+                    timeout_seconds=timeout_seconds
                 )
                     
                     if momentum_result.get("success"):
@@ -3186,7 +3195,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         discovered_assets: Dict[str, List[Any]],
         user_profile: UserOpportunityProfile,
         scan_id: str,
-        portfolio_result: Dict[str, Any]
+        portfolio_result: Dict[str, Any],
+        timeout_seconds: float = 60.0
     ) -> List[OpportunityResult]:
         """Scan spot mean reversion opportunities using REAL trading strategies service."""
         
@@ -3211,7 +3221,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     function="spot_mean_reversion",
                     symbol=f"{symbol}/USDT",
                     parameters={"timeframe": "1h"},
-                    user_id=user_profile.user_id
+                    user_id=user_profile.user_id,
+                    timeout_seconds=timeout_seconds
                 )
                 
                 if reversion_result.get("success"):
@@ -3325,7 +3336,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         discovered_assets: Dict[str, List[Any]],
         user_profile: UserOpportunityProfile,
         scan_id: str,
-        portfolio_result: Dict[str, Any]
+        portfolio_result: Dict[str, Any],
+        timeout_seconds: float = 60.0
     ) -> List[OpportunityResult]:
         """Scan spot breakout opportunities using REAL trading strategies service."""
         
@@ -3350,7 +3362,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     function="spot_breakout_strategy",
                     symbol=f"{symbol}/USDT",
                     parameters={"timeframe": "1h"},
-                    user_id=user_profile.user_id
+                    user_id=user_profile.user_id,
+                    timeout_seconds=timeout_seconds
                 )
                 
                 if breakout_result.get("success"):
@@ -3516,7 +3529,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         discovered_assets: Dict[str, List[Any]],
         user_profile: UserOpportunityProfile,
         scan_id: str,
-        portfolio_result: Dict[str, Any]
+        portfolio_result: Dict[str, Any],
+        timeout_seconds: float = 60.0
     ) -> List[OpportunityResult]:
         """Risk management focuses on portfolio protection opportunities."""
         
@@ -3549,7 +3563,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             hedge_result = await trading_strategies_service.execute_strategy(
                 function="risk_management",
                 user_id=user_profile.user_id,
-                simulation_mode=True  # Use simulation mode for opportunity scanning
+                simulation_mode=True,  # Use simulation mode for opportunity scanning
+                timeout_seconds=timeout_seconds
             )
             
             # DEBUG: Log strategy execution response
@@ -3684,7 +3699,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         discovered_assets: Dict[str, List[Any]],
         user_profile: UserOpportunityProfile, 
         scan_id: str,
-        portfolio_result: Dict[str, Any]
+        portfolio_result: Dict[str, Any],
+        timeout_seconds: float = 60.0
     ) -> List[OpportunityResult]:
         """Portfolio optimization identifies rebalancing opportunities."""
         
@@ -3720,6 +3736,7 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 user_id=user_profile.user_id,
                 simulation_mode=True,  # Use simulation mode for opportunity scanning
                 preloaded_portfolio=portfolio_result,
+                timeout_seconds=timeout_seconds
             )
             
             # DEBUG: Log strategy execution response
@@ -4022,7 +4039,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         discovered_assets: Dict[str, List[Any]], 
         user_profile: UserOpportunityProfile, 
         scan_id: str, 
-        portfolio_result: Dict[str, Any]
+        portfolio_result: Dict[str, Any],
+        timeout_seconds: float = 60.0
     ) -> List[OpportunityResult]:
         """Enterprise scalping scanner for high-frequency opportunities."""
         
@@ -4068,7 +4086,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                             "rsi_threshold": 70
                         },
                         user_id=user_profile.user_id,
-                        simulation_mode=True
+                        simulation_mode=True,
+                        timeout_seconds=timeout_seconds
                     )
                     
                     if scalp_result.get("success"):
@@ -4118,7 +4137,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
         discovered_assets: Dict[str, List[Any]], 
         user_profile: UserOpportunityProfile, 
         scan_id: str, 
-        portfolio_result: Dict[str, Any]
+        portfolio_result: Dict[str, Any],
+        timeout_seconds: float = 60.0
     ) -> List[OpportunityResult]:
         """Enterprise market making scanner with spread analysis."""
         
@@ -4163,7 +4183,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                             "rebalance_threshold": 0.1
                         },
                         user_id=user_profile.user_id,
-                        simulation_mode=True
+                        simulation_mode=True,
+                        timeout_seconds=timeout_seconds
                     )
                     
                     if mm_result.get("success"):
