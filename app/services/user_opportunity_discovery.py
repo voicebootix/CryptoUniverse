@@ -817,6 +817,22 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     return cache_key
 
         # CRITICAL FIX: Check Redis if not found in memory (cross-worker access)
+        # Re-initialize Redis if None (handles connection failures and cross-worker instances)
+        if not self.redis:
+            try:
+                self.redis = await get_redis_client()
+                if self.redis:
+                    self.logger.debug(
+                        "Redis client re-initialized during cache key resolution",
+                        **lookup_context
+                    )
+            except Exception as redis_error:
+                self.logger.debug(
+                    "Redis re-initialization failed during cache key resolution",
+                    **lookup_context,
+                    error=str(redis_error)
+                )
+        
         if not self.redis:
             lookup_context["failure_reason"] = "redis_not_available"
             self.logger.warning(
