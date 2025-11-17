@@ -2057,13 +2057,22 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                         metrics['timeouts'] += 1
                 else:
                     # CRITICAL DEBUG: Log what each strategy scanner returned
+                    result_dict = result if isinstance(result, dict) else {}
+                    result_opportunities = result_dict.get("opportunities", [])
+                    has_opportunities = bool(result_opportunities)
+                    opportunities_count = len(result_opportunities) if isinstance(result_opportunities, list) else 0
+                    
                     self.logger.info("?? STRATEGY SCAN RESULT",
                                    scan_id=scan_id,
                                    strategy_name=strategy_name,
                                    strategy_id=strategy_id,
                                    result_type=type(result).__name__,
-                                   has_opportunities=bool(result.get("opportunities") if isinstance(result, dict) else False),
-                                   opportunities_count=len(result.get("opportunities", [])) if isinstance(result, dict) else 0)
+                                   has_opportunities=has_opportunities,
+                                   opportunities_count=opportunities_count,
+                                   result_keys=list(result_dict.keys()) if isinstance(result_dict, dict) else [],
+                                   success=result_dict.get("success") if isinstance(result_dict, dict) else None,
+                                   has_error="error" in result_dict if isinstance(result_dict, dict) else False,
+                                   error_message=result_dict.get("error") if isinstance(result_dict, dict) else None)
 
                     if isinstance(result, dict) and result.get("opportunities"):
                         result_strategy_id = result["strategy_id"]
@@ -2747,6 +2756,22 @@ class UserOpportunityDiscoveryService(LoggerMixin):
 
             async def fetch_for_symbols(symbol_chunk: List[str]) -> List[OpportunityResult]:
                 symbols_str = ",".join(symbol_chunk)
+                
+                # DEBUG: Log strategy execution request
+                self.logger.info(
+                    "🔍 Executing funding arbitrage strategy",
+                    scan_id=scan_id,
+                    strategy_id=strategy_id,
+                    user_id=user_profile.user_id,
+                    symbols_count=len(symbol_chunk),
+                    symbols_sample=symbol_chunk[:5] if symbol_chunk else [],
+                    parameters={
+                        "symbols": symbols_str[:100],  # Truncate for logging
+                        "exchanges": "all",
+                        "min_funding_rate": 0.005,
+                    }
+                )
+                
                 arbitrage_result = await trading_strategies_service.execute_strategy(
                     function="funding_arbitrage",
                     parameters={
@@ -2758,10 +2783,37 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                     simulation_mode=True,  # Use simulation mode to avoid credit consumption
                 )
 
+                # DEBUG: Log strategy execution response structure
+                result_success = arbitrage_result.get("success", False)
+                result_keys = list(arbitrage_result.keys()) if isinstance(arbitrage_result, dict) else []
+                result_error = arbitrage_result.get("error") if isinstance(arbitrage_result, dict) else None
+                
+                self.logger.info(
+                    "📊 Funding arbitrage strategy execution result",
+                    scan_id=scan_id,
+                    strategy_id=strategy_id,
+                    success=result_success,
+                    result_keys=result_keys,
+                    has_error=result_error is not None,
+                    error_message=result_error,
+                    response_type=type(arbitrage_result).__name__
+                )
+
                 chunk_opportunities: List[OpportunityResult] = []
                 if arbitrage_result.get("success"):
                     analysis_data = arbitrage_result.get("funding_arbitrage_analysis", {})
                     opportunities_data = analysis_data.get("opportunities", [])
+                    
+                    # DEBUG: Log data extraction details
+                    self.logger.info(
+                        "🔎 Extracting opportunities from funding arbitrage result",
+                        scan_id=scan_id,
+                        strategy_id=strategy_id,
+                        has_analysis_data=bool(analysis_data),
+                        analysis_data_keys=list(analysis_data.keys()) if isinstance(analysis_data, dict) else [],
+                        opportunities_count=len(opportunities_data) if isinstance(opportunities_data, list) else 0,
+                        opportunities_type=type(opportunities_data).__name__
+                    )
 
                     for opp in opportunities_data or []:
                         chunk_opportunities.append(
@@ -2787,7 +2839,24 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                 discovered_at=self._current_timestamp(),
                             )
                         )
+                else:
+                    # DEBUG: Log why no opportunities were extracted
+                    self.logger.warning(
+                        "⚠️ Funding arbitrage strategy returned no opportunities",
+                        scan_id=scan_id,
+                        strategy_id=strategy_id,
+                        success=result_success,
+                        has_analysis_data=bool(arbitrage_result.get("funding_arbitrage_analysis") if isinstance(arbitrage_result, dict) else False),
+                        error_message=result_error,
+                        result_structure_keys=result_keys
+                    )
 
+                self.logger.info(
+                    "✅ Funding arbitrage chunk processing complete",
+                    scan_id=scan_id,
+                    strategy_id=strategy_id,
+                    opportunities_extracted=len(chunk_opportunities)
+                )
                 return chunk_opportunities
 
             opportunities = await self._execute_strategy_across_chunks(
@@ -3468,10 +3537,35 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                    portfolio_strategies=len(owned_strategy_ids))
             
             # User owns strategy - execute using unified approach
+            # DEBUG: Log strategy execution request
+            self.logger.info(
+                "🔍 Executing risk management strategy",
+                scan_id=scan_id,
+                strategy_id=strategy_id,
+                user_id=user_profile.user_id,
+                simulation_mode=True
+            )
+            
             hedge_result = await trading_strategies_service.execute_strategy(
                 function="risk_management",
                 user_id=user_profile.user_id,
                 simulation_mode=True  # Use simulation mode for opportunity scanning
+            )
+            
+            # DEBUG: Log strategy execution response
+            result_success = hedge_result.get("success", False) if isinstance(hedge_result, dict) else False
+            result_keys = list(hedge_result.keys()) if isinstance(hedge_result, dict) else []
+            result_error = hedge_result.get("error") if isinstance(hedge_result, dict) else None
+            
+            self.logger.info(
+                "📊 Risk management strategy execution result",
+                scan_id=scan_id,
+                strategy_id=strategy_id,
+                success=result_success,
+                result_keys=result_keys,
+                has_error=result_error is not None,
+                error_message=result_error,
+                response_type=type(hedge_result).__name__
             )
             
             if hedge_result.get("success"):
@@ -3482,6 +3576,19 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 # Also check for hedge_recommendations in case of hedge_position function
                 execution_result = hedge_result.get("execution_result", {})
                 hedge_recommendations = execution_result.get("hedge_recommendations", []) or hedge_result.get("hedge_recommendations", [])
+                
+                # DEBUG: Log data extraction details
+                self.logger.info(
+                    "🔎 Extracting opportunities from risk management result",
+                    scan_id=scan_id,
+                    strategy_id=strategy_id,
+                    has_risk_analysis=bool(risk_analysis),
+                    risk_analysis_keys=list(risk_analysis.keys()) if isinstance(risk_analysis, dict) else [],
+                    mitigation_strategies_count=len(mitigation_strategies) if isinstance(mitigation_strategies, list) else 0,
+                    has_execution_result=bool(execution_result),
+                    execution_result_keys=list(execution_result.keys()) if isinstance(execution_result, dict) else [],
+                    hedge_recommendations_count=len(hedge_recommendations) if isinstance(hedge_recommendations, list) else 0
+                )
                 
                 # Combine both sources
                 all_recommendations = mitigation_strategies + hedge_recommendations
@@ -3540,11 +3647,36 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                     discovered_at=self._current_timestamp()
                                 )
                                 opportunities.append(opportunity)
+                else:
+                    # DEBUG: Log why no opportunities were extracted
+                    self.logger.warning(
+                        "⚠️ Risk management strategy returned no recommendations",
+                        scan_id=scan_id,
+                        strategy_id=strategy_id,
+                        mitigation_strategies_count=len(mitigation_strategies) if isinstance(mitigation_strategies, list) else 0,
+                        hedge_recommendations_count=len(hedge_recommendations) if isinstance(hedge_recommendations, list) else 0,
+                        all_recommendations_count=len(all_recommendations)
+                    )
+            else:
+                # DEBUG: Log strategy execution failure
+                self.logger.warning(
+                    "❌ Risk management strategy execution failed",
+                    scan_id=scan_id,
+                    strategy_id=strategy_id,
+                    error_message=result_error,
+                    result_keys=result_keys
+                )
                         
         except Exception as e:
             self.logger.error("Risk management scan failed", 
-                            scan_id=scan_id, error=str(e))
+                            scan_id=scan_id, error=str(e), exc_info=True)
         
+        self.logger.info(
+            "✅ Risk management scan complete",
+            scan_id=scan_id,
+            strategy_id=strategy_id,
+            opportunities_found=len(opportunities)
+        )
         return opportunities
     
     async def _scan_portfolio_optimization_opportunities(
@@ -3573,6 +3705,16 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                                    portfolio_strategies=len(owned_strategy_ids))
             
             # User owns strategy - execute using unified approach
+            # DEBUG: Log strategy execution request
+            self.logger.info(
+                "🔍 Executing portfolio optimization strategy",
+                scan_id=scan_id,
+                strategy_id=strategy_id,
+                user_id=user_profile.user_id,
+                simulation_mode=True,
+                has_preloaded_portfolio=bool(portfolio_result)
+            )
+            
             optimization_result = await trading_strategies_service.execute_strategy(
                 function="portfolio_optimization",
                 user_id=user_profile.user_id,
@@ -3580,11 +3722,38 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 preloaded_portfolio=portfolio_result,
             )
             
+            # DEBUG: Log strategy execution response
+            result_success = optimization_result.get("success", False) if isinstance(optimization_result, dict) else False
+            result_keys = list(optimization_result.keys()) if isinstance(optimization_result, dict) else []
+            result_error = optimization_result.get("error") if isinstance(optimization_result, dict) else None
+            
+            self.logger.info(
+                "📊 Portfolio optimization strategy execution result",
+                scan_id=scan_id,
+                strategy_id=strategy_id,
+                success=result_success,
+                result_keys=result_keys,
+                has_error=result_error is not None,
+                error_message=result_error,
+                response_type=type(optimization_result).__name__
+            )
+            
             if optimization_result.get("success"):
                 execution_result = optimization_result.get("execution_result", {})
                 rebalancing_recommendations = (
                     execution_result.get("rebalancing_recommendations", [])
                     or optimization_result.get("rebalancing_recommendations", [])
+                )
+
+                # DEBUG: Log data extraction details
+                self.logger.info(
+                    "🔎 Extracting opportunities from portfolio optimization result",
+                    scan_id=scan_id,
+                    strategy_id=strategy_id,
+                    has_execution_result=bool(execution_result),
+                    execution_result_keys=list(execution_result.keys()) if isinstance(execution_result, dict) else [],
+                    rebalancing_recommendations_count=len(rebalancing_recommendations) if isinstance(rebalancing_recommendations, list) else 0,
+                    has_top_level_recommendations="rebalancing_recommendations" in optimization_result if isinstance(optimization_result, dict) else False
                 )
 
                 strategy_analysis_raw = optimization_result.get("strategy_analysis", {}) or {}
@@ -3813,11 +3982,36 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                             discovered_at=self._current_timestamp(),
                         )
                         opportunities.append(opportunity)
+                else:
+                    # DEBUG: Log why no opportunities were extracted
+                    self.logger.warning(
+                        "⚠️ Portfolio optimization strategy returned no rebalancing recommendations",
+                        scan_id=scan_id,
+                        strategy_id=strategy_id,
+                        rebalancing_recommendations_count=len(rebalancing_recommendations) if isinstance(rebalancing_recommendations, list) else 0,
+                        has_strategy_analysis=bool(strategy_analysis),
+                        strategy_analysis_keys=list(strategy_analysis.keys()) if isinstance(strategy_analysis, dict) else []
+                    )
+            else:
+                # DEBUG: Log strategy execution failure
+                self.logger.warning(
+                    "❌ Portfolio optimization strategy execution failed",
+                    scan_id=scan_id,
+                    strategy_id=strategy_id,
+                    error_message=result_error,
+                    result_keys=result_keys
+                )
                         
         except Exception as e:
             self.logger.error("Portfolio optimization scan failed",
-                            scan_id=scan_id, error=str(e))
+                            scan_id=scan_id, error=str(e), exc_info=True)
         
+        self.logger.info(
+            "✅ Portfolio optimization scan complete",
+            scan_id=scan_id,
+            strategy_id=strategy_id,
+            opportunities_found=len(opportunities)
+        )
         return opportunities
     
     # Placeholder implementations for remaining strategies
