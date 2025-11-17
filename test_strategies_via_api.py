@@ -11,9 +11,19 @@ import os
 import sys
 from typing import Dict, Any, Optional
 
-BASE_URL = "https://cryptouniverse.onrender.com"
-EMAIL = os.environ.get("OPPORTUNITY_SCAN_TEST_EMAIL", "admin@cryptouniverse.com")
-PASSWORD = os.environ.get("OPPORTUNITY_SCAN_TEST_PASSWORD", "AdminPass123!")
+# ⚠️ SECURITY WARNING: This test script must NEVER be run against production without proper safeguards.
+# All credentials and URLs must be provided via environment variables to prevent accidental exposure.
+# Environment variables are MANDATORY - the script will fail fast if they are not set.
+
+BASE_URL = os.environ.get("TEST_BASE_URL")
+EMAIL = os.environ.get("OPPORTUNITY_SCAN_TEST_EMAIL")
+PASSWORD = os.environ.get("OPPORTUNITY_SCAN_TEST_PASSWORD")
+
+if not all([BASE_URL, EMAIL, PASSWORD]):
+    raise ValueError(
+        "TEST_BASE_URL, OPPORTUNITY_SCAN_TEST_EMAIL, and OPPORTUNITY_SCAN_TEST_PASSWORD "
+        "environment variables must be set. Never use default credentials against production."
+    )
 
 # Fix Windows console encoding
 if sys.platform == 'win32':
@@ -264,4 +274,5 @@ async def main():
 
 if __name__ == "__main__":
     asyncio.run(main())
+
 
