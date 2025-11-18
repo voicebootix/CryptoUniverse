@@ -72,9 +72,10 @@ class RealBacktestingEngine(LoggerMixin):
             # Initialize backtest state
             portfolio = {
                 'cash': initial_capital,
-                'positions': {},
+                'positions': {},  # Active positions with entry details
+                'closed_trades': [],  # Complete trade records with entry/exit
                 'equity_curve': [],
-                'trades': [],
+                'trades': [],  # Legacy format for backward compatibility
                 'current_value': initial_capital
             }
 
@@ -110,6 +111,11 @@ class RealBacktestingEngine(LoggerMixin):
                     await self._execute_backtest_trades(
                         portfolio, signals, current_prices, timestamp
                     )
+                
+                # Check for stop loss / take profit exits
+                await self._check_position_exits(
+                    portfolio, current_prices, timestamp
+                )
 
                 # Update portfolio value
                 portfolio_value = self._calculate_portfolio_value(
@@ -121,6 +127,17 @@ class RealBacktestingEngine(LoggerMixin):
                     'value': portfolio_value
                 })
 
+            # Close any remaining open positions at end of backtest
+            final_prices = self._get_prices_at_timestamp(historical_data, timeline[-1])
+            for symbol, pos in list(portfolio['positions'].items()):
+                if symbol in final_prices and pos['quantity'] > 0:
+                    await self._close_position(
+                        portfolio, symbol, pos, pos['quantity'],
+                        final_prices[symbol], timeline[-1],
+                        pos.get('position_type', 'LONG'),
+                        exit_reason='BACKTEST_END'
+                    )
+            
             # Calculate final metrics
             results = self._calculate_backtest_metrics(
                 portfolio, initial_capital, start_date, end_date
@@ -301,6 +318,7 @@ class RealBacktestingEngine(LoggerMixin):
     ):
         """
         Execute trades in backtest based on signals.
+        Enhanced to track stop loss, take profit, and position type.
         """
         for symbol, signal in signals.items():
             if symbol not in current_prices:
@@ -309,6 +327,10 @@ class RealBacktestingEngine(LoggerMixin):
             price = current_prices[symbol]
             action = signal.get('action')
             quantity = signal.get('quantity', 0)
+            
+            # Extract risk management parameters from signal
+            stop_loss = signal.get('stop_loss') or signal.get('stop_loss_price')
+            take_profit = signal.get('take_profit') or signal.get('take_profit_price')
 
             if action == 'BUY' and quantity > 0:
                 # Calculate cost including fees
@@ -317,13 +339,14 @@ class RealBacktestingEngine(LoggerMixin):
                 total_cost = cost + fees
 
                 if portfolio['cash'] >= total_cost:
-                    # Execute buy
+                    # Execute buy (LONG position)
                     portfolio['cash'] -= total_cost
 
                     if symbol not in portfolio['positions']:
                         portfolio['positions'][symbol] = {
                             'quantity': 0,
-                            'avg_price': 0
+                            'avg_price': 0,
+                            'entry_trades': []  # Track multiple entries
                         }
 
                     # Update position
@@ -333,8 +356,27 @@ class RealBacktestingEngine(LoggerMixin):
                         (pos['avg_price'] * pos['quantity'] + cost) / total_quantity
                     )
                     pos['quantity'] = total_quantity
+                    
+                    # Store entry details for this position
+                    entry_trade = {
+                        'entry_time': timestamp,
+                        'entry_price': price,
+                        'quantity': quantity,
+                        'stop_loss': float(stop_loss) if stop_loss else None,
+                        'take_profit': float(take_profit) if take_profit else None,
+                        'position_type': 'LONG',  # BUY = LONG
+                        'fees': fees
+                    }
+                    pos['entry_trades'].append(entry_trade)
+                    
+                    # Update position-level stop loss/take profit (use most recent)
+                    if stop_loss:
+                        pos['stop_loss'] = float(stop_loss)
+                    if take_profit:
+                        pos['take_profit'] = float(take_profit)
+                    pos['position_type'] = 'LONG'
 
-                    # Record trade
+                    # Record trade (legacy format)
                     portfolio['trades'].append({
                         'timestamp': timestamp,
                         'symbol': symbol,
@@ -349,32 +391,136 @@ class RealBacktestingEngine(LoggerMixin):
                 sell_quantity = min(quantity, pos['quantity'])
 
                 if sell_quantity > 0:
-                    # Calculate proceeds
-                    proceeds = price * sell_quantity
-                    fees = proceeds * 0.001
-                    net_proceeds = proceeds - fees
+                    # Close LONG position
+                    await self._close_position(
+                        portfolio, symbol, pos, sell_quantity, price, timestamp, 'LONG'
+                    )
 
-                    # Calculate PnL
-                    cost_basis = pos['avg_price'] * sell_quantity
-                    pnl = net_proceeds - cost_basis
+    async def _check_position_exits(
+        self,
+        portfolio: Dict,
+        current_prices: Dict[str, float],
+        timestamp: datetime
+    ):
+        """
+        Check if any positions should be closed due to stop loss or take profit.
+        """
+        positions_to_close = []
+        
+        for symbol, pos in portfolio['positions'].items():
+            if symbol not in current_prices or pos['quantity'] == 0:
+                continue
+                
+            current_price = current_prices[symbol]
+            position_type = pos.get('position_type', 'LONG')
+            stop_loss = pos.get('stop_loss')
+            take_profit = pos.get('take_profit')
+            
+            should_exit = False
+            exit_reason = None
+            
+            if position_type == 'LONG':
+                # Check take profit (price goes up)
+                if take_profit and current_price >= take_profit:
+                    should_exit = True
+                    exit_reason = 'TAKE_PROFIT'
+                # Check stop loss (price goes down)
+                elif stop_loss and current_price <= stop_loss:
+                    should_exit = True
+                    exit_reason = 'STOP_LOSS'
+            elif position_type == 'SHORT':
+                # Check take profit (price goes down)
+                if take_profit and current_price <= take_profit:
+                    should_exit = True
+                    exit_reason = 'TAKE_PROFIT'
+                # Check stop loss (price goes up)
+                elif stop_loss and current_price >= stop_loss:
+                    should_exit = True
+                    exit_reason = 'STOP_LOSS'
+            
+            if should_exit:
+                positions_to_close.append((symbol, pos, exit_reason))
+        
+        # Close positions that hit stop loss or take profit
+        for symbol, pos, exit_reason in positions_to_close:
+            await self._close_position(
+                portfolio, symbol, pos, pos['quantity'], 
+                current_prices[symbol], timestamp, pos.get('position_type', 'LONG'),
+                exit_reason=exit_reason
+            )
+    
+    async def _close_position(
+        self,
+        portfolio: Dict,
+        symbol: str,
+        position: Dict,
+        exit_quantity: float,
+        exit_price: float,
+        exit_time: datetime,
+        position_type: str,
+        exit_reason: str = 'MANUAL'
+    ):
+        """
+        Close a position and create a complete trade record.
+        """
+        # Calculate proceeds
+        proceeds = exit_price * exit_quantity
+        fees = proceeds * 0.001
+        net_proceeds = proceeds - fees
 
-                    # Update portfolio
-                    portfolio['cash'] += net_proceeds
-                    pos['quantity'] -= sell_quantity
+        # Calculate PnL
+        cost_basis = position['avg_price'] * exit_quantity
+        pnl = net_proceeds - cost_basis if position_type == 'LONG' else cost_basis - net_proceeds
+        pnl_pct = (pnl / cost_basis * 100) if cost_basis > 0 else 0
 
-                    if pos['quantity'] == 0:
-                        del portfolio['positions'][symbol]
+        # Update portfolio
+        portfolio['cash'] += net_proceeds
+        position['quantity'] -= exit_quantity
 
-                    # Record trade
-                    portfolio['trades'].append({
-                        'timestamp': timestamp,
-                        'symbol': symbol,
-                        'action': 'SELL',
-                        'quantity': sell_quantity,
-                        'price': price,
-                        'fees': fees,
-                        'pnl': pnl
-                    })
+        # Create complete trade record
+        # Match exit with most recent entry that hasn't been closed
+        entry_trades = position.get('entry_trades', [])
+        if entry_trades:
+            # Use FIFO - close oldest entry first
+            entry_trade = entry_trades[0]
+            
+            closed_trade = {
+                'trade_id': f"{symbol}_{entry_trade['entry_time'].isoformat()}_{exit_time.isoformat()}",
+                'symbol': symbol,
+                'position_type': position_type,  # 'LONG' or 'SHORT'
+                'entry_time': entry_trade['entry_time'].isoformat(),
+                'exit_time': exit_time.isoformat(),
+                'entry_price': float(entry_trade['entry_price']),
+                'exit_price': float(exit_price),
+                'quantity': float(exit_quantity),
+                'stop_loss': entry_trade.get('stop_loss'),
+                'take_profit': entry_trade.get('take_profit'),
+                'exit_reason': exit_reason,  # 'TAKE_PROFIT', 'STOP_LOSS', 'MANUAL'
+                'pnl': float(pnl),
+                'pnl_pct': float(pnl_pct),
+                'fees': float(fees),
+                'cost_basis': float(cost_basis),
+                'outcome': 'WIN' if pnl > 0 else 'LOSS' if pnl < 0 else 'BREAKEVEN'
+            }
+            
+            portfolio['closed_trades'].append(closed_trade)
+            
+            # Remove closed entry
+            entry_trades.pop(0)
+
+        if position['quantity'] == 0:
+            del portfolio['positions'][symbol]
+
+        # Record trade (legacy format)
+        portfolio['trades'].append({
+            'timestamp': exit_time,
+            'symbol': symbol,
+            'action': 'SELL' if position_type == 'LONG' else 'BUY',
+            'quantity': exit_quantity,
+            'price': exit_price,
+            'fees': fees,
+            'pnl': pnl
+        })
 
     def _calculate_portfolio_value(
         self,
@@ -452,7 +598,8 @@ class RealBacktestingEngine(LoggerMixin):
             'sharpe_ratio': sharpe_ratio,
             'max_drawdown': max_drawdown,
             'equity_curve': portfolio['equity_curve'][-100:],  # Last 100 points
-            'trade_log': portfolio['trades'][-50:],  # Last 50 trades
+            'trade_log': portfolio['trades'][-50:],  # Last 50 trades (legacy format)
+            'closed_trades': portfolio.get('closed_trades', []),  # Complete trade records
             'final_positions': portfolio['positions'],
             'total_fees': trades_df['fees'].sum() if not trades_df.empty else 0,
             'calculation_method': 'real_market_data_backtest',
@@ -520,6 +667,12 @@ class RealBacktestingEngine(LoggerMixin):
                     symbols=symbols,
                     equity_curve=results.get('equity_curve', []),
                     trade_log=results.get('trade_log', []),
+                    # Store detailed trades in trade_log JSONB field
+                    # Format: trade_log contains both legacy format and closed_trades
+                    execution_params={
+                        'closed_trades': results.get('closed_trades', []),
+                        'total_closed_trades': len(results.get('closed_trades', []))
+                    },
                     data_source='real_market_data',
                     data_quality_score=Decimal('95.0')  # High quality real data
                 )
