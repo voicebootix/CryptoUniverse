@@ -486,17 +486,51 @@ async def get_scan_results(
                 detail="Scan is still in progress. Please poll the status endpoint."
             )
         
-        # Convert opportunities to response format
+        # Convert opportunities to response format (optimized for large datasets)
         opportunities = cached_entry.payload.get("opportunities", [])
         opportunity_responses = []
         
-        for opp in opportunities:
-            try:
-                opportunity_responses.append(OpportunityResponse(**opp))
-            except ValidationError as e:
-                logger.warning("Skipping malformed opportunity in results",
-                             validation_error=str(e),
-                             user_id=str(current_user.id))
+        # Log performance metrics
+        start_time = datetime.utcnow()
+        total_opportunities = len(opportunities) if isinstance(opportunities, list) else 0
+        
+        logger.info("Processing scan results",
+                   scan_id=scan_id,
+                   user_id=str(current_user.id),
+                   total_opportunities=total_opportunities)
+        
+        # Process opportunities in batches to avoid timeout
+        batch_size = 1000
+        for i in range(0, total_opportunities, batch_size):
+            batch = opportunities[i:i + batch_size]
+            for opp in batch:
+                try:
+                    # Ensure discovered_at is a datetime object if it's a string
+                    if isinstance(opp, dict) and "discovered_at" in opp:
+                        if isinstance(opp["discovered_at"], str):
+                            try:
+                                opp["discovered_at"] = datetime.fromisoformat(opp["discovered_at"].replace("Z", "+00:00"))
+                            except (ValueError, AttributeError):
+                                opp["discovered_at"] = datetime.utcnow()
+                    
+                    opportunity_responses.append(OpportunityResponse(**opp))
+                except ValidationError as e:
+                    logger.warning("Skipping malformed opportunity in results",
+                                 validation_error=str(e),
+                                 user_id=str(current_user.id),
+                                 opportunity_keys=list(opp.keys()) if isinstance(opp, dict) else [])
+                except Exception as e:
+                    logger.warning("Unexpected error processing opportunity",
+                                 error=str(e),
+                                 user_id=str(current_user.id),
+                                 error_type=type(e).__name__)
+        
+        processing_time = (datetime.utcnow() - start_time).total_seconds()
+        logger.info("Scan results processed",
+                   scan_id=scan_id,
+                   user_id=str(current_user.id),
+                   total_opportunities=len(opportunity_responses),
+                   processing_time_seconds=processing_time)
         
         return OpportunityDiscoveryResponse(
             success=True,
