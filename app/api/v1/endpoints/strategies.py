@@ -1663,12 +1663,25 @@ async def backtest_strategy(
             safe_days = max(1, days)
             annualized_return = sanitize_nan(total_return * 365 / safe_days)
 
+            # Calculate risk/reward ratio from trades
+            # For simplicity, use average win vs average loss
+            winning_returns = daily_returns[daily_returns > 0]
+            losing_returns = daily_returns[daily_returns < 0]
+            avg_win = winning_returns.mean() if len(winning_returns) > 0 else 0
+            avg_loss = abs(losing_returns.mean()) if len(losing_returns) > 0 else 0
+            risk_reward_ratio = round(sanitize_nan(avg_win / avg_loss if avg_loss > 0 else 0), 2)
+
+            # Get timeframe from parameters or default to '1d'
+            timeframe = request.parameters.get('timeframe', '1d') if request.parameters else '1d'
+
             return {
                 "success": True,
                 "backtest_result": {
                     "strategy_id": f"backtest_{current_user.id}_{int(datetime.utcnow().timestamp())}",
                     "symbol": request.symbol,
+                    "timeframe": timeframe,
                     "period": f"{request.start_date} to {request.end_date}",
+                    "period_days": days,
                     "initial_capital": request.initial_capital,
                     "final_capital": sanitize_nan(sanitize_nan(request.initial_capital * data['cumulative_returns'].iloc[-1])),
                     "total_return": round(sanitize_nan(total_return), 2),
@@ -1681,6 +1694,7 @@ async def backtest_strategy(
                     "losing_trades": total_trades - winning_trades,
                     "win_rate": round(win_rate * 100, 2),
                     "profit_factor": round(sanitize_nan(abs(daily_returns[daily_returns > 0].sum() / daily_returns[daily_returns < 0].sum()) if daily_returns[daily_returns < 0].sum() != 0 else 0), 2),
+                    "risk_reward_ratio": risk_reward_ratio,
                     "trades": [
                         {
                             "date": row['timestamp'].strftime('%Y-%m-%d'),

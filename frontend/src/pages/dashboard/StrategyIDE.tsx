@@ -121,15 +121,18 @@ interface Trade {
 
 interface BacktestResult {
   strategy_id: string;
-  period_days: number;
+  timeframe?: string;
+  period?: string;
+  period_days?: number;
   total_return: number;
   sharpe_ratio: number;
   max_drawdown: number;
   win_rate: number;
   total_trades: number;
-  avg_trade_duration: number;
+  avg_trade_duration?: number;
   profit_factor: number;
-  daily_returns: Array<{
+  risk_reward_ratio?: number;
+  daily_returns?: Array<{
     date: string;
     return: number;
     cumulative_return: number;
@@ -303,7 +306,7 @@ const StrategyIDE: React.FC = () => {
 
   // Run backtest mutation
   const runBacktestMutation = useMutation({
-    mutationFn: async (data: { code: string; symbol?: string; start_date?: string; end_date?: string; initial_capital?: number }) => {
+    mutationFn: async (data: { code: string; symbol?: string; start_date?: string; end_date?: string; initial_capital?: number; timeframe?: string }) => {
       // Add authentication check before starting
       const { useAuthStore } = await import('@/store/authStore');
       const { isAuthenticated, tokens } = useAuthStore.getState();
@@ -329,7 +332,9 @@ const StrategyIDE: React.FC = () => {
         start_date: data.start_date || startDate.toISOString().split('T')[0],
         end_date: data.end_date || endDate.toISOString().split('T')[0],
         initial_capital: data.initial_capital || 10000,
-        parameters: {}
+        parameters: {
+          timeframe: data.timeframe || metadata.timeframes?.[0] || '1d'
+        }
       };
 
       console.log('📊 Backtest request payload:', requestData);
@@ -510,7 +515,8 @@ const StrategyIDE: React.FC = () => {
       symbol: 'BTC/USDT',
       start_date: startDate.toISOString().split('T')[0],
       end_date: endDate.toISOString().split('T')[0],
-      initial_capital: metadata.required_capital || 10000
+      initial_capital: metadata.required_capital || 10000,
+      timeframe: metadata.timeframes?.[0] || '1d'
     });
   };
 
@@ -972,6 +978,25 @@ const StrategyIDE: React.FC = () => {
                 <Card>
                   <CardContent className="p-4">
                     <div className="space-y-2">
+                      {/* Backtest Period Info */}
+                      {backtestResult.timeframe && (
+                        <div className="flex justify-between">
+                          <span className="text-sm text-muted-foreground">Timeframe</span>
+                          <span className="font-medium">{backtestResult.timeframe.toUpperCase()}</span>
+                        </div>
+                      )}
+                      {backtestResult.period_days !== undefined && (
+                        <div className="flex justify-between">
+                          <span className="text-sm text-muted-foreground">Backtest Period</span>
+                          <span className="font-medium">
+                            {backtestResult.period_days} {backtestResult.period_days === 1 ? 'day' : 'days'}
+                            {backtestResult.period && ` (${backtestResult.period})`}
+                          </span>
+                        </div>
+                      )}
+                      <Separator />
+                      
+                      {/* Performance Metrics */}
                       <div className="flex justify-between">
                         <span className="text-sm text-muted-foreground">Total Return</span>
                         <span className={`font-bold ${backtestResult.total_return >= 0 ? 'text-green-500' : 'text-red-500'}`}>
@@ -998,6 +1023,25 @@ const StrategyIDE: React.FC = () => {
                         <span className="text-sm text-muted-foreground">Total Trades</span>
                         <span className="font-medium">{backtestResult.total_trades}</span>
                       </div>
+                      <Separator />
+                      
+                      {/* Risk/Reward Metrics */}
+                      {backtestResult.profit_factor !== undefined && (
+                        <div className="flex justify-between">
+                          <span className="text-sm text-muted-foreground">Profit Factor</span>
+                          <span className={`font-medium ${backtestResult.profit_factor >= 1.5 ? 'text-green-500' : backtestResult.profit_factor >= 1.0 ? 'text-yellow-500' : 'text-red-500'}`}>
+                            {backtestResult.profit_factor.toFixed(2)}
+                          </span>
+                        </div>
+                      )}
+                      {backtestResult.risk_reward_ratio !== undefined && (
+                        <div className="flex justify-between">
+                          <span className="text-sm text-muted-foreground">Risk/Reward Ratio</span>
+                          <span className={`font-medium ${backtestResult.risk_reward_ratio >= 2.0 ? 'text-green-500' : backtestResult.risk_reward_ratio >= 1.5 ? 'text-yellow-500' : 'text-red-500'}`}>
+                            1:{backtestResult.risk_reward_ratio.toFixed(2)}
+                          </span>
+                        </div>
+                      )}
                     </div>
                   </CardContent>
                 </Card>
