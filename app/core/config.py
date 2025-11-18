@@ -53,6 +53,7 @@ class Settings(BaseSettings):
     
     # Security settings
     SECRET_KEY: str = Field(..., env="SECRET_KEY", description="Secret key for JWT")
+    REFRESH_TOKEN_SECRET: str = Field(default="", env="REFRESH_TOKEN_SECRET", description="Secret key for refresh tokens")
     ENCRYPTION_KEY: str = Field(default="", env="ENCRYPTION_KEY", description="Key for encrypting sensitive data like API keys")
     DEBUG_TOKEN: Optional[str] = Field(default=None, env="DEBUG_TOKEN", description="Optional token for accessing debug endpoints in production")
     SIGNALS_WEBHOOK_SECRET: Optional[str] = Field(

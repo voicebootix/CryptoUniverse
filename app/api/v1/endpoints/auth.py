@@ -30,6 +30,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from app.core.config import get_settings
 from app.core.database import get_database
 from app.core.redis import get_redis_client
+from app.core.security import verify_token
 from app.models.user import User, UserRole, UserStatus
 from app.models.tenant import Tenant
 from app.models.session import UserSession
@@ -206,8 +207,15 @@ async def get_current_user(
     db: AsyncSession = Depends(get_database)
 ) -> User:
     """Get current authenticated user."""
-    token = credentials.credentials
-    payload = auth_service.verify_token(token)
+    try:
+        token = credentials.credentials
+        payload = verify_token(token)
+    except Exception as e:
+        logger.error("Token verification failed", error=str(e))
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token"
+        )
     
     if payload.get("type") != "access":
         raise HTTPException(
