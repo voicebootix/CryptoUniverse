@@ -18,7 +18,8 @@ from app.api.v1.endpoints import (
     auth, trading, admin, exchanges, strategies, credits,
     telegram, paper_trading, unified_chat, market_analysis, api_keys, ai_consensus,
     password_reset, health, opportunity_discovery, admin_testing, ab_testing, admin_strategy_access,
-    signals, unified_strategies, risk, diagnostics, scan_diagnostics, system_monitoring
+    signals, unified_strategies, risk, diagnostics, scan_diagnostics, system_monitoring,
+    backtest_results
 )
 
 from app.core.database import AsyncSessionLocal
@@ -38,6 +39,7 @@ api_router.include_router(api_keys.router, prefix="/api-keys", tags=["API Keys"]
 api_router.include_router(trading.router, prefix="/trading", tags=["Trading"])
 api_router.include_router(exchanges.router, prefix="/exchanges", tags=["Exchanges"])
 api_router.include_router(strategies.router, prefix="/strategies", tags=["Strategies"])
+api_router.include_router(backtest_results.router, prefix="/strategies", tags=["Backtest Results"])
 api_router.include_router(credits.router, prefix="/credits", tags=["Credits"])
 api_router.include_router(telegram.router, prefix="/telegram", tags=["Telegram"])
 api_router.include_router(paper_trading.router, prefix="/paper-trading", tags=["Paper Trading"])
