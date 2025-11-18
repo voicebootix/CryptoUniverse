@@ -2464,7 +2464,8 @@ class UserOpportunityDiscoveryService(LoggerMixin):
             # Provide graceful degradation - return limited opportunities if possible
             fallback_result = await self._provide_fallback_opportunities(user_id, scan_id)
 
-            return {
+            # CRITICAL FIX: Save error result to cache so lookup mapping isn't removed prematurely
+            error_result = {
                 "success": False,
                 "error": f"Opportunity discovery failed: {str(e)}",
                 "opportunities": fallback_result.get("opportunities", []),
@@ -2472,8 +2473,25 @@ class UserOpportunityDiscoveryService(LoggerMixin):
                 "user_id": user_id,
                 "execution_time_ms": execution_time,
                 "fallback_used": fallback_result.get("success", False),
-                "error_type": type(e).__name__
+                "error_type": type(e).__name__,
+                "metadata": {
+                    "scan_state": "failed",
+                    "error": str(e),
+                    "error_type": error_type,
+                    "is_timeout": is_timeout,
+                    "execution_time_ms": execution_time
+                }
             }
+            
+            # Save error result to cache (not partial - it's a complete failed result)
+            try:
+                await self._update_cached_scan_result(cache_key, error_result, partial=False)
+            except Exception as cache_error:
+                self.logger.warning("Failed to cache error result",
+                                  error=str(cache_error),
+                                  scan_id=scan_id)
+
+            return error_result
     
     async def _build_user_opportunity_profile(self, user_id: str) -> UserOpportunityProfile:
         """Build user's opportunity discovery profile based on their strategy portfolio and credits."""
