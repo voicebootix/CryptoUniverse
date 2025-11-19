@@ -24,6 +24,8 @@
 -- Note: idx_users_id removed - primary key already indexed
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_email ON users(email);
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_created_at ON users(created_at);
+-- Additional covering index for user lookups with all frequently accessed columns
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_users_id_covering ON users(id, email, username, is_active, is_admin, created_at, updated_at);
 
 -- User sessions indexes
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_user_sessions_user_id ON user_sessions(user_id);
@@ -39,6 +41,8 @@ CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_chat_sessions_user_id_created_at ON 
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_chat_messages_session_id ON chat_messages(session_id);
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_chat_messages_created_at ON chat_messages(created_at);
 CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_chat_messages_session_id_created_at ON chat_messages(session_id, created_at);
+-- Additional index for timestamp-based queries
+CREATE INDEX CONCURRENTLY IF NOT EXISTS idx_chat_messages_timestamp ON chat_messages(timestamp);
 
 -- Trading strategies indexes
 -- Note: idx_trading_strategies_id removed - primary key already indexed
