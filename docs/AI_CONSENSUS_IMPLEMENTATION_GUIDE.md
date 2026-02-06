@@ -362,6 +362,8 @@ def _extract_confidence(self, content: str) -> float:
 1. First tries regex patterns: `"confidence: 85%"`, `"85% confidence"`, `"score: 85"`, `"certainty: 85%"`
 2. Falls back to heuristic: 75.0 for detailed responses (>500 chars with "analysis"), 65.0 for moderate responses (>200 chars), 50.0 for short responses
 
+> **Reliability note**: The heuristic fallbacks (response length-based) can produce inconsistent confidence scores when AI models don't explicitly state confidence. The prompts in the system (see Section 9) explicitly request `"Confidence score (1-100) with reasoning"` and `"Include confidence percentage"` to maximize regex match rates. If no regex matches, the length-based defaults act as a conservative safety net.
+
 ---
 
 ## 6. Reasoning Extraction from AI Responses
@@ -556,6 +558,8 @@ def _determine_consensus_recommendation(self, recommendations: List[str]) -> str
 ```
 
 **How it works**: If >50% of models agree on a recommendation, that wins. Otherwise, defaults to "HOLD" (safe fallback).
+
+> **Edge case — 3-way split**: With 3 models and all giving different recommendations (e.g., STRONG_BUY, HOLD, STRONG_SELL), no recommendation exceeds 50% (each has 1/3 = 33%). The system defaults to "HOLD" — a conservative safety mechanism that prevents action when there is no consensus.
 
 ---
 
@@ -794,6 +798,8 @@ async def _enhance_consensus_decision(self, consensus: Dict, data: Dict) -> Dict
 | 50-70 | HOLD | ❌ No | CONDITIONAL | 7.5-10.5% | Required |
 | < 50 | WAIT | ❌ No | NONE | < 7.5% | Required |
 
+> **Position sizing formula**: `min(score / 100 × 0.15, 0.15)`. For score=70: 70/100 × 0.15 = 10.5%. For score=85: 85/100 × 0.15 = 12.75%. Maximum is capped at 15% per position.
+
 ---
 
 ## 14. Opportunity Ranking (Conversational Layer)
@@ -876,7 +882,7 @@ RISK_MAP = {
 }
 ```
 
-**Key insight**: Risk penalty measures the mismatch between the opportunity's risk and the user's risk profile. A "high" risk opportunity for a "low" risk user = penalty of |0.85 − 0.2| = 0.65, which significantly reduces the score.
+**Key insight**: Risk penalty measures the mismatch between the opportunity's risk and the user's risk profile. A "high" risk opportunity for a "low" risk user = penalty of |0.85 − 0.2| = 0.65. This penalty is applied in the scoring formula as `(1.0 − risk_penalty) × 0.2`, so a 0.65 penalty contributes (1.0 − 0.65) × 0.2 = 0.07 to the total score (out of a maximum 0.2 from this factor). While the weight factor is 20% of the total score, a high mismatch effectively zeroes out most of that component.
 
 ---
 
