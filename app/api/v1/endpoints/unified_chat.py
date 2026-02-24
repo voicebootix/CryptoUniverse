@@ -10,7 +10,7 @@ import asyncio
 import json
 import uuid
 from typing import Dict, List, Optional, Any
-from datetime import datetime, timezone
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status, WebSocket, WebSocketDisconnect, Query
 from fastapi.responses import StreamingResponse, JSONResponse
@@ -873,48 +873,3 @@ async def discover_opportunities(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to discover opportunities"
         )
-
-
-@router.get("/personas/leverage")
-async def get_persona_leverage_config(
-    current_user: User = Depends(get_current_user),
-) -> Dict[str, Any]:
-    """
-    Return the leverage ceiling assigned to each AI trading persona.
-
-    The values are read directly from the authoritative configuration objects
-    in ``MasterSystemController.mode_configs`` (``max_leverage``) and the
-    ``personalities`` dictionary defined in ``ConversationalAIOrchestrator``
-    so there is a single, verifiable source of truth for every figure returned.
-    """
-    from app.services.master_controller import MasterSystemController, TradingMode
-
-    controller = MasterSystemController()
-    personas = unified_chat_service.personalities
-
-    result = []
-    for mode in TradingMode:
-        config = controller.mode_configs[mode]
-        personality = personas.get(mode, {})
-        result.append(
-            {
-                "trading_mode": mode.value,
-                "persona_name": personality.get("name", mode.value),
-                "max_leverage": config.max_leverage,
-                "source": {
-                    "module": "app.services.master_controller",
-                    "class": "MasterSystemController",
-                    "attribute": f"mode_configs[TradingMode.{mode.name}].max_leverage",
-                },
-            }
-        )
-
-    return {
-        "success": True,
-        "description": (
-            "Maximum leverage ceiling assigned to each AI trading persona. "
-            "Values are sourced directly from MasterSystemController.mode_configs."
-        ),
-        "personas": result,
-        "timestamp": datetime.now(timezone.utc).isoformat(),
-    }
